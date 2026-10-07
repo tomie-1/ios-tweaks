@@ -855,8 +855,6 @@ static void SoulInstallWatermarkHooks(void) {
 static void (*gOrigWmSetShouldUse)(id, SEL, BOOL);
 static void (*gOrigWmSetAddDefault)(id, SEL, BOOL);
 static void (*gOrigWmStart)(id, SEL);
-static void (*gOrigWmMakeVideoPath)(id, SEL, id, id);
-static id   (*gOrigWmInitVideo)(id, SEL, id);
 
 static void SoulHookWmSetShouldUse(id s, SEL c, BOOL v) {
     if (SoulDef(kFxSaveNoWM)) { v = NO; }
@@ -876,15 +874,6 @@ static void SoulHookWmStart(id s, SEL c) {
     }
     if (gOrigWmStart) gOrigWmStart(s, c);
 }
-static void SoulHookWmMakeVideoPath(id s, SEL c, id path, id done) {
-    SoulLog(@"SOWatermarkOperation makeWatermarkVideoWithVideoPath nowm=%d path=%@", (int)SoulDef(kFxSaveNoWM), path);
-    if (gOrigWmMakeVideoPath) gOrigWmMakeVideoPath(s, c, path, done);
-}
-static id SoulHookWmInitVideo(id s, SEL c, id url) {
-    SoulLog(@"SOWatermarkOperation initWithVideoUrl url=%@", url);
-    return gOrigWmInitVideo ? gOrigWmInitVideo(s, c, url) : s;
-}
-
 static void SoulInstallVideoWatermarkHooks(void) {
     Class cls = objc_getClass("SOWatermarkOperation");
     if (!cls) { SoulLog(@"SOWatermarkOperation not found"); return; }
@@ -894,10 +883,6 @@ static void SoulInstallVideoWatermarkHooks(void) {
                           (IMP)SoulHookWmSetAddDefault, (IMP *)&gOrigWmSetAddDefault);
     SoulInstallMethodHook(cls, NSSelectorFromString(@"start"),
                           (IMP)SoulHookWmStart, (IMP *)&gOrigWmStart);
-    SoulInstallMethodHook(cls, NSSelectorFromString(@"makeWatermarkVideoWithVideoPath:completion:"),
-                          (IMP)SoulHookWmMakeVideoPath, (IMP *)&gOrigWmMakeVideoPath);
-    SoulInstallMethodHook(cls, NSSelectorFromString(@"initWithVideoUrl:"),
-                          (IMP)SoulHookWmInitVideo, (IMP *)&gOrigWmInitVideo);
     SoulLog(@"video watermark hooks installed");
 }
 
@@ -1155,10 +1140,6 @@ static id SoulHookDataTask(id self, SEL _cmd, NSURLRequest *req) {
     }
     return task;
 }
-
-static void SoulDiagBacktrace(NSString *tag);
-
-
 
 
 
@@ -2010,183 +1991,6 @@ static void SoulInstallLimitHooksRetry(int n) {
                    dispatch_get_main_queue(), ^{ SoulInstallLimitHooksRetry(n - 1); });
 }
 
-#pragma mark - 送礼 / 聊天限制 拦截点诊断 (v4)
-
-static BOOL SoulLimitDiagOn(void) {
-    return SoulDef(kFxGiftFree) || SoulDef(kFxQiyuFree) || SoulDef(kFxEtiquetteFree) || SoulDef(kFxNetLog);
-}
-
-static void SoulDiagDescribePresented(id owner, id vc, NSString *tag) {
-    if (!vc) return;
-    SoulLog(@"%@ %@ -> %@", tag, NSStringFromClass([owner class]), NSStringFromClass([vc class]));
-    if ([vc isKindOfClass:[UIAlertController class]]) {
-        UIAlertController *ac = (UIAlertController *)vc;
-        SoulLog(@"%@   alert title=[%@] msg=[%@]", tag, ac.title ?: @"", ac.message ?: @"");
-        for (UIAlertAction *a in ac.actions) SoulLog(@"%@   alert action=[%@]", tag, a.title ?: @"");
-    }
-    @try {
-        id t = [vc valueForKey:@"title"];
-        if ([t isKindOfClass:[NSString class]] && [t length]) SoulLog(@"%@   vc.title=[%@]", tag, t);
-    } @catch (NSException *e) {}
-}
-
-static void SoulDiagBacktrace(NSString *tag) {
-    NSArray<NSString *> *syms = [NSThread callStackSymbols];
-    NSUInteger n = syms.count < 22 ? syms.count : 22;
-    for (NSUInteger i = 0; i < n; i++) SoulLog(@"%@ bt[%lu] %@", tag, (unsigned long)i, syms[i]);
-}
-
-static void SoulDiagCaller(NSString *tag) {
-    void *ra = __builtin_return_address(0);
-    Dl_info di;
-    if (ra && dladdr(ra, &di) && di.dli_fbase) {
-        unsigned long off = (unsigned long)((uintptr_t)ra - (uintptr_t)di.dli_fbase);
-        SoulLog(@"%@ caller addr=%p base=%p off=0x%lx vaddr=0x%lx name=%s",
-                tag, ra, di.dli_fbase, off, (unsigned long)(0x100000000ULL + off),
-                di.dli_sname ?: "?");
-    } else {
-        SoulLog(@"%@ caller addr=%p (dladdr failed)", tag, ra);
-    }
-}
-
-static void SoulDiagSlide(void) {
-    uintptr_t s = (uintptr_t)_dyld_get_image_vmaddr_slide(0);
-    SoulLog(@"SLIDE main=0x%lx self=0x%lx", (unsigned long)s, (unsigned long)(uintptr_t)SoulDiagSlide);
-}
-
-static BOOL SoulIsLoveBellLimitPanel(id vc) {
-    if (!vc) return NO;
-    NSString *cn = [NSStringFromClass([vc class]) lowercaseString];
-    return [cn containsString:@"lovebelllimit"];
-}
-
-static void (*gOrigPresentVC)(id, SEL, id, BOOL, id);
-static void SoulHookPresentVC(id self, SEL _cmd, id vc, BOOL anim, id completion) {
-    BOOL isLimitPanel = SoulIsLoveBellLimitPanel(vc);
-    if (SoulLimitDiagOn() || isLimitPanel) SoulDiagDescribePresented(self, vc, @"PRESENT");
-    if (isLimitPanel) {
-        SoulDiagCaller(@"PRESENT");
-        SoulDiagSlide();
-        SoulDiagBacktrace(@"PRESENT");
-    }
-    if (gOrigPresentVC) gOrigPresentVC(self, _cmd, vc, anim, completion);
-}
-
-static void (*gOrigRnChatLimit)(id, SEL, id, id, id);
-static void SoulHookRnChatLimit(id self, SEL _cmd, id source, id resolver, id rejecter) {
-    SoulLog(@"RN-LOVEBELL putChatLimitSource=%@", source);
-    if (gOrigRnChatLimit) gOrigRnChatLimit(self, _cmd, source, resolver, rejecter);
-}
-
-static void (*gOrigManagerShowLimit)(id, SEL, id, id, id);
-static void SoulHookManagerShowLimit(id self, SEL _cmd, id a, id b, id c) {
-    SoulLog(@"FUNC-MGR showLoveBellLimitVCWith: %@ send=%@ cancel=%@", a, b, c);
-    SoulDiagCaller(@"FUNC-MGR");
-    SoulDiagSlide();
-    SoulDiagBacktrace(@"FUNC-MGR");
-    if (gOrigManagerShowLimit) gOrigManagerShowLimit(self, _cmd, a, b, c);
-}
-
-static void (*gOrigPushVC)(id, SEL, id, BOOL);
-static void SoulHookPushVC(id self, SEL _cmd, id vc, BOOL anim) {
-    if (SoulLimitDiagOn()) SoulDiagDescribePresented(self, vc, @"PUSH");
-    if (gOrigPushVC) gOrigPushVC(self, _cmd, vc, anim);
-}
-
-static void (*gOrigLimitUpdate)(id, SEL, unsigned long long, long long, long long);
-static void SoulHookLimitUpdate(id self, SEL _cmd, unsigned long long bus, long long free_, long long card) {
-    SoulLog(@"LIMIT update business=%llu free=%lld card=%lld", bus, free_, card);
-    if (gOrigLimitUpdate) gOrigLimitUpdate(self, _cmd, bus, free_, card);
-}
-
-static void (*gOrigLimitSetup)(id, SEL, id);
-static void SoulHookLimitSetup(id self, SEL _cmd, id arg) {
-    SoulLog(@"LIMIT setupWith: %@", arg);
-    if (gOrigLimitSetup) gOrigLimitSetup(self, _cmd, arg);
-}
-
-static void (*gOrigLimitClick)(id, SEL);
-static void SoulHookLimitClick(id self, SEL _cmd) {
-    SoulLog(@"LIMIT handleLimitComponentsClick called");
-    if (gOrigLimitClick) gOrigLimitClick(self, _cmd);
-}
-
-static void (*gOrigLimitIntercept)(id, SEL, id, long long, BOOL, BOOL);
-static void SoulHookLimitIntercept(id self, SEL _cmd, id msg, long long type, BOOL addLocal, BOOL isUpdate) {
-    SoulLog(@"LIMIT handleInterceptedMessage type=%lld addLocal=%d isUpdate=%d msg=%@", type, (int)addLocal, (int)isUpdate, msg);
-    if (gOrigLimitIntercept) gOrigLimitIntercept(self, _cmd, msg, type, addLocal, isUpdate);
-}
-
-static void (*gOrigLimitSetBusiness)(id, SEL, long long);
-static void SoulHookLimitSetBusiness(id self, SEL _cmd, long long v) {
-    SoulLog(@"LIMIT setLimitBusinessType=%lld", v);
-    if (gOrigLimitSetBusiness) gOrigLimitSetBusiness(self, _cmd, v);
-}
-
-static BOOL gDiagPresentDone = NO, gDiagPayDone = NO;
-static BOOL gDiagRnDone = NO, gDiagMgrDone = NO;
-
-static void SoulInstallDiagHooks(void) {
-    if (!gDiagPresentDone) {
-        Class vcc = objc_getClass("UIViewController");
-        if (vcc) {
-            SoulInstallMethodHook(vcc, NSSelectorFromString(@"presentViewController:animated:completion:"),
-                                  (IMP)SoulHookPresentVC, (IMP *)&gOrigPresentVC);
-            Class nav = objc_getClass("UINavigationController");
-            if (nav) {
-                SoulInstallMethodHook(nav, NSSelectorFromString(@"pushViewController:animated:"),
-                                      (IMP)SoulHookPushVC, (IMP *)&gOrigPushVC);
-            }
-            gDiagPresentDone = YES;
-            SoulLog(@"diag: present/push hooks installed");
-        }
-    }
-    if (!gDiagRnDone) {
-        Class rn = objc_getClass("SoulRnLoveBellPlugin");
-        if (rn) {
-            SoulInstallMethodHook(rn, NSSelectorFromString(@"putChatLimitSource:resolver:rejecter:"),
-                                  (IMP)SoulHookRnChatLimit, (IMP *)&gOrigRnChatLimit);
-            gDiagRnDone = YES;
-            SoulLog(@"diag: RN lovebell plugin hooked");
-        }
-    }
-    if (!gDiagMgrDone) {
-        Class mgr = objc_getClass("SOOtherHomePageFuncManager");
-        if (mgr) {
-            SoulInstallMethodHook(mgr, NSSelectorFromString(@"showLoveBellLimitVCWith:sendGiftBlock:cancelBlock:"),
-                                  (IMP)SoulHookManagerShowLimit, (IMP *)&gOrigManagerShowLimit);
-            gDiagMgrDone = YES;
-            SoulLog(@"diag: func manager showLoveBellLimit hooked");
-        }
-    }
-    if (!gDiagPayDone) {
-        Class pay = objc_getClass("_TtC15SoulPrivateChat23SOPCLimitPaymentManager");
-        if (pay) {
-            SoulInstallMethodHook(pay, NSSelectorFromString(@"updateLimitStatusWith:remainFreeMsgCount:remainTimesCardCount:"),
-                                  (IMP)SoulHookLimitUpdate, (IMP *)&gOrigLimitUpdate);
-            SoulInstallMethodHook(pay, NSSelectorFromString(@"setupWith:"),
-                                  (IMP)SoulHookLimitSetup, (IMP *)&gOrigLimitSetup);
-            SoulInstallMethodHook(pay, NSSelectorFromString(@"handleLimitComponentsClick"),
-                                  (IMP)SoulHookLimitClick, (IMP *)&gOrigLimitClick);
-            SoulInstallMethodHook(pay, NSSelectorFromString(@"handleInterceptedMessage:interceptType:addLocal:isUpdate:"),
-                                  (IMP)SoulHookLimitIntercept, (IMP *)&gOrigLimitIntercept);
-            SoulInstallMethodHook(pay, NSSelectorFromString(@"setLimitBusinessType:"),
-                                  (IMP)SoulHookLimitSetBusiness, (IMP *)&gOrigLimitSetBusiness);
-            gDiagPayDone = YES;
-            SoulLog(@"diag: limit payment diagnostics installed");
-        }
-    }
-}
-
-static void SoulInstallDiagHooksRetry(int n) {
-    SoulInstallDiagHooks();
-    if (gDiagPresentDone && gDiagPayDone && gDiagRnDone && gDiagMgrDone) return;
-    if (n <= 0) { SoulLog(@"diag: retries exhausted p=%d pay=%d rn=%d mgr=%d",
-                          (int)gDiagPresentDone, (int)gDiagPayDone, (int)gDiagRnDone, (int)gDiagMgrDone); return; }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ SoulInstallDiagHooksRetry(n - 1); });
-}
-
 #pragma mark - 超2分钟也能撤回自己消息
 
 /* 长按菜单里「撤回」只在 消息时间 距今 <= 120s 时才加入。
@@ -2406,7 +2210,6 @@ static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"blockview")) SoulInstallBlockViewHooksRetry(24);
     if (!SoulSkipGroup(@"recall")) SoulInstallAntiRecallHooksRetry(20);
     if (!SoulSkipGroup(@"limit")) SoulInstallLimitHooksRetry(24);
-    if (!SoulSkipGroup(@"diag")) SoulInstallDiagHooksRetry(24);
     if (!SoulSkipGroup(@"ownrecall")) SoulInstallOwnRecallHooksRetry(24);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
