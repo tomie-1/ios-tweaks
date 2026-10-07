@@ -1,0 +1,6 @@
+dist/
+*.o
+*.dylib
+*.deb
+.DS_Store
+build/
