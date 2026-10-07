@@ -14,26 +14,29 @@
 #import <objc/message.h>
 #import <stdarg.h>
 
-static NSString * const kDiceEnabledKey = @"soul_dice_tweak_enabled_v1";
-static NSString * const kAutoSignDayKey = @"soul_fx_autosign_last_day_v1";
-static NSString * const kAutoSignTaskDayKey = @"soul_fx_autosign_task_day_v1";
+// 统一命名：soulfx_<功能>（不带版本后缀；改名走 SoulCfgMigrate 迁移）
+static NSString * const kDiceEnabledKey     = @"soulfx_dice_enabled";
+static NSString * const kAutoSignDayKey     = @"soulfx_autosign_last_day";
+static NSString * const kAutoSignTaskDayKey = @"soulfx_autosign_task_day";
+static NSString * const kRecallBlockedKey   = @"soulfx_recall_blocked";
+static NSString * const kLegacyRecallBlockedKey = @"soul_fx_recall_blocked_v1";
 
-static NSString * const kFxSnapUnlock    = @"soul_fx_snap_unlock_v1";
-static NSString * const kFxSnapMulti     = @"soul_fx_snap_multi_v1";
-static NSString * const kFxSaveNoWM      = @"soul_fx_save_nowm_v1";
-static NSString * const kFxShareFree     = @"soul_fx_share_free_v1";
-static NSString * const kFxShareHome     = @"soul_fx_share_home_v1";
-static NSString * const kFxAntiRecall   = @"soul_fx_anti_recall_v1";
-static NSString * const kFxOwnRecall    = @"soul_fx_own_recall_v1";
-static NSString * const kFxMuteMatchBgm  = @"soul_fx_mute_match_bgm_v1";
-static NSString * const kFxBlockInput    = @"soul_fx_block_input_v1";
-static NSString * const kFxBlockView     = @"soul_fx_block_view_v1";
-static NSString * const kFxGiftFree      = @"soul_fx_gift_free_v1";
-static NSString * const kFxQiyuFree      = @"soul_fx_qiyu_free_v1";
-static NSString * const kFxEtiquetteFree = @"soul_fx_etiquette_free_v1";
-static NSString * const kFxAutoSignIn    = @"soul_fx_auto_signin_v1";
-static NSString * const kFxNetLog        = @"soul_fx_net_log_v1";
-static NSString * const kFxFileLog       = @"soul_fx_file_log_v1";
+static NSString * const kFxSnapUnlock    = @"soulfx_snap_unlock";
+static NSString * const kFxSnapMulti     = @"soulfx_snap_multi";
+static NSString * const kFxSaveNoWM      = @"soulfx_save_nowm";
+static NSString * const kFxShareFree     = @"soulfx_share_free";
+static NSString * const kFxShareHome     = @"soulfx_share_home";
+static NSString * const kFxAntiRecall    = @"soulfx_anti_recall";
+static NSString * const kFxOwnRecall     = @"soulfx_own_recall";
+static NSString * const kFxMuteMatchBgm  = @"soulfx_mute_match_bgm";
+static NSString * const kFxBlockInput    = @"soulfx_block_input";
+static NSString * const kFxBlockView     = @"soulfx_block_view";
+static NSString * const kFxGiftFree      = @"soulfx_gift_free";
+static NSString * const kFxQiyuFree      = @"soulfx_qiyu_free";
+static NSString * const kFxEtiquetteFree = @"soulfx_etiquette_free";
+static NSString * const kFxAutoSignIn    = @"soulfx_auto_signin";
+static NSString * const kFxNetLog        = @"soulfx_net_log";
+static NSString * const kFxFileLog       = @"soulfx_file_log";
 
 #pragma mark - 插件独立目录（不写 App 自身配置）
 
@@ -43,11 +46,13 @@ static NSString * const kFxFileLog       = @"soul_fx_file_log_v1";
 //   recall.plist  防撤回角标记录
 //   skip.txt      调试跳过分组
 static NSString *SoulFXDir(void) {
-    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/SoulFX"];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:dir]) {
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
-    }
+    static NSString *dir = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/SoulFX"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                  withIntermediateDirectories:YES attributes:nil error:NULL];
+    });
     return dir;
 }
 static NSString *SoulFXPath(NSString *name) {
@@ -57,22 +62,54 @@ static NSString *SoulFXPath(NSString *name) {
 static NSMutableDictionary *gSoulCfg = nil;
 static NSLock *gSoulCfgLock = nil;
 
-// 首次运行：把旧版本写在 App 自身 NSUserDefaults / suite 里的键迁移过来
+// 旧键名 -> 新键名（v1 时代用 soul_ / soul_fx_ 前缀 + _v1 后缀）
+static NSDictionary<NSString *, NSString *> *SoulLegacyKeyMap(void) {
+    static NSDictionary *m = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        m = @{ @"soul_dice_tweak_enabled_v1": kDiceEnabledKey,
+               @"soul_fx_autosign_last_day_v1": kAutoSignDayKey,
+               @"soul_fx_autosign_task_day_v1": kAutoSignTaskDayKey,
+               @"soul_fx_snap_unlock_v1": kFxSnapUnlock,
+               @"soul_fx_snap_multi_v1": kFxSnapMulti,
+               @"soul_fx_save_nowm_v1": kFxSaveNoWM,
+               @"soul_fx_share_free_v1": kFxShareFree,
+               @"soul_fx_share_home_v1": kFxShareHome,
+               @"soul_fx_anti_recall_v1": kFxAntiRecall,
+               @"soul_fx_own_recall_v1": kFxOwnRecall,
+               @"soul_fx_mute_match_bgm_v1": kFxMuteMatchBgm,
+               @"soul_fx_block_input_v1": kFxBlockInput,
+               @"soul_fx_block_view_v1": kFxBlockView,
+               @"soul_fx_gift_free_v1": kFxGiftFree,
+               @"soul_fx_qiyu_free_v1": kFxQiyuFree,
+               @"soul_fx_etiquette_free_v1": kFxEtiquetteFree,
+               @"soul_fx_auto_signin_v1": kFxAutoSignIn,
+               @"soul_fx_net_log_v1": kFxNetLog };
+    });
+    return m;
+}
+
+// 启动时把旧键名统一成新键名，来源三处：现有 config.plist、App 自身 NSUserDefaults、旧 suite。
+// 幂等：新键已存在就只删旧键；日期类键是字符串，按原类型保留。
 static void SoulCfgMigrate(void) {
     NSUserDefaults *std = [NSUserDefaults standardUserDefaults];
     NSUserDefaults *old = [[NSUserDefaults alloc] initWithSuiteName:@"com.soulapp.soulfx"];
-    NSArray *keys = @[kDiceEnabledKey, kAutoSignDayKey, kAutoSignTaskDayKey,
-                      kFxSnapUnlock, kFxSnapMulti, kFxSaveNoWM, kFxShareFree, kFxShareHome,
-                      kFxAntiRecall, kFxOwnRecall, kFxMuteMatchBgm, kFxBlockInput, kFxBlockView,
-                      kFxGiftFree, kFxQiyuFree, kFxEtiquetteFree, kFxAutoSignIn, kFxNetLog];
-    for (NSString *k in keys) {
-        id v = [std objectForKey:k];
-        if (v == nil) v = [old objectForKey:k];
-        if (v != nil) gSoulCfg[k] = @([v boolValue]);
-    }
-    id recall = [old arrayForKey:@"soul_fx_recall_blocked_v1"];
-    if ([recall isKindOfClass:[NSArray class]] && [recall count]) {
-        [@{@"soul_fx_recall_blocked_v1": recall} writeToFile:SoulFXPath(@"recall.plist") atomically:YES];
+    [SoulLegacyKeyMap() enumerateKeysAndObjectsUsingBlock:^(NSString *oldKey, NSString *newKey, BOOL *stop) {
+        if (gSoulCfg[newKey] == nil) {
+            id v = gSoulCfg[oldKey];
+            if (v == nil) v = [std objectForKey:oldKey];
+            if (v == nil) v = [old objectForKey:oldKey];
+            if (v != nil) gSoulCfg[newKey] = [v isKindOfClass:[NSString class]] ? v : @([v boolValue]);
+        }
+        [gSoulCfg removeObjectForKey:oldKey];
+    }];
+    NSDictionary *rec = [NSDictionary dictionaryWithContentsOfFile:SoulFXPath(@"recall.plist")];
+    if (rec[kRecallBlockedKey] == nil) {
+        id arr = rec[kLegacyRecallBlockedKey];
+        if (arr == nil) arr = [old arrayForKey:kLegacyRecallBlockedKey];
+        if ([arr isKindOfClass:[NSArray class]] && [arr count]) {
+            [@{kRecallBlockedKey: arr} writeToFile:SoulFXPath(@"recall.plist") atomically:YES];
+        }
     }
 }
 
@@ -82,10 +119,8 @@ static void SoulCfgLoad(void) {
         gSoulCfgLock = [NSLock new];
         NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:SoulFXPath(@"config.plist")];
         gSoulCfg = saved ? [saved mutableCopy] : [NSMutableDictionary dictionary];
-        if (!saved) {
-            SoulCfgMigrate();
-            [gSoulCfg writeToFile:SoulFXPath(@"config.plist") atomically:YES];
-        }
+        SoulCfgMigrate();
+        [gSoulCfg writeToFile:SoulFXPath(@"config.plist") atomically:YES];
     });
 }
 static void SoulCfgSave(void) {
@@ -282,7 +317,6 @@ static UIColor *SoulRowHi(void) {
     }];
 }
 static UIColor *SoulText(void)    { return [UIColor labelColor]; }
-static UIColor *SoulSubText(void) { return [UIColor secondaryLabelColor]; }
 static UIColor *SoulHair(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
         return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
@@ -298,7 +332,11 @@ static void SoulInstallMethodHook(Class cls, SEL sel, IMP newImp, IMP *orig) {
     Method m = class_getInstanceMethod(cls, sel);
     if (!m) return;
     if (orig) *orig = method_getImplementation(m);
-    method_setImplementation(m, newImp);
+    /* 若该类本身没实现（方法是从父类继承来的），必须用 class_addMethod 挂到本类；
+       直接 method_setImplementation 会改到父类的实现，波及整个 App。 */
+    if (!class_addMethod(cls, sel, newImp, method_getTypeEncoding(m))) {
+        method_setImplementation(m, newImp);
+    }
 }
 
 static BOOL SoulClassImplements(Class c, SEL sel) {
@@ -1184,16 +1222,6 @@ static SoulSnapSaveHelper *SoulSnapHelper(void) {
     return h;
 }
 
-static BOOL SoulIsSnapPreviewVC(id vc) {
-    if (!vc) return NO;
-    return [NSStringFromClass([vc class]) rangeOfString:@"SnapshotPreview"].location != NSNotFound;
-}
-static BOOL SoulSnapPreviewOnTop(void) {
-    UIViewController *vc = SoulTopViewController();
-    NSString *cn = vc ? NSStringFromClass([vc class]) : @"";
-    return [cn rangeOfString:@"SnapshotPreview"].location != NSNotFound;
-}
-
 static void SoulSnapSaveImageToAlbum(UIImage *img) {
     if (!img) return;
     UIImageWriteToSavedPhotosAlbum(img, nil, nil, NULL);
@@ -1504,7 +1532,6 @@ static void SoulHookDBUpdateRecall(id self, SEL _cmd, id msgs) {
 static void (*gOrigPCUpdateInChatRecall)(id, SEL, id, id);
 static void (*gOrigGCRecallMsg)(id, SEL, id);
 static BOOL gAntiRecallPC = NO, gAntiRecallGC = NO, gAntiRecallBadge = NO;
-static BOOL gAntiRecallCellH = NO;
 
 /* 私聊：撤回消息到达后，把聊天内模型改成「已撤回」提示的地方。
    拦掉它就等于不把原消息替换成撤回提示。 */
@@ -1512,13 +1539,13 @@ static BOOL gAntiRecallCellH = NO;
 
 static NSMutableSet<NSString *> *gRecallBlockedIds = nil;
 static NSLock *gRecallBlockedLock = nil;
-static NSString * const kRecallBlockedKey = @"soul_fx_recall_blocked_v1";
 
 static void SoulRecallStore(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         gRecallBlockedIds = [NSMutableSet set];
-        id saved = [NSDictionary dictionaryWithContentsOfFile:SoulFXPath(@"recall.plist")][kRecallBlockedKey];
+        NSDictionary *rd = [NSDictionary dictionaryWithContentsOfFile:SoulFXPath(@"recall.plist")];
+        id saved = rd[kRecallBlockedKey] ?: rd[kLegacyRecallBlockedKey];
         if ([saved isKindOfClass:[NSArray class]]) {
             for (id x in (NSArray *)saved)
                 if ([x isKindOfClass:[NSString class]] && [(NSString *)x length])
@@ -1710,32 +1737,6 @@ static void SoulHookDisplayWillCell(id self, SEL _cmd, id dc, id cell, id layout
 static void SoulHookDisplayOnCell(id self, SEL _cmd, id dc, id cell, id layout) {
     if (gOrigDisplayOnCell) gOrigDisplayOnCell(self, _cmd, dc, cell, layout);
     SoulApplyRecallBadge(cell, layout, SoulDef(kFxAntiRecall) && SoulRecallIsBlocked(layout));
-}
-
-static double (*gOrigRecallCellHeight)(id, SEL);
-static char kSoulRecallBaseHKey;
-static double SoulHookRecallCellHeight(id self, SEL _cmd) {
-    double h = gOrigRecallCellHeight ? gOrigRecallCellHeight(self, _cmd) : 0;
-    if (!(SoulDef(kFxAntiRecall) && SoulRecallIsBlocked(self))) return h;
-    NSNumber *base = objc_getAssociatedObject(self, &kSoulRecallBaseHKey);
-    if (!base) {
-        base = @(h);
-        objc_setAssociatedObject(self, &kSoulRecallBaseHKey, base, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    return base.doubleValue + kSoulRecallBadgeH + 3.0;
-}
-
-static void SoulInstallRecallCellHeightHook(void) {
-    if (gAntiRecallCellH) return;
-    Class mc = objc_getClass("SODCMsgLayout");
-    if (!mc) return;
-    SEL sel = NSSelectorFromString(@"cellHeight");
-    if (!SoulClassImplements(mc, sel)) return;   /* 只 hook 自己实现了的类，避免改到继承实现 */
-    SoulInstallMethodHook(mc, sel, (IMP)SoulHookRecallCellHeight, (IMP *)&gOrigRecallCellHeight);
-    if (gOrigRecallCellHeight) {
-        gAntiRecallCellH = YES;
-        SoulLog(@"anti-recall: cellHeight hook installed on SODCMsgLayout");
-    }
 }
 
 /* 跟随 cell 布局自动重贴角标：滚动/刷新/复用时不会丢 */
