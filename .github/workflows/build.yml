@@ -33,10 +33,14 @@ jobs:
             VERSION="$VERSION" bash scripts/build_tweak.sh "$d" dist
           done
 
+      - name: Short sha
+        id: vars
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tweaks-${{ github.run_number }}
+          name: tweaks-${{ steps.vars.outputs.short_sha }}
           path: dist/*
 
       - name: Release
