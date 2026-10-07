@@ -50,7 +50,11 @@ lipo -create -output "$OUT/$TWEAK_NAME-fat.dylib" "$WORK/arm64.dylib" "$WORK/arm
 
 for f in "$OUT/$TWEAK_NAME.dylib" "$OUT/$TWEAK_NAME-fat.dylib"; do
   strip -x "$f" 2>/dev/null || true
-  codesign -s - --force --timestamp=none "$f"
+  if command -v ldid >/dev/null 2>&1; then
+    ldid -S "$f"            # ad-hoc；codesign 会多约 19KB
+  else
+    codesign -s - --force --timestamp=none "$f"
+  fi
 done
 
 makedeb() {

@@ -15,8 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dpkg
-        run: brew install dpkg
+      - name: Install tools
+        run: brew install dpkg ldid || brew install dpkg
 
       - name: Build tweaks
         run: |
