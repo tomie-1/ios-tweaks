@@ -40,29 +40,22 @@ COMMON=(-isysroot "$SDK" -dynamiclib -fobjc-arc -fmodules -Os
 
 echo "[*] $TWEAK_NAME  sdk=$SDK  ios>=$MIN_IOS"
 
-xcrun --sdk iphoneos clang -target "arm64-apple-ios$MIN_IOS"  "${COMMON[@]}" \
-    -install_name "$INSTALL_PATH" -o "$WORK/arm64.dylib"  "$TWEAK_DIR/$SRC"
-xcrun --sdk iphoneos clang -target "arm64e-apple-ios$MIN_IOS" "${COMMON[@]}" \
-    -install_name "$INSTALL_PATH" -o "$WORK/arm64e.dylib" "$TWEAK_DIR/$SRC"
+xcrun --sdk iphoneos clang -target "arm64-apple-ios$MIN_IOS" "${COMMON[@]}" \
+    -install_name "$INSTALL_PATH" -o "$OUT/$TWEAK_NAME.dylib" "$TWEAK_DIR/$SRC"
 
-cp "$WORK/arm64.dylib" "$OUT/$TWEAK_NAME.dylib"
-lipo -create -output "$OUT/$TWEAK_NAME-fat.dylib" "$WORK/arm64.dylib" "$WORK/arm64e.dylib"
-
-for f in "$OUT/$TWEAK_NAME.dylib" "$OUT/$TWEAK_NAME-fat.dylib"; do
-  strip -x "$f" 2>/dev/null || true
-  if command -v ldid >/dev/null 2>&1; then
-    ldid -S "$f"            # ad-hoc；codesign 会多约 19KB
-  else
-    codesign -s - --force --timestamp=none "$f"
-  fi
-done
+strip -x "$OUT/$TWEAK_NAME.dylib" 2>/dev/null || true
+if command -v ldid >/dev/null 2>&1; then
+  ldid -S "$OUT/$TWEAK_NAME.dylib"          # ad-hoc；codesign 会多约 19KB
+else
+  codesign -s - --force --timestamp=none "$OUT/$TWEAK_NAME.dylib"
+fi
 
 makedeb() {
   local arch="$1" dest="$2"
   local d="$WORK/deb_$arch"
   rm -rf "$d"
   mkdir -p "$d/DEBIAN" "$d$dest"
-  cp "$OUT/$TWEAK_NAME-fat.dylib" "$d$dest/$TWEAK_NAME.dylib"
+  cp "$OUT/$TWEAK_NAME.dylib" "$d$dest/$TWEAK_NAME.dylib"
   if [ -n "$FILTER" ] && [ -f "$TWEAK_DIR/$FILTER" ]; then
     cp "$TWEAK_DIR/$FILTER" "$d$dest/$TWEAK_NAME.plist"
   fi

@@ -24,8 +24,7 @@ scripts/build_tweak.sh 通用构建脚本
 
 | 文件 | 说明 |
 |---|---|
-| `<name>.dylib` | 瘦 arm64（TrollFools 等直接注入） |
-| `<name>-fat.dylib` | 胖 arm64 + arm64e |
+| `<name>.dylib` | 注入用 / deb 内同一份 |
 | `<pkg>_iphoneos-arm.deb` | rootful，装 `/Library/MobileSubstrate/DynamicLibraries/` |
 | `<pkg>_iphoneos-arm64.deb` | rootless，装 `/var/jb/Library/MobileSubstrate/DynamicLibraries/` |
 | `<pkg>_iphoneos-arm64e.deb` | roothide，装 `/Library/MobileSubstrate/DynamicLibraries/` |
