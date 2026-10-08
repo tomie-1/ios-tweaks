@@ -34,9 +34,9 @@ trap 'rm -rf "$WORK"' EXIT
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 INSTALL_PATH="/Library/MobileSubstrate/DynamicLibraries/$TWEAK_NAME.dylib"
 
-COMMON=(-isysroot "$SDK" -dynamiclib -fobjc-arc -fmodules -Os
+COMMON=(-isysroot "$SDK" -dynamiclib -fobjc-arc -fmodules -Oz
         -Wno-deprecated-declarations -Wno-unused-function
-        -framework Foundation -framework UIKit -framework WebKit)
+        -framework Foundation -framework UIKit -framework WebKit -framework UserNotifications)
 
 echo "[*] $TWEAK_NAME  sdk=$SDK  ios>=$MIN_IOS"
 

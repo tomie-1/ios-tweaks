@@ -13,30 +13,32 @@
 #include <libkern/OSCacheControl.h>
 #import <objc/message.h>
 #import <stdarg.h>
+#import <UserNotifications/UserNotifications.h>
 
 // 统一命名：soulfx_<功能>（不带版本后缀；改名走 SoulCfgMigrate 迁移）
 static NSString * const kDiceEnabledKey     = @"soulfx_dice_enabled";
-static NSString * const kAutoSignDayKey     = @"soulfx_autosign_last_day";
-static NSString * const kAutoSignTaskDayKey = @"soulfx_autosign_task_day";
 static NSString * const kRecallBlockedKey   = @"soulfx_recall_blocked";
 static NSString * const kLegacyRecallBlockedKey = @"soul_fx_recall_blocked_v1";
 
 static NSString * const kFxSnapUnlock    = @"soulfx_snap_unlock";
-static NSString * const kFxSnapMulti     = @"soulfx_snap_multi";
 static NSString * const kFxSaveNoWM      = @"soulfx_save_nowm";
-static NSString * const kFxShareFree     = @"soulfx_share_free";
 static NSString * const kFxShareHome     = @"soulfx_share_home";
 static NSString * const kFxAntiRecall    = @"soulfx_anti_recall";
 static NSString * const kFxOwnRecall     = @"soulfx_own_recall";
 static NSString * const kFxMuteMatchBgm  = @"soulfx_mute_match_bgm";
 static NSString * const kFxBlockInput    = @"soulfx_block_input";
-static NSString * const kFxBlockView     = @"soulfx_block_view";
 static NSString * const kFxGiftFree      = @"soulfx_gift_free";
-static NSString * const kFxQiyuFree      = @"soulfx_qiyu_free";
 static NSString * const kFxEtiquetteFree = @"soulfx_etiquette_free";
-static NSString * const kFxAutoSignIn    = @"soulfx_auto_signin";
-static NSString * const kFxNetLog        = @"soulfx_net_log";
-static NSString * const kFxFileLog       = @"soulfx_file_log";
+static NSString * const kFxDebugLog      = @"soulfx_debug_log";
+
+// —— 2026-10-08 新增批次 ——
+static NSString * const kFxPickerFree    = @"soulfx_picker_free";
+static NSString * const kFxNoSplashAd    = @"soulfx_no_splash_ad";
+static NSString * const kFxBlockRead     = @"soulfx_block_read";
+static NSString * const kFxAutoRead      = @"soulfx_auto_read";
+static NSString * const kFxNoCloseFriend = @"soulfx_no_close_friend";
+static NSString * const kFxClearNotif    = @"soulfx_clear_notif";
+static NSString * const kFxVoiceUnlock   = @"soulfx_voice_unlock";
 
 #pragma mark - 插件独立目录（不写 App 自身配置）
 
@@ -68,23 +70,27 @@ static NSDictionary<NSString *, NSString *> *SoulLegacyKeyMap(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         m = @{ @"soul_dice_tweak_enabled_v1": kDiceEnabledKey,
-               @"soul_fx_autosign_last_day_v1": kAutoSignDayKey,
-               @"soul_fx_autosign_task_day_v1": kAutoSignTaskDayKey,
                @"soul_fx_snap_unlock_v1": kFxSnapUnlock,
-               @"soul_fx_snap_multi_v1": kFxSnapMulti,
+               @"soul_fx_snap_multi_v1": kFxSnapUnlock,
                @"soul_fx_save_nowm_v1": kFxSaveNoWM,
-               @"soul_fx_share_free_v1": kFxShareFree,
+               @"soul_fx_share_free_v1": kFxSaveNoWM,
                @"soul_fx_share_home_v1": kFxShareHome,
                @"soul_fx_anti_recall_v1": kFxAntiRecall,
                @"soul_fx_own_recall_v1": kFxOwnRecall,
                @"soul_fx_mute_match_bgm_v1": kFxMuteMatchBgm,
                @"soul_fx_block_input_v1": kFxBlockInput,
-               @"soul_fx_block_view_v1": kFxBlockView,
+               @"soul_fx_block_view_v1": kFxBlockInput,
                @"soul_fx_gift_free_v1": kFxGiftFree,
-               @"soul_fx_qiyu_free_v1": kFxQiyuFree,
+               @"soul_fx_qiyu_free_v1": kFxGiftFree,
                @"soul_fx_etiquette_free_v1": kFxEtiquetteFree,
-               @"soul_fx_auto_signin_v1": kFxAutoSignIn,
-               @"soul_fx_net_log_v1": kFxNetLog };
+               @"soulfx_snap_multi": kFxSnapUnlock,
+               @"soulfx_share_free": kFxSaveNoWM,
+               @"soulfx_block_view": kFxBlockInput,
+               @"soulfx_qiyu_free": kFxGiftFree,
+               @"soulfx_group_recall": kFxAntiRecall,
+               @"soul_fx_net_log_v1": kFxDebugLog,
+               @"soulfx_net_log": kFxDebugLog,
+               @"soulfx_file_log": kFxDebugLog };
     });
     return m;
 }
@@ -129,11 +135,11 @@ static void SoulCfgSave(void) {
 
 #pragma mark - 日志
 
-// 默认只写系统日志；打开「写入调试日志」后才落盘到 SoulFX/soulfx.log
+// 默认只写系统日志；打开「调试日志」后才落盘到 SoulFX/soulfx.log
 static BOOL SoulFileLogOn(void) {
     SoulCfgLoad();
     [gSoulCfgLock lock];
-    id o = gSoulCfg[kFxFileLog];
+    id o = gSoulCfg[kFxDebugLog];
     BOOL v = (o == nil) ? NO : [o boolValue];
     [gSoulCfgLock unlock];
     return v;
@@ -185,7 +191,7 @@ static void SoulSetDef(NSString *key, BOOL on) {
     SoulCfgSave();
     [gSoulCfgLock unlock];
     SoulLog(@"toggle %@ -> %d", key, (int)on);
-    if ([key isEqualToString:kFxQiyuFree] || [key isEqualToString:kFxGiftFree]) {
+    if ([key isEqualToString:kFxGiftFree]) {
         dispatch_async(dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     }
 }
@@ -198,25 +204,35 @@ static void SoulSetCfgString(NSString *key, NSString *val) {
 }
 static BOOL SoulDiceOn(void) { return SoulDef(kDiceEnabledKey); }
 
-static NSArray<NSArray *> *SoulFxRows(void) {
+// 面板分组：@[ @{@"title": 分组名, @"items": @[ @[标题, 键, 默认] ... ]} ... ]
+static NSArray<NSDictionary *> *SoulFxSections(void) {
     return @[
-        @[@"自定义骰子 / 猜拳",        kDiceEnabledKey,  @NO],
-        @[@"阅后即焚：允许截屏 / 录屏", kFxSnapUnlock,    @YES],
-        @[@"阅后即焚：允许多次查看",    kFxSnapMulti,     @NO],
-        @[@"保存图片 / 视频 无水印",   kFxSaveNoWM,      @NO],
-        @[@"去除图片 / 视频分享限制",  kFxShareFree,     @NO],
-        @[@"去除主页分享限制（隐私防护）", kFxShareHome,    @NO],
-        @[@"防撤回（对方撤回后仍可见）", kFxAntiRecall, @NO],
-        @[@"超2分钟也能撤回自己消息",   kFxOwnRecall,     @YES],
-        @[@"关闭匹配背景音乐",         kFxMuteMatchBgm,  @NO],
-        @[@"禁止上报「正在输入」",     kFxBlockInput,    @NO],
-        @[@"禁止发送「正在查看主页」", kFxBlockView,     @NO],
-        @[@"去除送礼聊天限制",         kFxGiftFree,      @NO],
-        @[@"去除奇遇铃送礼限制",       kFxQiyuFree,      @NO],
-        @[@"去除礼仪分限制",           kFxEtiquetteFree, @NO],
-        @[@"自动签到",                 kFxAutoSignIn,    @NO],
-        @[@"出站请求日志（调试）",     kFxNetLog,        @NO],
-        @[@"写入调试日志（默认关）",   kFxFileLog,       @NO],
+        @{ @"title": @"聊天与消息", @"items": @[
+            @[@"自定义骰子 / 猜拳",          kDiceEnabledKey,  @NO],
+            @[@"防撤回（私聊 / 群聊）",      kFxAntiRecall,    @NO],
+            @[@"超2分钟也能撤回自己消息",    kFxOwnRecall,     @YES],
+            @[@"禁止上报状态（输入 / 查看主页）", kFxBlockInput, @NO],
+            @[@"禁止上报「已读」回执",       kFxBlockRead,     @NO],
+            @[@"收到消息自动已读",           kFxAutoRead,      @NO],
+            @[@"禁止弹「挚友」邀请",         kFxNoCloseFriend, @NO],
+            @[@"回前台自动清除通知",         kFxClearNotif,    @NO],
+        ]},
+        @{ @"title": @"图片 / 视频 / 分享", @"items": @[
+            @[@"阅后即焚解锁（截屏 / 多次查看）", kFxSnapUnlock, @NO],
+            @[@"保存 / 分享：无水印 + 无限制", kFxSaveNoWM,    @NO],
+            @[@"去除主页分享限制（隐私防护）", kFxShareHome,   @NO],
+            @[@"解除图片 / 视频选择数量上限", kFxPickerFree,   @NO],
+        ]},
+        @{ @"title": @"限制与体验", @"items": @[
+            @[@"去除送礼限制（聊天 / 奇遇铃）", kFxGiftFree,    @NO],
+            @[@"去除礼仪分限制",             kFxEtiquetteFree, @NO],
+            @[@"关闭匹配背景音乐",           kFxMuteMatchBgm,  @NO],
+            @[@"跳过开屏 / 启动广告",        kFxNoSplashAd,    @NO],
+            @[@"语音消息解锁装扮",           kFxVoiceUnlock,   @NO],
+        ]},
+        @{ @"title": @"调试", @"items": @[
+            @[@"调试日志（请求日志 + 落盘）", kFxDebugLog,      @NO],
+        ]},
     ];
 }
 
@@ -502,6 +518,7 @@ typedef NS_ENUM(NSInteger, SoulGameMode) {
 @end
 
 static UIView *gSoulPanel = nil;
+static NSArray<NSString *> *gSoulPanelKeys = nil;
 
 static void SoulHidePanel(void) {
     if (gSoulPanel) { [gSoulPanel removeFromSuperview]; gSoulPanel = nil; }
@@ -516,12 +533,16 @@ static void SoulTogglePanel(void) {
     if (!win) { SoulLog(@"toggle: no host window"); return; }
 
     BOOL dark = SoulAppDark();
-    NSArray<NSArray *> *rows = SoulFxRows();
+    NSArray<NSDictionary *> *sections = SoulFxSections();
 
     const CGFloat W = 306;
     const CGFloat headerH = 48;
     const CGFloat rowH = 46;
-    CGFloat contentH = rows.count * rowH + 8;
+    const CGFloat secH = 34;
+    CGFloat contentH = 8;
+    for (NSDictionary *sec in sections) {
+        contentH += secH + ((NSArray *)sec[@"items"]).count * rowH;
+    }
     CGFloat maxH = win.bounds.size.height - 130;
     CGFloat H = MIN(maxH, headerH + contentH);
     H = MAX(H, 260);
@@ -563,31 +584,45 @@ static void SoulTogglePanel(void) {
     scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [inner addSubview:scroll];
 
-    for (NSInteger i = 0; i < (NSInteger)rows.count; i++) {
-        NSArray *row = rows[i];
-        CGFloat y = 4 + i * rowH;
+    NSMutableArray<NSString *> *keys = [NSMutableArray array];
+    CGFloat y = 4;
+    for (NSDictionary *sec in sections) {
+        UILabel *head = [[UILabel alloc] initWithFrame:CGRectMake(16, y + 6, W - 32, secH - 6)];
+        head.text = sec[@"title"];
+        head.textColor = [SoulText() colorWithAlphaComponent:0.5];
+        head.font = [UIFont boldSystemFontOfSize:12.5];
+        [scroll addSubview:head];
+        y += secH;
 
-        UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(16, y, W - 16 - 62, rowH)];
-        lab.text = row[0];
-        lab.textColor = SoulText();
-        lab.font = [UIFont systemFontOfSize:14.5];
-        lab.adjustsFontSizeToFitWidth = YES;
-        lab.minimumScaleFactor = 0.8;
-        [scroll addSubview:lab];
+        NSArray *items = sec[@"items"];
+        for (NSInteger j = 0; j < (NSInteger)items.count; j++) {
+            NSArray *row = items[j];
 
-        UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W - 16 - 51, y + (rowH - 31) / 2.0, 51, 31)];
-        sw.onTintColor = SoulAccent();
-        sw.on = SoulDefOn(row[1], [row[2] boolValue]);
-        sw.tag = i;
-        [sw addTarget:panel action:@selector(soulSwitchChanged:) forControlEvents:UIControlEventValueChanged];
-        [scroll addSubview:sw];
+            UILabel *lab = [[UILabel alloc] initWithFrame:CGRectMake(16, y, W - 16 - 62, rowH)];
+            lab.text = row[0];
+            lab.textColor = SoulText();
+            lab.font = [UIFont systemFontOfSize:14.5];
+            lab.adjustsFontSizeToFitWidth = YES;
+            lab.minimumScaleFactor = 0.8;
+            [scroll addSubview:lab];
 
-        if (i < (NSInteger)rows.count - 1) {
-            UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(16, y + rowH - 0.5, W - 32, 0.5)];
-            sep.backgroundColor = SoulHair();
-            [scroll addSubview:sep];
+            UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W - 16 - 51, y + (rowH - 31) / 2.0, 51, 31)];
+            sw.onTintColor = SoulAccent();
+            sw.on = SoulDefOn(row[1], [row[2] boolValue]);
+            sw.tag = (NSInteger)keys.count;
+            [keys addObject:row[1]];
+            [sw addTarget:panel action:@selector(soulSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+            [scroll addSubview:sw];
+
+            if (j < (NSInteger)items.count - 1) {
+                UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(16, y + rowH - 0.5, W - 32, 0.5)];
+                sep.backgroundColor = SoulHair();
+                [scroll addSubview:sep];
+            }
+            y += rowH;
         }
     }
+    gSoulPanelKeys = keys;
     scroll.contentSize = CGSizeMake(W, contentH);
 
     SoulPanelOverlay *overlay = [[SoulPanelOverlay alloc] initWithFrame:win.bounds];
@@ -607,7 +642,7 @@ static void SoulTogglePanel(void) {
     [win addSubview:overlay];
     [win bringSubviewToFront:overlay];
     gSoulPanel = overlay;
-    SoulLog(@"panel shown dark=%d center=(%.0f,%.0f) h=%.0f rows=%d", (int)dark, cx, cy, H, (int)rows.count);
+    SoulLog(@"panel shown dark=%d center=(%.0f,%.0f) h=%.0f rows=%d", (int)dark, cx, cy, H, (int)keys.count);
 }
 
 @implementation SoulPanelOverlay
@@ -621,9 +656,9 @@ static void SoulTogglePanel(void) {
 
 @implementation UIView (SoulPanel)
 - (void)soulSwitchChanged:(UISwitch *)sw {
-    NSArray<NSArray *> *rows = SoulFxRows();
-    if (sw.tag < 0 || sw.tag >= (NSInteger)rows.count) return;
-    SoulSetDef(rows[sw.tag][1], sw.on);
+    if (!gSoulPanelKeys) return;
+    if (sw.tag < 0 || sw.tag >= (NSInteger)gSoulPanelKeys.count) return;
+    SoulSetDef(gSoulPanelKeys[sw.tag], sw.on);
 }
 @end
 
@@ -752,15 +787,15 @@ static void (*gOrigSnapWillResignActive)(id, SEL);
 static BOOL gSnapHooksInstalled = NO;
 
 static void SoulSnapDidTakeScreenshot(id self, SEL _cmd) {
-    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapMulti)) { SoulLog(@"snap didTakeScreenshot swallowed"); return; }
+    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapUnlock)) { SoulLog(@"snap didTakeScreenshot swallowed"); return; }
     if (gOrigSnapDidTakeScreenshot) gOrigSnapDidTakeScreenshot(self, _cmd);
 }
 static void SoulSnapScreenCaptureChanged(id self, SEL _cmd) {
-    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapMulti)) { SoulLog(@"snap screenCaptureStatusChanged swallowed"); return; }
+    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapUnlock)) { SoulLog(@"snap screenCaptureStatusChanged swallowed"); return; }
     if (gOrigSnapScreenCaptureChanged) gOrigSnapScreenCaptureChanged(self, _cmd);
 }
 static void SoulSnapWillResignActive(id self, SEL _cmd) {
-    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapMulti)) { SoulLog(@"snap willResignActive swallowed"); return; }
+    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapUnlock)) { SoulLog(@"snap willResignActive swallowed"); return; }
     if (gOrigSnapWillResignActive) gOrigSnapWillResignActive(self, _cmd);
 }
 
@@ -917,155 +952,11 @@ static void SoulInstallBgmHooks(void) {
     SoulLog(@"match bgm hooks installed");
 }
 
-#pragma mark - 自动签到（SoulWebViewRequest -> /increase/sign/userSign）
-
-static BOOL gAutoSignAttempted = NO;
-
-static void SoulAutoSignRun(void) {
-    if (gAutoSignAttempted) return;
-    if (!SoulDef(kFxAutoSignIn)) return;
-    NSDateFormatter *df = [[NSDateFormatter alloc] init];
-    df.dateFormat = @"yyyy-MM-dd";
-    NSString *day = [df stringFromDate:[NSDate date]];
-    if ([SoulCfgString(kAutoSignDayKey) isEqualToString:day]) return;
-    gAutoSignAttempted = YES;
-
-    Class wvr = objc_getClass("SoulWebViewRequest");
-    if (!wvr) { SoulLog(@"autosign: no SoulWebViewRequest"); return; }
-    id inst = nil;
-    SEL si = NSSelectorFromString(@"sharedInstance");
-    if ([wvr respondsToSelector:si]) inst = ((id (*)(id, SEL))objc_msgSend)(wvr, si);
-    if (!inst) {
-        id obj = ((id (*)(id, SEL))objc_msgSend)(wvr, NSSelectorFromString(@"alloc"));
-        inst = ((id (*)(id, SEL))objc_msgSend)(obj, NSSelectorFromString(@"init"));
-    }
-    SEL sel = NSSelectorFromString(@"startRequestWithURLPath:baseUrl:method:param:success:failure:");
-    if (!inst || ![inst respondsToSelector:sel]) { SoulLog(@"autosign: wvr unavailable"); return; }
-    NSDictionary *param = @{@"pageId": @"welfarecenter_daily_welfare_exposure",
-                            @"source": @"welfareCenter"};
-    SoulLog(@"autosign: sending userSign");
-    ((void (*)(id, SEL, id, id, id, id, id, id))objc_msgSend)(
-        inst, sel,
-        @"/increase/sign/userSign",
-        @"https://increase-openapi.soulapp.cn",
-        @"GET",
-        param,
-        ^(id resp) {
-            SoulSetCfgString(kAutoSignDayKey, day);
-            SoulLog(@"autosign: ok resp=%@", resp);
-        },
-        ^(NSError *err) {
-            gAutoSignAttempted = NO;
-            SoulLog(@"autosign: fail err=%@", err);
-        });
-}
-
-typedef void (^SoulRespBlock)(id resp);
-
-static void SoulWvrRequest(NSString *path, NSString *method, NSDictionary *param, SoulRespBlock cb) {
-    Class wvr = objc_getClass("SoulWebViewRequest");
-    if (!wvr) return;
-    SEL si = NSSelectorFromString(@"sharedInstance");
-    id inst = [wvr respondsToSelector:si] ? ((id (*)(id, SEL))objc_msgSend)(wvr, si) : nil;
-    if (!inst) {
-        id obj = ((id (*)(id, SEL))objc_msgSend)(wvr, NSSelectorFromString(@"alloc"));
-        inst = ((id (*)(id, SEL))objc_msgSend)(obj, NSSelectorFromString(@"init"));
-    }
-    SEL sel = NSSelectorFromString(@"startRequestWithURLPath:baseUrl:method:param:success:failure:");
-    if (!inst || ![inst respondsToSelector:sel]) return;
-    ((void (*)(id, SEL, id, id, id, id, id, id))objc_msgSend)(
-        inst, sel, path, @"https://increase-openapi.soulapp.cn", method, param,
-        ^(id resp) { if (cb) cb(resp); },
-        ^(NSError *e) { SoulLog(@"sign-task: %@ err %@", path, e); });
-}
-
-static void SoulCompleteSignTask(NSNumber *taskId, NSNumber *taskType) {
-    if (!taskId || !taskType) return;
-    SoulWvrRequest(@"/increase/sign/task/complete", @"POST",
-                   @{@"taskId": taskId, @"taskType": taskType}, ^(id resp) {
-        SoulLog(@"sign-task: complete id=%@ type=%@ -> %@", taskId, taskType, resp);
-    });
-}
-
-static void SoulAutoSignTasksRun(void) {
-    SoulWvrRequest(@"/increase/sign/AB/task/info", @"GET",
-                   @{@"page": @"welfareCenterPage", @"pageId": @"Plant_Main"}, ^(id resp) {
-        NSArray *list = nil;
-        if ([resp isKindOfClass:[NSDictionary class]]) {
-            id d = resp[@"data"];
-            if ([d isKindOfClass:[NSDictionary class]]) {
-                id d2 = d[@"data"];
-                if ([d2 isKindOfClass:[NSDictionary class]]) list = d2[@"signAbTaskDetailResponseList"];
-            }
-        }
-        if (![list isKindOfClass:[NSArray class]]) {
-            SoulLog(@"sign-task: no task list resp=%@", resp);
-            return;
-        }
-        NSUInteger done = 0;
-        for (NSDictionary *t in list) {
-            if (![t isKindOfClass:[NSDictionary class]]) continue;
-            NSNumber *tt = t[@"taskType"];
-            if (tt.integerValue == 3) continue;   // 双倍抽奖任务，不做
-            SoulCompleteSignTask(t[@"taskId"], tt);
-            done++;
-        }
-        SoulLog(@"sign-task: completed %lu tasks", (unsigned long)done);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            SoulWvrRequest(@"/increase/sign/querySign", @"GET",
-                           @{@"pageId": @"welfarecenter_daily_welfare_exposure"}, ^(id r) {
-                NSDictionary *d = [r isKindOfClass:[NSDictionary class]] ? r[@"data"] : nil;
-                SoulLog(@"sign-task: check card=%@ received=%@ signDays=%@",
-                        d[@"userRetroactiveCardNum"], d[@"todayIsReceiveCompensationCard"], d[@"continuousSignDays"]);
-            });
-        });
-    });
-}
-
-static void SoulSignTaskProbe(void) {
-    if (!SoulDef(kFxAutoSignIn)) return;
-    NSDateFormatter *df = [[NSDateFormatter alloc] init];
-    df.dateFormat = @"yyyy-MM-dd";
-    NSString *day = [df stringFromDate:[NSDate date]];
-    if ([SoulCfgString(kAutoSignTaskDayKey) isEqualToString:day]) return;
-    SoulSetCfgString(kAutoSignTaskDayKey, day);
-    SoulAutoSignTasksRun();
-}
-
-static void SoulAutoSignSchedule(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        SoulAutoSignRun();
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ SoulSignTaskProbe(); });
-    });
-}
-
-static void SoulAutoSignOnActive(id self, SEL _cmd) {
-    SoulAutoSignSchedule();
-}
-
-static void SoulInstallSignInHooks(void) {
-    Class appCls = [UIApplication class];
-    SEL onActive = NSSelectorFromString(@"soulAutoSignOnActive");
-    if (!class_getInstanceMethod(appCls, onActive)) {
-        class_addMethod(appCls, onActive, (IMP)SoulAutoSignOnActive, "v@:");
-    }
-    [[NSNotificationCenter defaultCenter] addObserver:[UIApplication sharedApplication]
-                                             selector:onActive
-                                                 name:UIApplicationDidBecomeActiveNotification
-                                               object:nil];
-    SoulAutoSignSchedule();
-    SoulLog(@"auto sign-in observer installed");
-}
-
 #pragma mark - 出站请求日志（用于定位 输入状态 / 主页访问 / 权益限制 等接口）
 
 static BOOL SoulNetInterested(void) {
-    return SoulDef(kFxNetLog) || SoulDef(kFxBlockInput) || SoulDef(kFxBlockView) ||
-           SoulDef(kFxGiftFree) || SoulDef(kFxQiyuFree) || SoulDef(kFxEtiquetteFree) ||
-           SoulDef(kFxShareFree);
+    return SoulDef(kFxDebugLog) || SoulDef(kFxBlockInput) || SoulDef(kFxGiftFree) ||
+           SoulDef(kFxEtiquetteFree) || SoulDef(kFxSaveNoWM);
 }
 
 static void SoulLogRequest(NSURLRequest *req, NSString *via) {
@@ -1083,7 +974,7 @@ static void SoulLogRequest(NSURLRequest *req, NSString *via) {
 }
 
 static BOOL SoulShouldBlockRequest(NSURLRequest *req) {
-    if (!SoulDef(kFxSnapMulti)) return NO;
+    if (!SoulDef(kFxSnapUnlock)) return NO;
     NSString *u = req.URL.absoluteString ?: @"";
     if ([u containsString:@"/snapchat/read"]) return YES;
     return NO;
@@ -1258,7 +1149,7 @@ static void SoulSnapFixHintLabel(UIView *v) {
 static void SoulSnapViewDidLoad(id self, SEL _cmd) {
     if (gOrigSnapViewDidLoad) gOrigSnapViewDidLoad(self, _cmd);
     SoulLog(@"SNAP viewDidLoad %@", NSStringFromClass([self class]));
-    if (SoulDef(kFxSnapMulti) || SoulDef(kFxSnapUnlock)) {
+    if (SoulDef(kFxSnapUnlock) || SoulDef(kFxSnapUnlock)) {
         UIViewController *vc = (UIViewController *)self;
         UILongPressGestureRecognizer *lpGr = nil;
         UITapGestureRecognizer *tapGr = nil;
@@ -1299,7 +1190,7 @@ static void SoulSnapViewWillDisappear(id self, SEL _cmd, BOOL animated) {
     SoulLog(@"SNAP viewWillDisappear %@", NSStringFromClass([self class]));
     /* 原实现 = [super viewWillDisappear:] + 本地焚毁(sub_1060346cc)。
        开启「多次查看」时只调 super，跳过本地焚毁，图片留在本地可反复打开。 */
-    if (SoulDef(kFxSnapMulti) && [self isKindOfClass:[UIViewController class]]) {
+    if (SoulDef(kFxSnapUnlock) && [self isKindOfClass:[UIViewController class]]) {
         if (gSuperSnapViewWillDisappear) gSuperSnapViewWillDisappear(self, _cmd, animated);
         SoulLog(@"snap: skip local burn on close");
         return;
@@ -1332,20 +1223,20 @@ static void (*gOrigSnapScheduleBurn)(id, SEL, id, double, id);
 static BOOL (*gOrigSnapShouldBurn)(id, SEL, long);
 
 static void SoulHookSnapScheduleBurn(id s, SEL c, id msgId, double delay, id block) {
-    if (SoulDef(kFxSnapMulti)) {
+    if (SoulDef(kFxSnapUnlock)) {
         SoulLog(@"snap burn canceled (multiview) msgId=%@ delay=%.1f", msgId, delay);
         return;
     }
     if (gOrigSnapScheduleBurn) gOrigSnapScheduleBurn(s, c, msgId, delay, block);
 }
 static BOOL SoulHookSnapShouldBurn(id s, SEL c, long scene) {
-    if (SoulDef(kFxSnapMulti)) { return NO; }
+    if (SoulDef(kFxSnapUnlock)) { return NO; }
     return gOrigSnapShouldBurn ? gOrigSnapShouldBurn(s, c, scene) : NO;
 }
 
 static void (*gOrigSnapRecallSched)(id, SEL, id, double, id, id);
 static void SoulHookSnapRecallSched(id s, SEL c, id msgId, double delay, id reason, id completion) {
-    if (SoulDef(kFxSnapMulti)) {
+    if (SoulDef(kFxSnapUnlock)) {
         SoulLog(@"snap recall schedule canceled (multiview) msgId=%@ delay=%.1f", msgId, delay);
         return;
     }
@@ -1353,7 +1244,7 @@ static void SoulHookSnapRecallSched(id s, SEL c, id msgId, double delay, id reas
 }
 static void (*gOrigSnapRecallSend)(id, SEL, id, id);
 static void SoulHookSnapRecallSend(id s, SEL c, id msgId, id uid) {
-    if (SoulDef(kFxSnapMulti)) {
+    if (SoulDef(kFxSnapUnlock)) {
         SoulLog(@"snap recall IM blocked (multiview) msgId=%@ to=%@", msgId, uid);
         return;
     }
@@ -1889,7 +1780,7 @@ static BOOL (*gOrigSocForbidPic)(id, SEL);
 static BOOL (*gOrigSocForbidCallProp)(id, SEL);
 static BOOL (*gOrigSocCreateLimit)(id, SEL);
 static BOOL SoulGiftLimitFree(void) {
-    return SoulDef(kFxGiftFree) || SoulDef(kFxQiyuFree);
+    return SoulDef(kFxGiftFree);
 }
 
 static BOOL (*gOrigPayCanSendV2)(id, SEL, id);
@@ -2148,15 +2039,15 @@ static BOOL SoulSkipGroup(NSString *g) {
 }
 
 static void SoulSyncLoveBellPatch(void) {
-    if (SoulDef(kFxQiyuFree) || SoulDef(kFxGiftFree)) SoulApplyLoveBellPatch();
+    if (SoulDef(kFxGiftFree)) SoulApplyLoveBellPatch();
     else SoulRevertLoveBellPatch();
 }
 
-#pragma mark - 禁止发送「正在查看主页」(kFxBlockView)
+#pragma mark - 禁止上报状态（输入 / 查看主页）(kFxBlockInput)
 
 static void (*gOrigSysHomepageSee)(id, SEL, BOOL);
 static void SoulHookSysHomepageSee(id self, SEL _cmd, BOOL see) {
-    if (SoulDef(kFxBlockView)) {
+    if (SoulDef(kFxBlockInput)) {
         SoulLog(@"block-view: homepage-see send suppressed see=%d", (int)see);
         return;
     }
@@ -2182,6 +2073,223 @@ static void SoulInstallBlockViewHooksRetry(int n) {
                    dispatch_get_main_queue(), ^{ SoulInstallBlockViewHooksRetry(n - 1); });
 }
 
+#pragma mark - 新增批次（2026-10-08）：选择上限 / 开屏广告 / 关注列表 / 群撤回 / 已读 / 挚友 / 清通知 / 语音
+
+// 通用重试安装：block 返回 YES 表示已装好；否则 0.5s 后重试，最多 n 次。
+static void SoulRetryInstall(BOOL (^block)(void), int n) {
+    if (block()) return;
+    if (n <= 0) { SoulLog(@"install: retries exhausted"); return; }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ SoulRetryInstall(block, n - 1); });
+}
+
+// —— B. 图片/视频选择数量上限解除 ——
+static NSInteger (*gOrigAideMaxCount)(id, SEL);
+static NSInteger SoulHookAideMaxCount(id self, SEL _cmd) {
+    if (SoulDef(kFxPickerFree)) return 99;
+    return gOrigAideMaxCount ? gOrigAideMaxCount(self, _cmd) : 9;
+}
+
+static NSInteger (*gOrigAlbumImgMax)(id, SEL);
+static NSInteger SoulHookAlbumImgMax(id self, SEL _cmd) {
+    if (SoulDef(kFxPickerFree)) return 99;
+    return gOrigAlbumImgMax ? gOrigAlbumImgMax(self, _cmd) : 9;
+}
+static BOOL gPickerDone = NO;
+static BOOL SoulInstallPickerHooks(void) {
+    if (gPickerDone) return YES;
+    Class aide = objc_getClass("SOAlbumPhotoJudgeSelectAide");
+    if (aide) {
+        SoulInstallMethodHook(aide, NSSelectorFromString(@"maxCount"), (IMP)SoulHookAideMaxCount, (IMP *)&gOrigAideMaxCount);
+        SoulLog(@"picker: aide hooked");
+    }
+    Class alb = objc_getClass("_TtC10SOPhotoKit25SOPhotoAlbumConfiguration");
+    if (alb) {
+        SoulInstallMethodHook(alb, NSSelectorFromString(@"imageCountMaximum"), (IMP)SoulHookAlbumImgMax, (IMP *)&gOrigAlbumImgMax);
+        SoulLog(@"picker: album config hooked");
+    }
+    if (aide || alb) { gPickerDone = YES; return YES; }
+    return NO;
+}
+
+// —— C. 跳过开屏/启动广告 ——
+static void (*gOrigShowSplash)(id, SEL, id, NSInteger, id);
+static void SoulHookShowSplash(id self, SEL _cmd, id ad, NSInteger scene, id reqId) {
+    if (SoulDef(kFxNoSplashAd)) { SoulLog(@"no-splash: showSpalshAd suppressed"); return; }
+    if (gOrigShowSplash) gOrigShowSplash(self, _cmd, ad, scene, reqId);
+}
+static void (*gOrigShowLaunch)(id, SEL, NSInteger);
+static void SoulHookShowLaunch(id self, SEL _cmd, NSInteger sceneAction) {
+    if (SoulDef(kFxNoSplashAd)) { SoulLog(@"no-splash: showLaunchView suppressed"); return; }
+    if (gOrigShowLaunch) gOrigShowLaunch(self, _cmd, sceneAction);
+}
+static BOOL gSplashDone = NO;
+static BOOL SoulInstallSplashHooks(void) {
+    if (gSplashDone) return YES;
+    Class mgr = objc_getClass("SoulSplashAdManager");
+    if (mgr) {
+        SoulInstallMethodHook(mgr, NSSelectorFromString(@"showSpalshAd:scene:reqId:"), (IMP)SoulHookShowSplash, (IMP *)&gOrigShowSplash);
+        SoulInstallMethodHook(mgr, NSSelectorFromString(@"showLaunchViewWithSceneAction:"), (IMP)SoulHookShowLaunch, (IMP *)&gOrigShowLaunch);
+        gSplashDone = YES;
+        SoulLog(@"no-splash: manager hooked");
+        return YES;
+    }
+    return NO;
+}
+
+// —— D. 群聊防撤回 ——
+static void (*gOrigGCHandleRecall)(id, SEL, id);
+static void SoulHookGCHandleRecall(id self, SEL _cmd, id msg) {
+    if (SoulDef(kFxAntiRecall)) { SoulLog(@"group-recall: blocked"); return; }
+    if (gOrigGCHandleRecall) gOrigGCHandleRecall(self, _cmd, msg);
+}
+static BOOL gGroupRecallDone = NO;
+static BOOL SoulInstallGroupRecallHooks(void) {
+    if (gGroupRecallDone) return YES;
+    Class mgr = objc_getClass("SOGCMessageManager");
+    if (mgr) {
+        SoulInstallMethodHook(mgr, NSSelectorFromString(@"handleRecallMessageWith:"), (IMP)SoulHookGCHandleRecall, (IMP *)&gOrigGCHandleRecall);
+        gGroupRecallDone = YES;
+        SoulLog(@"group-recall: hooked");
+        return YES;
+    }
+    return NO;
+}
+
+// —— F. 禁止上报「已读」回执 ——
+static BOOL (*gOrigCanSendIMRead)(id, SEL, id);
+static BOOL SoulHookCanSendIMRead(id self, SEL _cmd, id arg) {
+    if (SoulDef(kFxBlockRead)) { SoulLog(@"block-read: canSendIMRead -> NO"); return NO; }
+    return gOrigCanSendIMRead ? gOrigCanSendIMRead(self, _cmd, arg) : YES;
+}
+static void (*gOrigSendSingleRead)(id, SEL, id, id);
+static void SoulHookSendSingleRead(id self, SEL _cmd, id a, id b) {
+    if (SoulDef(kFxBlockRead)) { SoulLog(@"block-read: single read suppressed"); return; }
+    if (gOrigSendSingleRead) gOrigSendSingleRead(self, _cmd, a, b);
+}
+static void (*gOrigSendBgRead)(id, SEL, id, id);
+static void SoulHookSendBgRead(id self, SEL _cmd, id a, id b) {
+    if (SoulDef(kFxBlockRead)) { SoulLog(@"block-read: bg read suppressed"); return; }
+    if (gOrigSendBgRead) gOrigSendBgRead(self, _cmd, a, b);
+}
+static BOOL gBlockReadDone = NO;
+static BOOL SoulInstallBlockReadHooks(void) {
+    if (gBlockReadDone) return YES;
+    BOOL any = NO;
+    Class mgr = objc_getClass("SOPrivateChatIMManager");
+    if (mgr) {
+        SoulInstallMethodHook(mgr, NSSelectorFromString(@"canSendIMRead:"), (IMP)SoulHookCanSendIMRead, (IMP *)&gOrigCanSendIMRead);
+        SoulLog(@"block-read: manager hooked");
+        any = YES;
+    }
+    Class snd = objc_getClass("SOPCMessageSender");
+    if (snd) {
+        SoulInstallMethodHook(snd, NSSelectorFromString(@"sendSingleReadIMMessage:to:"), (IMP)SoulHookSendSingleRead, (IMP *)&gOrigSendSingleRead);
+        SoulInstallMethodHook(snd, NSSelectorFromString(@"sendBackGroundRead:to:"), (IMP)SoulHookSendBgRead, (IMP *)&gOrigSendBgRead);
+        SoulLog(@"block-read: sender hooked");
+        any = YES;
+    }
+    if (any) { gBlockReadDone = YES; return YES; }
+    return NO;
+}
+
+// —— F2. 收到消息自动已读（best-effort，KVC 取 sessionId）——
+static void (*gOrigDidReceiveMsgs)(id, SEL, id);
+static void SoulHookDidReceiveMsgs(id self, SEL _cmd, id msgs) {
+    if (gOrigDidReceiveMsgs) gOrigDidReceiveMsgs(self, _cmd, msgs);
+    if (!SoulDef(kFxAutoRead)) return;
+    @try {
+        if (![msgs isKindOfClass:[NSArray class]]) return;
+        NSMutableSet *sids = [NSMutableSet set];
+        for (id m in (NSArray *)msgs) {
+            id sid = nil;
+            @try { sid = [m valueForKey:@"sessionId"]; } @catch (__unused NSException *e) {}
+            if (!sid) { @try { sid = [m valueForKey:@"conversationId"]; } @catch (__unused NSException *e) {} }
+            if (sid) [sids addObject:sid];
+        }
+        if (!sids.count) return;
+        Class mgrCls = objc_getClass("SOPrivateChatIMManager");
+        id mgr = nil;
+        SEL sh = NSSelectorFromString(@"shareInstance");
+        SEL sh2 = NSSelectorFromString(@"sharedInstance");
+        if (mgrCls && [mgrCls respondsToSelector:sh]) mgr = ((id (*)(id, SEL))objc_msgSend)(mgrCls, sh);
+        else if (mgrCls && [mgrCls respondsToSelector:sh2]) mgr = ((id (*)(id, SEL))objc_msgSend)(mgrCls, sh2);
+        SEL rd = NSSelectorFromString(@"readAllMessagesWithSessionId:");
+        if (mgr && [mgr respondsToSelector:rd]) {
+            for (id sid in sids) ((void (*)(id, SEL, id))objc_msgSend)(mgr, rd, sid);
+            SoulLog(@"auto-read: marked %lu session(s)", (unsigned long)sids.count);
+        }
+    } @catch (__unused NSException *e) {}
+}
+static BOOL gAutoReadDone = NO;
+static BOOL SoulInstallAutoReadHooks(void) {
+    if (gAutoReadDone) return YES;
+    Class ad = objc_getClass("SOIMMsgAdapter");
+    if (ad) {
+        SoulInstallMethodHook(ad, NSSelectorFromString(@"didReceiveMessages:"), (IMP)SoulHookDidReceiveMsgs, (IMP *)&gOrigDidReceiveMsgs);
+        gAutoReadDone = YES;
+        SoulLog(@"auto-read: adapter hooked");
+        return YES;
+    }
+    return NO;
+}
+
+// —— G. 禁止弹「挚友」邀请 ——
+static void (*gOrigShowCloseFriendAlert)(id, SEL, id);
+static void SoulHookShowCloseFriendAlert(id self, SEL _cmd, id arg) {
+    if (SoulDef(kFxNoCloseFriend)) { SoulLog(@"no-closefriend: alert suppressed"); return; }
+    if (gOrigShowCloseFriendAlert) gOrigShowCloseFriendAlert(self, _cmd, arg);
+}
+static BOOL gCloseFriendDone = NO;
+static BOOL SoulInstallCloseFriendHooks(void) {
+    if (gCloseFriendDone) return YES;
+    Class vc = objc_getClass("AudioMatchChatViewController");
+    if (vc) {
+        SoulInstallMethodHook(vc, NSSelectorFromString(@"showAddCloseFriendAlertViewWith:"), (IMP)SoulHookShowCloseFriendAlert, (IMP *)&gOrigShowCloseFriendAlert);
+        gCloseFriendDone = YES;
+        SoulLog(@"no-closefriend: hooked");
+        return YES;
+    }
+    return NO;
+}
+
+// —— E. 语音消息：跳过「解锁语音装扮」门槛（best-effort）——
+static void (*gOrigUnlockVoiceWear)(id, SEL, id);
+static void SoulHookUnlockVoiceWear(id self, SEL _cmd, id sender) {
+    if (SoulDef(kFxVoiceUnlock)) {
+        SoulLog(@"voice-unlock: auto-unlock");
+        SEL h = NSSelectorFromString(@"hideUnlockVoiceContainerWithAnimation:");
+        if ([self respondsToSelector:h]) ((void (*)(id, SEL, BOOL))objc_msgSend)(self, h, YES);
+        return;
+    }
+    if (gOrigUnlockVoiceWear) gOrigUnlockVoiceWear(self, _cmd, sender);
+}
+static BOOL gVoiceDone = NO;
+static BOOL SoulInstallVoiceHooks(void) {
+    if (gVoiceDone) return YES;
+    Class cell = objc_getClass("SOCPVoiceMessageCell");
+    if (cell) {
+        SoulInstallMethodHook(cell, NSSelectorFromString(@"unlockVoiceWearBtnClick:"), (IMP)SoulHookUnlockVoiceWear, (IMP *)&gOrigUnlockVoiceWear);
+        gVoiceDone = YES;
+        SoulLog(@"voice-unlock: hooked");
+        return YES;
+    }
+    return NO;
+}
+
+// —— H. 回前台清除已送达通知（系统级，无类依赖）——
+static void SoulInstallClearNotif(void) {
+    static BOOL done = NO;
+    if (done) return;
+    done = YES;
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *note) {
+        if (!SoulDef(kFxClearNotif)) return;
+        [[UNUserNotificationCenter currentNotificationCenter] removeAllDeliveredNotifications];
+        SoulLog(@"clear-notif: delivered notifications cleared");
+    }];
+}
 __attribute__((constructor))
 static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"dice")) {
@@ -2204,15 +2312,22 @@ static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"snap")) { SoulInstallSnapHooksRetry(12); SoulInstallSnapProbes(); SoulInstallSnapMultiHooks(); }
     if (!SoulSkipGroup(@"wm")) { SoulInstallWatermarkHooks(); SoulInstallVideoWatermarkHooks(); }
     if (!SoulSkipGroup(@"bgm")) SoulInstallBgmHooks();
-    if (!SoulSkipGroup(@"signin")) SoulInstallSignInHooks();
     if (!SoulSkipGroup(@"net")) SoulInstallNetHooks();
     if (!SoulSkipGroup(@"share")) SoulInstallShareHooks();
     if (!SoulSkipGroup(@"blockview")) SoulInstallBlockViewHooksRetry(24);
     if (!SoulSkipGroup(@"recall")) SoulInstallAntiRecallHooksRetry(20);
     if (!SoulSkipGroup(@"limit")) SoulInstallLimitHooksRetry(24);
     if (!SoulSkipGroup(@"ownrecall")) SoulInstallOwnRecallHooksRetry(24);
+    if (!SoulSkipGroup(@"picker")) SoulRetryInstall(^BOOL{ return SoulInstallPickerHooks(); }, 12);
+    if (!SoulSkipGroup(@"splash")) SoulRetryInstall(^BOOL{ return SoulInstallSplashHooks(); }, 12);
+    if (!SoulSkipGroup(@"grouprecall")) SoulRetryInstall(^BOOL{ return SoulInstallGroupRecallHooks(); }, 12);
+    if (!SoulSkipGroup(@"blockread")) SoulRetryInstall(^BOOL{ return SoulInstallBlockReadHooks(); }, 12);
+    if (!SoulSkipGroup(@"autoread")) SoulRetryInstall(^BOOL{ return SoulInstallAutoReadHooks(); }, 12);
+    if (!SoulSkipGroup(@"closefriend")) SoulRetryInstall(^BOOL{ return SoulInstallCloseFriendHooks(); }, 12);
+    if (!SoulSkipGroup(@"voice")) SoulRetryInstall(^BOOL{ return SoulInstallVoiceHooks(); }, 12);
+    SoulInstallClearNotif();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v16. dice=%d snapMulti=%d", (int)SoulDiceOn(), (int)SoulDef(kFxSnapMulti));
+    SoulLog(@"loaded v17. dice=%d snapUnlock=%d", (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock));
 }
