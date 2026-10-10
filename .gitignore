@@ -1,3 +1,5 @@
+# 构建临时目录（publish job 用，不入库）
+artifacts/
 # 生成的签名文件（不留）
 Release.gpg
 InRelease
