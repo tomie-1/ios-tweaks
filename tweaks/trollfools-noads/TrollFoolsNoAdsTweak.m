@@ -47,18 +47,20 @@ static id tfna_valueForKey(id self, SEL _cmd, NSString *key) {
     return orig_valueForKey ? orig_valueForKey(self, _cmd, key) : nil;
 }
 
+// 写入不丢弃，而是强制成 YES：这样即使 SwiftUI 的 @AppStorage 缓存了旧值，
+// 10% 的重置写入也会被改写成 true 并触发刷新，广告位保持隐藏。
 static void tfna_setBool(id self, SEL _cmd, BOOL value, NSString *key) {
-    if (TFNAIsAdKey(key)) return;
+    if (TFNAIsAdKey(key)) value = YES;
     if (orig_setBool) orig_setBool(self, _cmd, value, key);
 }
 
 static void tfna_setObject(id self, SEL _cmd, id value, NSString *key) {
-    if (TFNAIsAdKey(key)) return;
+    if (TFNAIsAdKey(key)) value = @YES;
     if (orig_setObject) orig_setObject(self, _cmd, value, key);
 }
 
 static void tfna_setValue(id self, SEL _cmd, id value, NSString *key) {
-    if (TFNAIsAdKey(key)) return;
+    if (TFNAIsAdKey(key)) value = @YES;
     if (orig_setValue) orig_setValue(self, _cmd, value, key);
 }
 
