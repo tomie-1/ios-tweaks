@@ -10,41 +10,91 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-14
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      tweaks: ${{ steps.list.outputs.tweaks }}
     steps:
       - uses: actions/checkout@v4
+      - id: list
+        run: |
+          set -euo pipefail
+          list=$(for d in tweaks/*/; do [ -f "${d}tweak.env" ] && basename "$d"; done | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "tweaks=$list" >> "$GITHUB_OUTPUT"
+          echo "discovered: $list"
 
+  build:
+    needs: discover
+    if: needs.discover.outputs.tweaks != '[]'
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        tweak: ${{ fromJSON(needs.discover.outputs.tweaks) }}
+    steps:
+      - uses: actions/checkout@v4
       - name: Install tools
         run: brew install dpkg ldid || brew install dpkg
-
-      - name: Build tweaks
+      - name: Short sha
+        id: vars
+        run: echo "sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Build ${{ matrix.tweak }}
         run: |
           set -euo pipefail
           VERSION="1.0.0"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          mkdir -p dist
-          shopt -s nullglob
-          for d in tweaks/*/; do
-            [ -f "${d}tweak.env" ] || continue
-            echo "=== building $d (version $VERSION) ==="
-            VERSION="$VERSION" bash scripts/build_tweak.sh "$d" dist
-          done
-
-      - name: Short sha
-        id: vars
-        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifacts
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+          mkdir -p "dist/${{ matrix.tweak }}"
+          VERSION="$VERSION" bash scripts/build_tweak.sh "tweaks/${{ matrix.tweak }}" "dist/${{ matrix.tweak }}"
+      - name: Upload artifact (${{ matrix.tweak }})
         uses: actions/upload-artifact@v4
         with:
-          name: tweaks-${{ steps.vars.outputs.short_sha }}
-          path: dist/*
+          name: ${{ matrix.tweak }}-${{ steps.vars.outputs.sha }}
+          path: dist/${{ matrix.tweak }}/*
+          if-no-files-found: error
 
+  publish:
+    needs: [discover, build]
+    if: needs.discover.outputs.tweaks != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish to repo branch
+        run: |
+          set -euo pipefail
+          cp scripts/build_repo.sh /tmp/build_repo.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin repo
+          git checkout -B repo origin/repo
+          rm -rf debs Packages Packages.gz Packages.bz2 Packages.xz Release
+          mkdir -p debs scripts
+          shopt -s nullglob
+          for f in artifacts/*.deb; do
+            arch=$(dpkg-deb -f "$f" Architecture)
+            mkdir -p "debs/$arch"
+            cp "$f" "debs/$arch/"
+          done
+          cp /tmp/build_repo.sh scripts/build_repo.sh
+          chmod +x scripts/build_repo.sh
+          bash scripts/build_repo.sh .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to publish"
+          else
+            git commit -m "repo: update packages (run ${GITHUB_RUN_NUMBER}, ${GITHUB_SHA::7})"
+            git push origin repo
+          fi
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: artifacts/*
