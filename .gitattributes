@@ -1,0 +1,9 @@
+# APT 索引必须保持 LF，否则 SHA256 校验对不上
+* text=auto
+Packages     -text
+Packages.gz  -text
+Packages.bz2 -text
+Packages.xz  -text
+Release      -text
+*.deb        -text
+*.sh         text eol=lf

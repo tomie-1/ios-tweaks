@@ -1,0 +1,16 @@
+Origin: tomie iOS Repo
+Label: tomie iOS Repo
+Description: tomie personal iOS tweaks
+Suite: stable
+Version: 1.0
+Codename: ios
+Architectures: iphoneos-arm iphoneos-arm64 iphoneos-arm64e
+Components: main
+MD5Sum:
+ 673482bee6fea75f337e371226c602f3             3693 Packages
+ cfcc231cdb2ec0bf14e7b40b1a4d280d             1461 Packages.gz
+ 1f3931c2914d4d560f18958f4f5f7daf             1384 Packages.xz
+SHA256:
+ df80921a61bd12e4bdd515252a873a14a7cfc60297c08d1c4cb40b7c338a8665             3693 Packages
+ e57bd1223f83dabfe1bcb1d9193a8b1cafd9e610a077472469d671af4e5dcf59             1461 Packages.gz
+ 0d4157de3c98dccba3e750a731234348bfae162d1ff72fb08956eb833f15d1f6             1384 Packages.xz
