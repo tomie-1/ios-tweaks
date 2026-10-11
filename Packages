@@ -8,11 +8,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.soulfx.souldicetweak_iphoneos-arm.deb
-Size: 32152
-MD5sum: 55ec232f851800675e08f4affe35533d
-SHA1: a4fa002fa2e155b6f1d9bf48cdae98ebd040573a
-SHA256: f3115e82f1990e382c484a5991ab165eda25dd7aafebdb84538c86b971c9dd11
-SHA512: 1be3e9428a9ccbeb1fa7917be64c50d32daeddf3643650e7f9eb96f574ad1dad9864efec332278e47d4aab354bfd39fb17006e83a5168281ce575500a81952bd
+Size: 32160
+MD5sum: ee0661c17ebae6338a6321881d056819
+SHA1: a485608df391698b325736bb02b5314447496efc
+SHA256: 8f774670ed80ca1acaabae2b8a61ee06f29bc7576816205c573fc5f58f42d526
+SHA512: 5f8d737b3631131a41b3da117e6a4aea408fa90268d19f19a5225b9718314bf7a52978d825e62e9128681e135b54b0ccc0fa1b5ae24903110dda674d64550f17
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -24,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.trollfoolsnoads_iphoneos-arm.deb
-Size: 3548
-MD5sum: 14749eda91ef74b9878c100a7d40d313
-SHA1: 24bccffef50e84d0e40cffef27c527c15f8cd24b
-SHA256: 552a5ff14ce1c540e6ee65526e7b2f227fa0a1343681c2e346c96cbbba69bdd7
-SHA512: 92f5cadc2b2e29b9ce13e3a9cc746b34ac1522c2f89e955c8665bbb59c20a8d6dd530b81ec863804f6b722a72d2f926d412975b5a91b09a3883588c3f1df199e
+Size: 3552
+MD5sum: d90dc4c8c10ae67ad1a3f3b09066624d
+SHA1: 9741e947df488887a528c64371840160ed69eb80
+SHA256: 84d0b5ab40678c49ec24a0746617b4ec434dc3141ba9e4c5e328c6684bf007a7
+SHA512: 04c2d9236ff239221639cf911beab15a1f8347573f919d8a05dcdcc8ff7d0d95e0a51bd139d636b55eb5cd1f2a99066eccc01c311d032070866d7dac0d7024ae
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -40,11 +40,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.soulfx.souldicetweak_iphoneos-arm64.deb
-Size: 32172
-MD5sum: 054068bf505ce3cd22658e34ee727980
-SHA1: a7cd2039841762c6dffe8a354da61a9f946818a1
-SHA256: e5945421636cd4b3c89d3de4144e26e980f77baaed8ca94f8e8953b0ae0f1855
-SHA512: 0349915ec391c07ccd1bacc51bd6b294ace9d5a1a42cbf91a6e97b687644c718975471a1a1fe03f44f73c1fd0fc71a147110b9bfdbfb4f482d6add703416837f
+Size: 32212
+MD5sum: e9e011c9f7d3666874dda508ba5ebfee
+SHA1: f8d7c1d96f4c2b920f805ea5611d4e69b16a1261
+SHA256: 016159e922f84790c4909d7b92423ac59c335e7351cbdc836d079952d02f2a66
+SHA512: 614eb13515dc8c0e10e39312cc15c5bd8414698ef30e5c6e54310618317036f282b4688fddc9ae1cf3fe508f94a16c499e20b2d3bfe61eccc0995dfb0c70174a
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -56,11 +56,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.trollfoolsnoads_iphoneos-arm64.deb
-Size: 3576
-MD5sum: 9c4eea22784ca87064b7207b010c2ebf
-SHA1: b667e438843d8dbcda18900a77e5160aaa77ac3a
-SHA256: 4b5bab0260cab91d2652b416cb2b52270d817449881d70659000143b0fc6cbd6
-SHA512: 8ad3f1ed676cecd662cd74087e24392b45fe1d7bbeca8d1228c8fa2617fc14603d1d2fd57987b34318b4e2ed7c505df0f2c7f8509bab5f776a2ad85b21da6151
+Size: 3580
+MD5sum: ac9c76d857baa50bab22008c3fbc4aac
+SHA1: 8cece3383479113f911eb0cab242c03c0bf464bf
+SHA256: 3b3725787fbee9b588852f0272bdd6f6bdfca3dfa48b3d0ae92d4375bf289621
+SHA512: a7f40fc329d44811b4eddcf61ee62577bc8f625666c44a9842f18c145e96878da61c4b3e165e21110d5a6fbd91d6f0354e4fcf0602d1c0806dbc6edc772e6024
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -72,11 +72,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.soulfx.souldicetweak_iphoneos-arm64e.deb
-Size: 32168
-MD5sum: 7ae3b2455f73bc3b8f74cf4642a453e9
-SHA1: 38637c1382f6f8ce2d89c3d1d985023c4ec54510
-SHA256: 7cff62656b7f4563a0df86a1635c0532677b4192cc083b92fb4d094bf7ad8e10
-SHA512: fa94ae9c1804a7e0e255583996fcde3f504384c8aaf6707801d6ee3a327793fd093a356069f99dd436854c10b64a94ed148f0927ccbe7595a7675352153175f7
+Size: 32156
+MD5sum: a25b9852df93f0f2e13c1cfdde66bdef
+SHA1: 952d3f594fabfbd0d502584ae0021e9b56f0e724
+SHA256: 5c6423f8109e1a8f52af5548704b7b56d480a1b6cde37b5792946d8ae18d4670
+SHA512: 3757729b2cb8857639279dd0202eee9305a88e11ff4b08260c815caebe85db20712852e14f85460cac2e6110f52b60130b0c8ed2abb36f35dd72bd008cdcdf7c
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -89,8 +89,8 @@ Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.trollfoolsnoads_iphoneos-arm64e.deb
 Size: 3552
-MD5sum: daf44905bf3b50431cc156fd5ae336e7
-SHA1: 91264ad38fdaa4793e1302824ff79531c330c4f7
-SHA256: 5769daa495444ebb3c1f20729c6ca7f48665537b6cc6ec6ebea65a25ce870f55
-SHA512: ae277f1ce7ff1613b4cb7875a2d1ae7ee6652cb634c8d5a1b22a865ce5b7777b74675c87483a7fbbfc216545adac8f84187a83045dade3c69d01ef3a9b83d50b
+MD5sum: 5344cff9ff521344a69bedef7abd529b
+SHA1: 21ae861a60edaf91d4be9ddc0f9a0149f5a209df
+SHA256: be3360db9817bfd864c89c240665e37785b2f80549de53705ca3598a5a9c1004
+SHA512: 9dd479ed8558b3a1fd1c9fe451f4ff85dad77893f1853c6df44439abc5cfd18ed7bc4fc5d8cef220d56cf483c0b68adee95d2c0fb00dcbb844a49725aae52927
 
