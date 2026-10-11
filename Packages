@@ -24,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.trollfoolsnoads_iphoneos-arm.deb
-Size: 3552
-MD5sum: d90dc4c8c10ae67ad1a3f3b09066624d
-SHA1: 9741e947df488887a528c64371840160ed69eb80
-SHA256: 84d0b5ab40678c49ec24a0746617b4ec434dc3141ba9e4c5e328c6684bf007a7
-SHA512: 04c2d9236ff239221639cf911beab15a1f8347573f919d8a05dcdcc8ff7d0d95e0a51bd139d636b55eb5cd1f2a99066eccc01c311d032070866d7dac0d7024ae
+Size: 3548
+MD5sum: 6d140f0ebd417e1957ecd870993eb1e6
+SHA1: 0ac25dfaa91f51456c3166bfd45103fb56d6291c
+SHA256: 3a80cc2ac5b6ea9df1d9dfeafd6f254fc6fa5cb25b886360ebbf1fb441acd92b
+SHA512: 045f13d6f2dc99f30893220e62454564163e1d08168568abab2433b1ea1d659bb715be485620dd200a8f0966c611e0ad2bd5509895e3d6d0278c49d91bb4f01d
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -56,11 +56,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.trollfoolsnoads_iphoneos-arm64.deb
-Size: 3580
-MD5sum: ac9c76d857baa50bab22008c3fbc4aac
-SHA1: 8cece3383479113f911eb0cab242c03c0bf464bf
-SHA256: 3b3725787fbee9b588852f0272bdd6f6bdfca3dfa48b3d0ae92d4375bf289621
-SHA512: a7f40fc329d44811b4eddcf61ee62577bc8f625666c44a9842f18c145e96878da61c4b3e165e21110d5a6fbd91d6f0354e4fcf0602d1c0806dbc6edc772e6024
+Size: 3576
+MD5sum: 10286480f040d7e5d51177373a1c4c26
+SHA1: c456ce8170e982c81ccb0754a4a6dc5c267bf93d
+SHA256: fd8b8b20a52490d8c65be224c8b2b90ff52136f24c8d2e3c060e2e414addbfb1
+SHA512: 3fed530e6dd56f5fbef118a4f6d31b89a015a4660314e3d30507d896aeadb0b36c0d58543d4b5660e277cdbde3c8fcd1acb99584944c951c625f44bf417e8374
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -88,9 +88,9 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.trollfoolsnoads_iphoneos-arm64e.deb
-Size: 3552
-MD5sum: 5344cff9ff521344a69bedef7abd529b
-SHA1: 21ae861a60edaf91d4be9ddc0f9a0149f5a209df
-SHA256: be3360db9817bfd864c89c240665e37785b2f80549de53705ca3598a5a9c1004
-SHA512: 9dd479ed8558b3a1fd1c9fe451f4ff85dad77893f1853c6df44439abc5cfd18ed7bc4fc5d8cef220d56cf483c0b68adee95d2c0fb00dcbb844a49725aae52927
+Size: 3556
+MD5sum: 5d96152e4436bb1acfef923c6f190dd9
+SHA1: 477a48e0464c9cf802ed8269867e81221a382f71
+SHA256: 61acc5bdbcb14050ea903c8644b7df67d1af28c0ff44038fd4dffeacdec7d18f
+SHA512: acb803eabbdfeca50db7059743e46f2e0c3f7f19beb3ab6cea2a6397bdb1fa5ac8145efd20777978b08303866f3573095470f4b6f9d6b6e4c0b340da397a9740
 
