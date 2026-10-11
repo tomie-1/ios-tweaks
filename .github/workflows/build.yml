@@ -3,25 +3,83 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    paths:
+      - "tweaks/**"
+      - "scripts/**"
+      - ".github/workflows/build.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   discover:
     runs-on: ubuntu-latest
     outputs:
-      tweaks: ${{ steps.list.outputs.tweaks }}
+      tweaks: ${{ steps.plan.outputs.tweaks }}
+      full: ${{ steps.plan.outputs.full }}
     steps:
       - uses: actions/checkout@v4
-      - id: list
+        with:
+          fetch-depth: 0
+      - id: plan
+        name: Plan changed tweaks
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
-          list=$(for d in tweaks/*/; do [ -f "${d}tweak.env" ] && basename "$d"; done | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "tweaks=$list" >> "$GITHUB_OUTPUT"
-          echo "discovered: $list"
+
+          all=$(for d in tweaks/*/; do [ -f "${d}tweak.env" ] && basename "$d"; done | sort)
+
+          full=false
+          reason=""
+          if [ "$EVENT" != "push" ]; then
+            full=true; reason="event=$EVENT"
+          elif [ "$REF" != "refs/heads/main" ]; then
+            full=true; reason="ref=$REF"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            full=true; reason="initial push"
+          elif ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            full=true; reason="base commit missing (force push?)"
+          fi
+
+          changed=""
+          if [ "$full" = false ]; then
+            infra=$(git diff --name-only "$BEFORE" "$SHA" -- scripts .github/workflows || true)
+            if [ -n "$infra" ]; then
+              full=true; reason="build infra changed"
+            else
+              changed=$(git diff --name-only "$BEFORE" "$SHA" -- tweaks \
+                | awk -F/ 'NF > 2 && $1 == "tweaks" { print $2 }' | sort -u || true)
+            fi
+          fi
+
+          if [ "$full" = true ]; then
+            list="$all"
+          else
+            list=""
+            for t in $all; do
+              if printf '%s\n' "$changed" | grep -qxF -- "$t"; then
+                list="${list}${t}"$'\n'
+              fi
+            done
+          fi
+
+          json=$(printf '%s' "$list" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "mode: full=$full${reason:+ ($reason)}"
+          echo "tweaks: $json"
+          {
+            echo "full=$full"
+            echo "tweaks=$json"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: discover
@@ -63,11 +121,17 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-      - name: Publish to repo branch
+      - name: List packages declared in source
+        run: |
+          set -euo pipefail
+          : > /tmp/src_ids.txt
+          for f in tweaks/*/tweak.env; do
+            [ -f "$f" ] || continue
+            ( unset PKG_ID; . "$f"; echo "$PKG_ID" )
+          done >> /tmp/src_ids.txt
+          sort -u /tmp/src_ids.txt -o /tmp/src_ids.txt
+          echo "declared packages:"; sed 's/^/  /' /tmp/src_ids.txt
+      - name: Switch to repo branch
         run: |
           set -euo pipefail
           cp scripts/build_repo.sh /tmp/build_repo.sh
@@ -75,16 +139,48 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin repo
           git checkout -B repo origin/repo
-          rm -rf debs Packages Packages.gz Packages.bz2 Packages.xz Release
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish to repo branch
+        run: |
+          set -euo pipefail
           mkdir -p debs scripts
+          cp /tmp/build_repo.sh scripts/build_repo.sh
+          chmod +x scripts/build_repo.sh
+
           shopt -s nullglob
+          rebuilt=""
+          for f in artifacts/*.deb; do
+            rebuilt="$rebuilt$(dpkg-deb -f "$f" Package)"$'\n'
+          done
+          rebuilt=$(printf '%s' "$rebuilt" | sort -u | sed '/^$/d')
+          echo "rebuilt packages:"; printf '%s\n' "$rebuilt" | sed 's/^/  /'
+
+          echo "drop stale debs of rebuilt packages:"
+          while IFS= read -r pkg; do
+            [ -n "$pkg" ] || continue
+            find debs -type f -name "${pkg}_*.deb" -print -delete
+          done <<< "$rebuilt"
+
+          echo "prune packages no longer declared in source:"
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            pkg=$(dpkg-deb -f "$f" Package 2>/dev/null || echo "")
+            if ! grep -qxF -- "$pkg" /tmp/src_ids.txt; then
+              echo "  prune $f"
+              rm -f "$f"
+            fi
+          done < <(find debs -type f -name '*.deb' | sort)
+
           for f in artifacts/*.deb; do
             arch=$(dpkg-deb -f "$f" Architecture)
             mkdir -p "debs/$arch"
             cp "$f" "debs/$arch/"
+            chmod 644 "debs/$arch/$(basename "$f")"
           done
-          cp /tmp/build_repo.sh scripts/build_repo.sh
-          chmod +x scripts/build_repo.sh
+
           bash scripts/build_repo.sh .
           git add -A
           if git diff --cached --quiet; then
