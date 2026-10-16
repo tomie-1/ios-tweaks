@@ -14,6 +14,22 @@ SHA1: a485608df391698b325736bb02b5314447496efc
 SHA256: 8f774670ed80ca1acaabae2b8a61ee06f29bc7576816205c573fc5f58f42d526
 SHA512: 5f8d737b3631131a41b3da117e6a4aea408fa90268d19f19a5225b9718314bf7a52978d825e62e9128681e135b54b0ccc0fa1b5ae24903110dda674d64550f17
 
+Package: com.tomie.tftool
+Name: TFTool
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: TestFlight 批量「停止测试」：多选列表 + 测试版/正式版安装状态
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm/com.tomie.tftool_iphoneos-arm.deb
+Size: 30824
+MD5sum: 683efbb72e3110b600930770503d3053
+SHA1: e382cdd7aa4997ede86f03404be89f482db4c3a0
+SHA256: b8c2804e6198ab585a63a6f875bf2f6aa8d8c66638f255ca5493b3e6a116982c
+SHA512: 0612262d2115181f6e384be7df92898430e330cbbf32063ee3b0c5a1e962215e567ea4676f95aded7a33508a095933ca28a7ec136609bdeb08a431d6a63868ad
+
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
 Version: 1.0.0
@@ -46,6 +62,22 @@ SHA1: f8d7c1d96f4c2b920f805ea5611d4e69b16a1261
 SHA256: 016159e922f84790c4909d7b92423ac59c335e7351cbdc836d079952d02f2a66
 SHA512: 614eb13515dc8c0e10e39312cc15c5bd8414698ef30e5c6e54310618317036f282b4688fddc9ae1cf3fe508f94a16c499e20b2d3bfe61eccc0995dfb0c70174a
 
+Package: com.tomie.tftool
+Name: TFTool
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: TestFlight 批量「停止测试」：多选列表 + 测试版/正式版安装状态
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64/com.tomie.tftool_iphoneos-arm64.deb
+Size: 30860
+MD5sum: a80328bfef6f20b305d1dd1118abf985
+SHA1: 29d53965f1af7519cd9e1df6432cca2c6697a1f7
+SHA256: bb2045de6354e3bf30a4d30784699b8e05258463103b6754b19753d6a9bf1b9d
+SHA512: f5c7a76958c467a9cdf967abd9a084e047380ad65d056388ce4e76d40488fa58cc09c121f01600a70431c1e50117e5ca35cdb39be826af0cd2c6a379ad94876b
+
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
 Version: 1.0.0
@@ -77,6 +109,22 @@ MD5sum: a25b9852df93f0f2e13c1cfdde66bdef
 SHA1: 952d3f594fabfbd0d502584ae0021e9b56f0e724
 SHA256: 5c6423f8109e1a8f52af5548704b7b56d480a1b6cde37b5792946d8ae18d4670
 SHA512: 3757729b2cb8857639279dd0202eee9305a88e11ff4b08260c815caebe85db20712852e14f85460cac2e6110f52b60130b0c8ed2abb36f35dd72bd008cdcdf7c
+
+Package: com.tomie.tftool
+Name: TFTool
+Version: 1.0.0
+Architecture: iphoneos-arm64e
+Description: TestFlight 批量「停止测试」：多选列表 + 测试版/正式版安装状态
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64e/com.tomie.tftool_iphoneos-arm64e.deb
+Size: 30828
+MD5sum: 18d6db574febc743f0cf5b900276b9d1
+SHA1: f3946da555b9add321ab7dcf36f806cbacb569f7
+SHA256: 5018095c243560fb45c480f2279683114b46b26c7cf3a62965bcb620db4c1ac5
+SHA512: 4f10ebc4e8ea7866ed56636ec39e035b5663dece6d6156a17352c3c2f42bb2e90ef04e510516eeea71aaeafb9109d0ac0784e471ab8fc6db521b33c35c8d5bf6
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
