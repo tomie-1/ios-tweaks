@@ -44,3 +44,11 @@ scripts/build_tweak.sh 通用构建脚本
 
   配置统一存放在 App 沙盒 `Library/Preferences/SoulFX/`（`config.plist` / `soulfx.log` /
   `recall.plist`），不改动原 App 自身配置。旧版键名（`soul_fx_*_v1`）启动时自动迁移。
+
+- **tftool** — TestFlight 批量「停止测试」（`com.tomie.tftool`）：
+  - 入口：TestFlight 列表页顶部、原生「兑换」按钮左边的蓝色「批量」（位置按无障碍树取到的「兑换」frame 对齐）；
+  - 多选：点击单行勾选；**长按后拖动连续多选**（锚点区间模型：按住那行决定这一笔是「选」还是「取消」，往回滑区间缩小会撤销刚选上的，滑过锚点继续走则反向继续；拖到列表上下边缘自动滚动）；顶栏 `全选/全不选`、`⟳ 刷新`、`取消`（清空勾选），`停止测试` 在勾选 ≥5 或全选时二次确认；中间标题显示 `已选 N 个`；
+  - 数据、分组、图标、文案全部取自 TestFlight 自己：`OASAppList`（列表，条目是 `TFApp`）、`OASAppListSection.sectionType` 位标志 + `OASLocalizable`（分组标题）、`OASIconURLImageView` + `TFApp.latestAppBuild`（图标，走它自己的图标服务与缓存）；
+  - 执行走 App 自己的入口：`[[OASAppContext alloc] initWithAppStub:app andSessionContext:list.sessionContext]` → `-unsubscribeWithCompletion:`（内部即 `OASInviteManager -unsubscribeFromApp:withCompletion:`，与手动点详情页「停止测试」同一条路径）；
+  - 状态气泡：绿色 `测试版`（`OASAppContext.installedBuildGroupOrVersion` 有值）、灰色 `正式版`（`LSApplicationWorkspace` 里有但没装测试版）；
+  - 所有私有类/selector 都做了存在性检查，TestFlight 升级后最坏是**静默失效而非崩溃**。
