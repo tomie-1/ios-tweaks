@@ -8,11 +8,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.soulfx.souldicetweak_iphoneos-arm.deb
-Size: 32160
-MD5sum: ee0661c17ebae6338a6321881d056819
-SHA1: a485608df391698b325736bb02b5314447496efc
-SHA256: 8f774670ed80ca1acaabae2b8a61ee06f29bc7576816205c573fc5f58f42d526
-SHA512: 5f8d737b3631131a41b3da117e6a4aea408fa90268d19f19a5225b9718314bf7a52978d825e62e9128681e135b54b0ccc0fa1b5ae24903110dda674d64550f17
+Size: 32176
+MD5sum: d38db9ebdefa542cba75060ad7035a58
+SHA1: a235988fb2907d2bfbc2bfc43f673e20728b5a60
+SHA256: 2552d5159dc5df27708df65de4ebb8e90d1b7dcf91579aa1e40c5784f0496974
+SHA512: df0418911f91d0538613abc7f2a814e879bbee7fa4df9407bf87d5544f8b769296c9b5a1f26a4768310eca39631cf68c684aaed46147b1aa632e1be157a2bb9a
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -56,11 +56,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.soulfx.souldicetweak_iphoneos-arm64.deb
-Size: 32212
-MD5sum: e9e011c9f7d3666874dda508ba5ebfee
-SHA1: f8d7c1d96f4c2b920f805ea5611d4e69b16a1261
-SHA256: 016159e922f84790c4909d7b92423ac59c335e7351cbdc836d079952d02f2a66
-SHA512: 614eb13515dc8c0e10e39312cc15c5bd8414698ef30e5c6e54310618317036f282b4688fddc9ae1cf3fe508f94a16c499e20b2d3bfe61eccc0995dfb0c70174a
+Size: 32208
+MD5sum: 2aa89b7139c95df1a8c2c668dad07ccd
+SHA1: 3343c3d4d5d8faac17604ec8937663f5cc8f44c6
+SHA256: fa83be888e4a03cd886e01f9977608e577ff94827cbfb19d9d24cd3e5bafa55d
+SHA512: 857a7f85d5a968e03245b5260ca996355a90df25429fe06bae9389563f9c46b81d28eaa76dcc3ffbf64b615abd10dd2eae6c7a1a536b1f5b2d03d968e660f9f8
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -104,11 +104,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.soulfx.souldicetweak_iphoneos-arm64e.deb
-Size: 32156
-MD5sum: a25b9852df93f0f2e13c1cfdde66bdef
-SHA1: 952d3f594fabfbd0d502584ae0021e9b56f0e724
-SHA256: 5c6423f8109e1a8f52af5548704b7b56d480a1b6cde37b5792946d8ae18d4670
-SHA512: 3757729b2cb8857639279dd0202eee9305a88e11ff4b08260c815caebe85db20712852e14f85460cac2e6110f52b60130b0c8ed2abb36f35dd72bd008cdcdf7c
+Size: 32164
+MD5sum: e42a9f728898b76623c5963a5f156bdb
+SHA1: b5456f7f543ecb4b84fb182eeac4f111a413d302
+SHA256: 0da677be7ff93f517a3f9d683494778bde405cd90c52879f76f62c66b6cdb6f9
+SHA512: cd208015e6cee1b3959cc4d3b0459a244615259a52d1557be02a0d26fa6d9ab58bb89fc62d9547ca7c0e89c9e1798c9e8d09657577c1475cf449f2a540bcb194
 
 Package: com.tomie.tftool
 Name: TFTool
