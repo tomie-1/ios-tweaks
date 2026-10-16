@@ -7,6 +7,7 @@
 ## 目录结构
 
 ```
+# 目录名统一为“包名最后一段”，例如 tweaks/tftool ↔ com.tomie.tftool
 tweaks/<name>/
   tweak.env            插件配置（名字 / 包名 / 源文件 / 过滤器 ...）
   *.m                  源码（纯 Objective-C 运行时 hook）
