@@ -16,6 +16,19 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+static NSMutableString *gLog;
+static void KYLog(NSString *fmt, ...) {
+    @try {
+        va_list ap; va_start(ap, fmt);
+        NSString *line = [[NSString alloc] initWithFormat:fmt arguments:ap];
+        va_end(ap);
+        if (!gLog) gLog = [NSMutableString string];
+        [gLog appendFormat:@"%@\n", line];
+        NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/kgyouthlite.log"];
+        [gLog writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    } @catch (NSException *e) {}
+}
+
 static NSString *const kEnabledKey = @"com.tomie.kgyouthlite.enabled";
 
 static BOOL kyEnabled(void) {
@@ -36,12 +49,17 @@ static void kyHidePromos(id vc) {
     for (NSString *k in keys) {
         @try {
             id v = [vc valueForKey:k];
-            if ([v isKindOfClass:[UIView class]]) ((UIView *)v).hidden = YES;
-        } @catch (NSException *e) {}
+            if ([v isKindOfClass:[UIView class]]) {
+                ((UIView *)v).hidden = YES;
+                KYLog(@"[hide] %@ -> %@ hidden", k, NSStringFromClass([v class]));
+            } else {
+                KYLog(@"[hide] %@ -> %@", k, v ? NSStringFromClass([v class]) : @"(nil)");
+            }
+        } @catch (NSException *e) { KYLog(@"[hide] %@ 异常 %@", k, e.name); }
     }
 }
 
-static IMP o_viewDidLoad, o_refreshVipUI, o_refreshActive, o_showTip;
+static IMP o_viewDidLoad, o_refreshVipUI, o_refreshActive, o_showTip, o_refreshPlayState, o_refreshTopStatusBar;
 static IMP o_checkSplash, o_showSplash;
 
 static void h_viewDidLoad(id self, SEL _cmd) {
@@ -56,6 +74,15 @@ static void h_refreshActive(id self, SEL _cmd, BOOL active) {
     ((void (*)(id, SEL, BOOL))o_refreshActive)(self, _cmd, active);
     kyHidePromos(self);          // 仅隐藏推广；不碰 playControl / clickPlayOrPause:
 }
+static void h_refreshPlayState(id self, SEL _cmd) {
+    ((void (*)(id, SEL))o_refreshPlayState)(self, _cmd);
+    kyHidePromos(self);
+}
+static void h_refreshTopStatusBar(id self, SEL _cmd) {
+    ((void (*)(id, SEL))o_refreshTopStatusBar)(self, _cmd);
+    kyHidePromos(self);
+}
+
 static void h_showTip(id self, SEL _cmd) { /* 不弹“看视频领 VIP”提示 */ }
 
 static BOOL h_checkSplash(id self, SEL _cmd) { return NO; }
@@ -64,8 +91,9 @@ static void h_showSplash(id self, SEL _cmd, id opt) { /* 不展示开屏 */ }
 #pragma mark - 双指长按：底栏精简
 
 static UIView *kyFindView(UIView *root, NSString *clsName, int depth) {
-    if (!root || depth > 30) return nil;
-    if ([NSStringFromClass([root class]) isEqualToString:clsName]) return root;
+    if (!root || depth > 40) return nil;
+    Class want = NSClassFromString(clsName);
+    if (want && [root isKindOfClass:want]) return root;
     for (UIView *sub in root.subviews) {
         UIView *r = kyFindView(sub, clsName, depth + 1);
         if (r) return r;
@@ -89,10 +117,12 @@ static UIWindow *kyKeyWindow(void) {
     if (g.state != UIGestureRecognizerStateBegan) return;
     UIWindow *w = kyKeyWindow();
     UIView *bar = kyFindView(w, @"YouthNewBarView", 0);
+    KYLog(@"[bar] 查找 YouthNewBarView -> %@", bar ? NSStringFromClass([bar class]) : @"(nil)");
     if (!bar) return;
     static BOOL hidden = NO;
     hidden = !hidden;
     SEL sel = NSSelectorFromString(hidden ? @"hideNormalUI" : @"showNormalUI");
+    KYLog(@"[bar] 调用 %@", hidden ? @"hideNormalUI" : @"showNormalUI");
     if ([bar respondsToSelector:sel]) {
         ((void (*)(id, SEL))objc_msgSend)(bar, sel);
         UINotificationFeedbackGenerator *fg = [[UINotificationFeedbackGenerator alloc] init];
@@ -128,7 +158,8 @@ __attribute__((constructor)) static void kgyouthlite_init(void) {
         (void)0;
     } @catch (NSException *e) {}
 
-    if (!kyEnabled()) return;
+    KYLog(@"=== KGYouthLite 加载 %@ ===", [[NSBundle mainBundle] bundleIdentifier]);
+    if (!kyEnabled()) { KYLog(@"[init] 开关关闭"); return; }
 
     Class pc = objc_getClass("YouthAlbumPlayPageController");
     Method m;
@@ -140,6 +171,12 @@ __attribute__((constructor)) static void kgyouthlite_init(void) {
     }
     if (pc && (m = class_getInstanceMethod(pc, sel_registerName("refreshActiveStatus:")))) {
         o_refreshActive = method_getImplementation(m); method_setImplementation(m, (IMP)h_refreshActive);
+    }
+    if (pc && (m = class_getInstanceMethod(pc, sel_registerName("refreshPlayState")))) {
+        o_refreshPlayState = method_getImplementation(m); method_setImplementation(m, (IMP)h_refreshPlayState);
+    }
+    if (pc && (m = class_getInstanceMethod(pc, sel_registerName("refreshTopStatusBar")))) {
+        o_refreshTopStatusBar = method_getImplementation(m); method_setImplementation(m, (IMP)h_refreshTopStatusBar);
     }
     if (pc && (m = class_getInstanceMethod(pc, sel_registerName("showWatchVideoToVipTip")))) {
         o_showTip = method_getImplementation(m); method_setImplementation(m, (IMP)h_showTip);
@@ -153,6 +190,7 @@ __attribute__((constructor)) static void kgyouthlite_init(void) {
         o_showSplash = method_getImplementation(m); method_setImplementation(m, (IMP)h_showSplash);
     }
 
+    KYLog(@"[init] 安装完成: 播放页=%@ 开屏=%@", pc ? @"有" : @"无", sm ? @"有" : @"无");
     gToggle = [[KYToggle alloc] init];
     [[NSNotificationCenter defaultCenter] addObserverForName:@"UIWindowDidBecomeKeyNotification"
                                                       object:nil queue:NSOperationQueue.mainQueue
