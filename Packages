@@ -8,27 +8,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.soulfx.souldicetweak_iphoneos-arm.deb
-Size: 32176
-MD5sum: d38db9ebdefa542cba75060ad7035a58
-SHA1: a235988fb2907d2bfbc2bfc43f673e20728b5a60
-SHA256: 2552d5159dc5df27708df65de4ebb8e90d1b7dcf91579aa1e40c5784f0496974
-SHA512: df0418911f91d0538613abc7f2a814e879bbee7fa4df9407bf87d5544f8b769296c9b5a1f26a4768310eca39631cf68c684aaed46147b1aa632e1be157a2bb9a
-
-Package: com.tomie.kgyouthlite
-Name: KGYouthLite
-Version: 1.0.0
-Architecture: iphoneos-arm
-Description: 酷狗概念版精简：隐藏播放页推广/免费听按钮、双指长按精简底栏、跳过开屏广告；不触发任何自动播放
-Maintainer: tomie
-Author: tomie
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm/com.tomie.kgyouthlite_iphoneos-arm.deb
-Size: 6632
-MD5sum: 48347d60391bd33ea91679f7e8a1168c
-SHA1: 8a176833d5d7aedcd2fdcd82d746b517c9e8caeb
-SHA256: 26357f6d02686c4dcb9e3c0da6888b9db9ae270b41cbdce72b9c48494e33efee
-SHA512: 903776bcf1fd0f55368cf96077237bdea976c86e56de60caea248bf395d9792f23205dca042e19ee0784ccb6bfcc4387d3bfcfbe0c309df945eb5188cca32057
+Size: 32164
+MD5sum: 397b92cab37a7bba9f550af26c2fc067
+SHA1: 6215b36bee6414f111fcaaf47dfc031b4063b532
+SHA256: 3991fc2dde7a8bbe3c1444ec552a9610e5d0cca6d5027a72059c21466ef186cc
+SHA512: 65c7c259ed280264cf3a974034964c98f3aa93fecd7ac12dceccc21cac130da6d18486cda59830ee92ea7a21c65943b8431685f8292f3dd586efd09f9a73bc93
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -40,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tftool_iphoneos-arm.deb
-Size: 30824
-MD5sum: 683efbb72e3110b600930770503d3053
-SHA1: e382cdd7aa4997ede86f03404be89f482db4c3a0
-SHA256: b8c2804e6198ab585a63a6f875bf2f6aa8d8c66638f255ca5493b3e6a116982c
-SHA512: 0612262d2115181f6e384be7df92898430e330cbbf32063ee3b0c5a1e962215e567ea4676f95aded7a33508a095933ca28a7ec136609bdeb08a431d6a63868ad
+Size: 30840
+MD5sum: 257b269fe724273e712d50290bea2fd3
+SHA1: 80e5eeec22cf253a995f9ff21b2279cf929663a5
+SHA256: 6c42720494818e088e8f689c7dc09e589f0ff3f9a3ff22206f89679106119535
+SHA512: a92a9e9d906ce6cba32f1fda794839ec14305e8984cc49ffe09665879aa026fa49608bd540e4ebc29c2755d90cd0e34e5fdf00b1b397eec37a6e79f3255a4d26
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -56,11 +40,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.trollfoolsnoads_iphoneos-arm.deb
-Size: 3548
-MD5sum: 8d9dbbff691abb3f7a3f1c73213b7923
-SHA1: ed86051752ca35432f549c57b2e0d672e665c29a
-SHA256: e048c28549393d239cd025ad9b1a132d1eaee05cc1fecf2e976174273cfde6ee
-SHA512: 2ef782a63cfefd1be712ffa4d9f2ed29f9fbec144dda2f6489ca70c4652e74741be62c3d5c9efbe8d0a89b4da48e6fdb34efbaa78678407ce2a019eb1af6d21e
+Size: 3552
+MD5sum: b02b02eb98686860f275cb9bc55ab227
+SHA1: 136db353ec6cae4ba8d9b78a9f2249371e376449
+SHA256: 26cdc13a8add99398a4f11b5c273e6ec2e40515db42feba379932cf22d26c18e
+SHA512: d802cfeed115c79d7632479ea1604c20c7938830adf89a3825f727885bb1a67459456e833ae3be7ab8b35a69ac634ddb03c2404afeb61353ddad002c81b60463
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -72,27 +56,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.soulfx.souldicetweak_iphoneos-arm64.deb
-Size: 32208
-MD5sum: 2aa89b7139c95df1a8c2c668dad07ccd
-SHA1: 3343c3d4d5d8faac17604ec8937663f5cc8f44c6
-SHA256: fa83be888e4a03cd886e01f9977608e577ff94827cbfb19d9d24cd3e5bafa55d
-SHA512: 857a7f85d5a968e03245b5260ca996355a90df25429fe06bae9389563f9c46b81d28eaa76dcc3ffbf64b615abd10dd2eae6c7a1a536b1f5b2d03d968e660f9f8
-
-Package: com.tomie.kgyouthlite
-Name: KGYouthLite
-Version: 1.0.0
-Architecture: iphoneos-arm64
-Description: 酷狗概念版精简：隐藏播放页推广/免费听按钮、双指长按精简底栏、跳过开屏广告；不触发任何自动播放
-Maintainer: tomie
-Author: tomie
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm64/com.tomie.kgyouthlite_iphoneos-arm64.deb
-Size: 6664
-MD5sum: b3c3432bf38320eb697d8532b6c73494
-SHA1: f251af183e96a1a47faa84e1ab80efd9c5f008fc
-SHA256: 24b7a4fc6c9d5673cbc017c0fa0646c0cce545c1715f89a9b7f35cea2e12aad8
-SHA512: 80417d9520430f7119ee85dea27e9674633b7d531e133f6c4ec598dc496d684f73dfdb15f3a134277dbdc616873f8666983f51d1354fa4e5368751404d540b51
+Size: 32184
+MD5sum: 38b9c8be822e13665679a8d7cf53820f
+SHA1: c0a1efde8779af6bf5e2853319db02dc0950666c
+SHA256: 0c6f5c6d1d9e7fd7a9db2514e00db8aaafbcbdf2753244b5aff9b1d99aab4af9
+SHA512: be7e7f8acc65ce073c9800a4a8c2a54778d10b4d9c2ba6349c7ba6677dd6f2e9afbd71b1b16d5c2c0efefd7e836fdd97c919921041072742f7cafba4d3caee5f
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -104,11 +72,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tftool_iphoneos-arm64.deb
-Size: 30860
-MD5sum: a80328bfef6f20b305d1dd1118abf985
-SHA1: 29d53965f1af7519cd9e1df6432cca2c6697a1f7
-SHA256: bb2045de6354e3bf30a4d30784699b8e05258463103b6754b19753d6a9bf1b9d
-SHA512: f5c7a76958c467a9cdf967abd9a084e047380ad65d056388ce4e76d40488fa58cc09c121f01600a70431c1e50117e5ca35cdb39be826af0cd2c6a379ad94876b
+Size: 30828
+MD5sum: e0f2f0ce65bd25949b3bd41c37aa3d27
+SHA1: bba04b762e3d08e0edff950ef25516a5515dc91e
+SHA256: 7f9ca6e9df29629c2c48d7b2441690856ba51d231fb25775ff3abad8680fd4bc
+SHA512: efa7ffa99bb280cb11f10fc543f094378211f3f630f0165b7d619243013af3ef255cbacc4d5a34d0963741b140db989f13e802bb47cfb3feb237fb01d17feca0
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -121,10 +89,10 @@ Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.trollfoolsnoads_iphoneos-arm64.deb
 Size: 3580
-MD5sum: 56313579ea6274d39d2b4fbd7567e00b
-SHA1: 3277789dce04b1fbac903932ce90127ab9559f86
-SHA256: 3ffcf682d76d07f5849f74d89b9cf3a7ae3af378332ff022b5bd453f10474107
-SHA512: 320b6f563abf2ca7ab6fb36573f4583876d53fe7aa122ecc52b9c72f7305c26e05fca8f6ad615fffab083c13183b0d97e45289f16f3310ad3017b4b9bbadc219
+MD5sum: 84d4153466314af9dd8f9c64f2edd7b9
+SHA1: 76129ce30594da0d331dbadd406291d0d54f1ffa
+SHA256: acebaacfa2fa6d425c19a8bd1aa97fa144ec40d5b7a59aac6cd4412afb28318d
+SHA512: d9ffcc653fd225b0a39ee8113860b216dd44454cdd1f9511fef0964b5bdbb9726e95bd276bc75bdb632cf365bb60698b6374fb102bd0cc9e3d171ead131f4913
 
 Package: com.soulfx.souldicetweak
 Name: SoulDiceTweak
@@ -136,27 +104,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.soulfx.souldicetweak_iphoneos-arm64e.deb
-Size: 32164
-MD5sum: e42a9f728898b76623c5963a5f156bdb
-SHA1: b5456f7f543ecb4b84fb182eeac4f111a413d302
-SHA256: 0da677be7ff93f517a3f9d683494778bde405cd90c52879f76f62c66b6cdb6f9
-SHA512: cd208015e6cee1b3959cc4d3b0459a244615259a52d1557be02a0d26fa6d9ab58bb89fc62d9547ca7c0e89c9e1798c9e8d09657577c1475cf449f2a540bcb194
-
-Package: com.tomie.kgyouthlite
-Name: KGYouthLite
-Version: 1.0.0
-Architecture: iphoneos-arm64e
-Description: 酷狗概念版精简：隐藏播放页推广/免费听按钮、双指长按精简底栏、跳过开屏广告；不触发任何自动播放
-Maintainer: tomie
-Author: tomie
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm64e/com.tomie.kgyouthlite_iphoneos-arm64e.deb
-Size: 6644
-MD5sum: 019360ca34aebf4a67db505c379f2f8f
-SHA1: f9d19b3577dc015c9d672ea23c492f4600abd23d
-SHA256: f3d406f345e7bd51226957ecbdaa42e97140189f78b04552ab126d29644458c8
-SHA512: 3efb5aeee4aed3626781651e6d07bd884e34ef4bdd71c0a563ed611116b13f974d18811990faf4791c65e69e4e4b9978171d6895a3179ef4bde68b38e21544c2
+Size: 32160
+MD5sum: 37c75ebbb26109c0800e918bb920f3a2
+SHA1: 05ebb8d294602af6faaae338dec279b85ab444fb
+SHA256: 224ab6959ba0980f7aea3e936971b2e42de458b2451de9782223f3df2aeb90c6
+SHA512: 1d58205b7bf1750782f2d49ca828acede2305df84c67d7fdd4d2d829beb332cba7e6eb629154664b922e1f55db8eaad0318b504157d7d2284d99bc63a1c92634
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -168,11 +120,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tftool_iphoneos-arm64e.deb
-Size: 30828
-MD5sum: 18d6db574febc743f0cf5b900276b9d1
-SHA1: f3946da555b9add321ab7dcf36f806cbacb569f7
-SHA256: 5018095c243560fb45c480f2279683114b46b26c7cf3a62965bcb620db4c1ac5
-SHA512: 4f10ebc4e8ea7866ed56636ec39e035b5663dece6d6156a17352c3c2f42bb2e90ef04e510516eeea71aaeafb9109d0ac0784e471ab8fc6db521b33c35c8d5bf6
+Size: 30844
+MD5sum: f3a285c13a9ebd05804be688d74ee0fa
+SHA1: 297ef9d8386d2b7e495d289306dfaf47e803f4db
+SHA256: 86e360c327b914d7369945c7cdf8972bab3131ba8f8a2411dc381c979f9fc1b0
+SHA512: d7b95403c6e9d8d44b3b0a544476d0d7f909013c5243bcb5cdc749a439615eba7202a3a83bc3d5d583e7ad38419b2014e7b3a672981edbe1b8054d3049a4e002
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -184,9 +136,9 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.trollfoolsnoads_iphoneos-arm64e.deb
-Size: 3552
-MD5sum: b259ef94ccad4c98367c3ba1d76c829b
-SHA1: a7105e6a98513efa1828364609865b5fb5f055ed
-SHA256: f9f4b8de765cafeb8079ee6ea22c20639bc8ea075d11d4da0ab68e6075e9d920
-SHA512: b5597776d34d9476ffa57239f8ee9f3148d69b79ab1912ff0ca7e283443befca6d4c2ff1efb0e40222209406b3574db7d4cb919c9495d8b3751b43cdc62d78b7
+Size: 3556
+MD5sum: cc531a308b0a640013af5625abdb6d15
+SHA1: 2bc0cb3ff441b71a24dba773085244be88258085
+SHA256: bde9469994702dde39184e36df6996c813d749258490d1d622fe2b0bd8604d81
+SHA512: ab76a8ffd7f922b6654113b505c433544f0e64d326b871026f1bfc21706621687d45abd6f8dddde027b3ec1d706c11645571a342fb94a474833afee3da7a70ad
 
