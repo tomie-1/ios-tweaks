@@ -14,6 +14,22 @@ SHA1: 6215b36bee6414f111fcaaf47dfc031b4063b532
 SHA256: 3991fc2dde7a8bbe3c1444ec552a9610e5d0cca6d5027a72059c21466ef186cc
 SHA512: 65c7c259ed280264cf3a974034964c98f3aa93fecd7ac12dceccc21cac130da6d18486cda59830ee92ea7a21c65943b8431685f8292f3dd586efd09f9a73bc93
 
+Package: com.tomie.tfdevices
+Name: TFDevices
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: TestFlight 设备管理：列出账号下的测试设备（含 tvOS 等），可逐个移除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm/com.tomie.tfdevices_iphoneos-arm.deb
+Size: 15152
+MD5sum: b3f24ce84e76d21bd4fb261b313b944e
+SHA1: a7ad4f85f666df53194bf2bfb85f66825f76a17d
+SHA256: 770bb580f204b433197610463157e134fd2f981aaddf490a7fa3b725b1695d10
+SHA512: 06d83742d090d1c4f905f94756cba2814ef5c58d5d47abe652985c20550d61f36166f422369983bfaba3ec3f8488632d43ab7cfb9c461803bb988db8ee1a8280
+
 Package: com.tomie.tftool
 Name: TFTool
 Version: 1.0.0
@@ -62,6 +78,22 @@ SHA1: c0a1efde8779af6bf5e2853319db02dc0950666c
 SHA256: 0c6f5c6d1d9e7fd7a9db2514e00db8aaafbcbdf2753244b5aff9b1d99aab4af9
 SHA512: be7e7f8acc65ce073c9800a4a8c2a54778d10b4d9c2ba6349c7ba6677dd6f2e9afbd71b1b16d5c2c0efefd7e836fdd97c919921041072742f7cafba4d3caee5f
 
+Package: com.tomie.tfdevices
+Name: TFDevices
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: TestFlight 设备管理：列出账号下的测试设备（含 tvOS 等），可逐个移除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64/com.tomie.tfdevices_iphoneos-arm64.deb
+Size: 15156
+MD5sum: 21296d2484ed8bd60a17262456f3e43f
+SHA1: 0d3ac229c9da4640d44a45ab80713b26f9cd3192
+SHA256: dba5db5c0588edf7633a9f386661d96782c66fecd2392554cbb9cc0b21c66396
+SHA512: 196496bbcb0360acff53dd469c026d6743a0e65d614a33b03d5a66c467760d9f40077a06a88aa2a5317c51f1779dc27eb49d5b1e17a7e56b08922756bb4ff4cb
+
 Package: com.tomie.tftool
 Name: TFTool
 Version: 1.0.0
@@ -109,6 +141,22 @@ MD5sum: 37c75ebbb26109c0800e918bb920f3a2
 SHA1: 05ebb8d294602af6faaae338dec279b85ab444fb
 SHA256: 224ab6959ba0980f7aea3e936971b2e42de458b2451de9782223f3df2aeb90c6
 SHA512: 1d58205b7bf1750782f2d49ca828acede2305df84c67d7fdd4d2d829beb332cba7e6eb629154664b922e1f55db8eaad0318b504157d7d2284d99bc63a1c92634
+
+Package: com.tomie.tfdevices
+Name: TFDevices
+Version: 1.0.0
+Architecture: iphoneos-arm64e
+Description: TestFlight 设备管理：列出账号下的测试设备（含 tvOS 等），可逐个移除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64e/com.tomie.tfdevices_iphoneos-arm64e.deb
+Size: 15152
+MD5sum: e615dde4207a9aecfb7cc738d24dbe02
+SHA1: 3e9235ecf561bd6167e65c416a3afa0d39437f2d
+SHA256: c170cf05ba3f383196fecaacf6874bc4657a74abf0bde84b16b32d692b7fabd5
+SHA512: 6c68b809a42d7624ca80391300cff2a5e99485aace9da479ca539a65e3a2fbc4353c87246cc58ebb59f1248bdf269958c22bfe18c6bf9b8567114eba6344e94c
 
 Package: com.tomie.tftool
 Name: TFTool
