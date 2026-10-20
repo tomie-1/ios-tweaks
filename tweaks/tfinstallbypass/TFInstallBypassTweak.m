@@ -48,7 +48,7 @@ static id idSafe(id obj, NSString *selName) {
     @try { return ((id (*)(id, SEL))objc_msgSend)(obj, s); } @catch (NSException *e) { return nil; }
 }
 
-static IMP oFamily, oCaps, oMinOS, oThinning, oValidate, oValidateMeta;
+static IMP oFamily, oCaps, oMinOS, oThinning, oValidate, oValidateMeta, oCurOS, oOSVer, oFamCompat;
 
 static BOOL hFamily(id self, SEL _cmd, NSError **err) {
     BOOL r = ((BOOL (*)(id, SEL, NSError **))oFamily)(self, _cmd, err);
@@ -85,6 +85,31 @@ static BOOL hThinning(id self, SEL _cmd, NSError **err) {
     return r;
 }
 
+
+static BOOL hCurOS(id self, SEL _cmd, NSError **err) {
+    BOOL r = ((BOOL (*)(id, SEL, NSError **))oCurOS)(self, _cmd, err);
+    BOOL on = bypassEnabled();
+    LOGS(@"[curos] %@ -> %d bypass=%d", NSStringFromClass([self class]), r, on);
+    if (on) { if (err) *err = nil; return YES; }
+    return r;
+}
+
+static BOOL hOSVer(id self, SEL _cmd, id osVersion, NSError **err) {
+    BOOL r = ((BOOL (*)(id, SEL, id, NSError **))oOSVer)(self, _cmd, osVersion, err);
+    BOOL on = bypassEnabled();
+    LOGS(@"[osver] %@ target=%@ -> %d bypass=%d", NSStringFromClass([self class]), objDesc(osVersion), r, on);
+    if (on) { if (err) *err = nil; return YES; }
+    return r;
+}
+
+static BOOL hFamCompat(id self, SEL _cmd, int family) {
+    BOOL r = ((BOOL (*)(id, SEL, int))oFamCompat)(self, _cmd, family);
+    BOOL on = bypassEnabled();
+    LOGS(@"[famc] %@ family=%d -> %d bypass=%d", NSStringFromClass([self class]), family, r, on);
+    if (on) return YES;
+    return r;
+}
+
 static BOOL hValidate(id self, SEL _cmd, NSError **err) {
     BOOL r = ((BOOL (*)(id, SEL, NSError **))oValidate)(self, _cmd, err);
     if (!r) LOGS(@"[validate] %@ -> NO err=%@", NSStringFromClass([self class]), err && *err ? objDesc(*err) : @"nil");
@@ -115,6 +140,9 @@ __attribute__((constructor)) static void init(void) {
         hookMethod(c, @"isApplicableToCurrentDeviceCapabilitiesWithError:", (IMP)hCaps, &oCaps, NO);
         hookMethod(c, @"isMinimumOSVersion:applicableToOSVersion:error:", (IMP)hMinOS, &oMinOS, NO);
         hookMethod(c, @"thinningMatchesCurrentDeviceWithError:", (IMP)hThinning, &oThinning, NO);
+        hookMethod(c, @"isApplicableToCurrentOSVersionWithError:", (IMP)hCurOS, &oCurOS, NO);
+        hookMethod(c, @"isApplicableToOSVersion:error:", (IMP)hOSVer, &oOSVer, NO);
+        hookMethod(c, @"isCompatibleWithDeviceFamily:", (IMP)hFamCompat, &oFamCompat, NO);
         hookMethod(c, @"_validateWithError:", (IMP)hValidate, &oValidate, NO);
         hookMethod(c, @"validateAppMetadataWithError:", (IMP)hValidateMeta, &oValidateMeta, NO);
     } else {
