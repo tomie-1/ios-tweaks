@@ -255,10 +255,13 @@ static NSString *pluginTitle(id p) {
         if (n.length && !looksLikeHash(n)) name = n;
     }
     if (!name.length) {
+        NSString *file = [url lastPathComponent].stringByDeletingPathExtension;
+        if (file.length && !looksLikeHash(file)) name = file;
+    }
+    if (!name.length) {
         NSString *n = strv(o, @"name");
         if (n.length) name = n;
     }
-    if (!name.length) name = [url lastPathComponent];
     return name.length ? name : @"(未命名插件)";
 }
 
