@@ -123,27 +123,6 @@ static NSArray *arrayByRemovingPtrs(NSArray *src, NSArray *remove) {
     return out;
 }
 
-// 把选中项整体移动一格，保持它们之间的相对顺序。
-static NSArray *arrayByMovingSelected(NSArray *src, NSArray *selected, NSInteger delta, BOOL *changed) {
-    NSMutableArray *a = [src mutableCopy] ?: [NSMutableArray array];
-    if (delta < 0) {
-        for (NSUInteger i = 1; i < a.count; i++) {
-            if (ptrContains(selected, a[i]) && !ptrContains(selected, a[i - 1])) {
-                [a exchangeObjectAtIndex:i withObjectAtIndex:i - 1];
-                if (changed) *changed = YES;
-            }
-        }
-    } else if (delta > 0) {
-        for (NSInteger i = (NSInteger)a.count - 2; i >= 0; i--) {
-            if (ptrContains(selected, a[i]) && !ptrContains(selected, a[(NSUInteger)i + 1])) {
-                [a exchangeObjectAtIndex:(NSUInteger)i withObjectAtIndex:(NSUInteger)i + 1];
-                if (changed) *changed = YES;
-            }
-        }
-    }
-    return a;
-}
-
 #pragma mark - 插件原生名称
 
 static NSURL *loonGroupURL(void) {
@@ -389,7 +368,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     LNBLModeRemoteRules = 4,
 };
 
-@interface LNBatchVC : UITableViewController
+@interface LNBatchVC : UITableViewController <UITableViewDragDelegate, UITableViewDropDelegate>
 @property (nonatomic, assign) LNBLMode mode;
 @property (nonatomic, weak) UIViewController *host;
 @property (nonatomic, strong) NSMutableArray *sections;   // @{title, items}
@@ -399,6 +378,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, strong) UIBarButtonItem *actionItem;
 @property (nonatomic, strong) UIBarButtonItem *deleteItem;
 @property (nonatomic, strong) UILabel *toastLabel;
+@property (nonatomic, strong) NSArray *draggingItems;
+@property (nonatomic, assign) NSInteger draggingSection;
 @end
 
 @implementation LNBatchVC
@@ -417,6 +398,9 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.tableView.rowHeight = 62;
     self.tableView.allowsMultipleSelection = YES;
     self.tableView.decelerationRate = UIScrollViewDecelerationRateFast;
+    self.tableView.dragInteractionEnabled = YES;
+    self.tableView.dragDelegate = self;
+    self.tableView.dropDelegate = self;
     self.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
                                         target:self action:@selector(cancel)];
@@ -532,6 +516,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     return self.sections[s][@"title"];
 }
 
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
+    if ([self itemsForSection:s].count < 2) return nil;
+    return @"长按拖动可排序；勾选多行后拖动会整组移动";
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"cell"];
     if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
@@ -594,25 +583,126 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.deleteItem.enabled = n > 0;
 }
 
-#pragma mark 操作菜单
+#pragma mark 拖动排序
 
-- (BOOL)canMoveBy:(NSInteger)delta {
-    LNDCConfigModel *config = configForHost(self.host);
-    if (!config || self.selected.count == 0) return NO;
-    NSArray *arrays;
-    if (self.mode == LNBLModePlugins) arrays = @[config.plugins ?: @[]];
-    else if (self.mode == LNBLModeLocalRules) arrays = @[config.localRule ?: @[]];
-    else if (self.mode == LNBLModeRemoteRules) arrays = @[config.remoteRules ?: @[]];
-    else arrays = @[config.localRule ?: @[], config.remoteRules ?: @[]];
-    for (NSArray *a in arrays) {
-        for (NSInteger i = 0; i < (NSInteger)a.count; i++) {
-            if (!ptrContains(self.selected, a[(NSUInteger)i])) continue;
-            NSInteger j = i + delta;
-            if (j >= 0 && j < (NSInteger)a.count && !ptrContains(self.selected, a[(NSUInteger)j])) return YES;
+static BOOL samePtrOrder(NSArray *a, NSArray *b) {
+    if (a.count != b.count) return NO;
+    for (NSUInteger i = 0; i < a.count; i++) if (a[i] != b[i]) return NO;
+    return YES;
+}
+
+- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView
+           itemsForBeginningSession:(id<UIDragSession>)session
+                        atIndexPath:(NSIndexPath *)indexPath {
+    NSArray *items = [self itemsForSection:indexPath.section];
+    if (indexPath.row < 0 || indexPath.row >= (NSInteger)items.count) return @[];
+    id item = items[(NSUInteger)indexPath.row];
+    NSMutableArray *drag = [NSMutableArray array];
+    if (ptrContains(self.selected, item) && self.selected.count > 1) {
+        for (id x in items) if (ptrContains(self.selected, x)) [drag addObject:x];
+    } else {
+        [drag addObject:item];
+    }
+    self.draggingItems = drag;
+    self.draggingSection = indexPath.section;
+    NSMutableArray<UIDragItem *> *out = [NSMutableArray array];
+    for (id x in drag) {
+        UIDragItem *d = [[UIDragItem alloc] initWithItemProvider:[[NSItemProvider alloc] init]];
+        d.localObject = x;
+        [out addObject:d];
+    }
+    LBL(@"开始拖动 section=%ld rows=%lu", (long)indexPath.section, (unsigned long)drag.count);
+    return out;
+}
+
+- (void)tableView:(UITableView *)tableView dragSessionDidEnd:(id<UIDragSession>)session {
+    self.draggingItems = nil;
+}
+
+- (UITableViewDropProposal *)tableView:(UITableView *)tableView
+                  dropSessionDidUpdate:(id<UIDropSession>)session
+              withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
+    if (!session.localDragSession || self.draggingItems.count == 0) {
+        return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationCancel
+                                                              intent:UITableViewDropIntentUnspecified];
+    }
+    NSInteger section = destinationIndexPath ? destinationIndexPath.section : self.draggingSection;
+    if (section != self.draggingSection) {
+        return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationCancel
+                                                              intent:UITableViewDropIntentUnspecified];
+    }
+    return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationMove
+                                                          intent:UITableViewDropIntentInsertAtDestinationIndexPath];
+}
+
+- (void)tableView:(UITableView *)tableView
+    performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
+    NSArray *drag = self.draggingItems;
+    NSInteger section = self.draggingSection;
+    self.draggingItems = nil;
+    if (drag.count == 0) return;
+    NSIndexPath *dest = coordinator.destinationIndexPath;
+    if (dest && dest.section != section) return;
+
+    NSArray *old = [self itemsForSection:section];
+    if (old.count == 0) return;
+
+    CGPoint p = [coordinator.session locationInView:tableView];
+    NSIndexPath *hover = [tableView indexPathForRowAtPoint:p];
+    NSInteger insertRow = (NSInteger)old.count;
+    if (hover && hover.section == section && hover.row < (NSInteger)old.count) {
+        CGRect r = [tableView rectForRowAtIndexPath:hover];
+        insertRow = hover.row + (p.y > CGRectGetMidY(r) ? 1 : 0);
+    } else if (dest && dest.section == section) {
+        insertRow = MIN((NSInteger)dest.row, (NSInteger)old.count);
+    }
+
+    NSMutableArray *rest = [NSMutableArray array];
+    NSInteger insertIndex = 0;
+    for (NSInteger i = 0; i < (NSInteger)old.count; i++) {
+        id x = old[(NSUInteger)i];
+        if (ptrContains(drag, x)) continue;
+        if (i < insertRow) insertIndex++;
+        [rest addObject:x];
+    }
+    if (insertIndex > (NSInteger)rest.count) insertIndex = (NSInteger)rest.count;
+    [rest insertObjects:drag atIndexes:[NSIndexSet indexSetWithIndexesInRange:
+        NSMakeRange((NSUInteger)insertIndex, drag.count)]];
+
+    if (samePtrOrder(old, rest)) return;
+    [self applyReorder:rest inSection:section];
+
+    for (UITableViewDropItem *di in coordinator.items) {
+        id obj = di.dragItem.localObject;
+        NSUInteger idx = NSNotFound;
+        for (NSUInteger i = 0; i < rest.count; i++) if (rest[i] == obj) { idx = i; break; }
+        if (idx != NSNotFound) {
+            [coordinator dropItem:di.dragItem
+                toRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)idx inSection:section]];
         }
     }
-    return NO;
+    LBL(@"拖动完成 section=%ld items=%lu -> row=%ld", (long)section,
+        (unsigned long)drag.count, (long)insertIndex);
 }
+
+- (void)applyReorder:(NSArray *)items inSection:(NSInteger)section {
+    LNDCConfigModel *config = configForHost(self.host);
+    if (!config) return;
+    if (self.mode == LNBLModePlugins) {
+        config.plugins = items;
+    } else if (self.mode == LNBLModeLocalRules) {
+        config.localRule = items;
+    } else if (self.mode == LNBLModeRemoteRules) {
+        config.remoteRules = items;
+    } else if (section == 0 && [(config.localRule ?: @[]) count] > 0) {
+        config.localRule = items;
+    } else {
+        config.remoteRules = items;
+    }
+    [self commitChange];
+}
+
+#pragma mark 操作菜单
 
 - (UIMenu *)buildActionMenu {
     BOOL has = self.selected.count > 0;
@@ -624,8 +714,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (boolv(t, @"enable")) anyEnabled = YES;
         else anyDisabled = YES;
     }
-    BOOL canUp = [self canMoveBy:-1];
-    BOOL canDown = [self canMoveBy:1];
 
     NSString *copyTitle = @"复制链接";
     if (self.mode == LNBLModeLocalRules) copyTitle = @"复制规则文本";
@@ -638,17 +726,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                                       identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
     UIAction *disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
                                        identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
-    UIAction *up = [UIAction actionWithTitle:@"上移" image:[UIImage systemImageNamed:@"arrow.up"]
-                                  identifier:nil handler:^(UIAction *a) { [ws moveSelectedBy:-1]; }];
-    UIAction *down = [UIAction actionWithTitle:@"下移" image:[UIImage systemImageNamed:@"arrow.down"]
-                                    identifier:nil handler:^(UIAction *a) { [ws moveSelectedBy:1]; }];
 
     if (!has) copy.attributes = UIMenuElementAttributesDisabled;
     if (!toggleable || !anyDisabled) enable.attributes = UIMenuElementAttributesDisabled;
     if (!toggleable || !anyEnabled) disable.attributes = UIMenuElementAttributesDisabled;
-    if (!canUp) up.attributes = UIMenuElementAttributesDisabled;
-    if (!canDown) down.attributes = UIMenuElementAttributesDisabled;
-    return [UIMenu menuWithTitle:@"" children:@[copy, enable, disable, up, down]];
+    return [UIMenu menuWithTitle:@"" children:@[copy, enable, disable]];
 }
 
 - (void)copySelected {
@@ -686,30 +768,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
     [self commitChange];
     [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
-}
-
-- (void)moveSelectedBy:(NSInteger)delta {
-    LNDCConfigModel *config = configForHost(self.host);
-    if (!config) {
-        [self showToast:@"未取到当前配置"];
-        return;
-    }
-    BOOL changed = NO;
-    if (self.mode == LNBLModePlugins) {
-        config.plugins = arrayByMovingSelected(config.plugins ?: @[], self.selected, delta, &changed);
-    } else if (self.mode == LNBLModeLocalRules) {
-        config.localRule = arrayByMovingSelected(config.localRule ?: @[], self.selected, delta, &changed);
-    } else if (self.mode == LNBLModeRemoteRules) {
-        config.remoteRules = arrayByMovingSelected(config.remoteRules ?: @[], self.selected, delta, &changed);
-    } else {
-        config.localRule = arrayByMovingSelected(config.localRule ?: @[], self.selected, delta, &changed);
-        config.remoteRules = arrayByMovingSelected(config.remoteRules ?: @[], self.selected, delta, &changed);
-    }
-    if (!changed) {
-        [self showToast:(delta < 0 ? @"已经在最前面" : @"已经在最后面")];
-        return;
-    }
-    [self commitChange];
 }
 
 - (void)commitChange {
