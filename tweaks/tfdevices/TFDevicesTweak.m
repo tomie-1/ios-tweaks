@@ -60,6 +60,27 @@ static NSInteger intSafe(id obj, NSString *selName) {
 
 static id gAppList, gSession, gDeviceMgr;
 static NSArray *gDevices;
+static BOOL gSpoof;                  // 是否启用伪装
+static NSString *gSpoofModel, *gSpoofProductType, *gSpoofSystemVersion, *gSpoofBuildVersion;
+static NSString *spoofPath(void) { return docPath(@"tfspoof.plist"); }
+static void loadSpoofConfig(void) {
+    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:spoofPath()];
+    gSpoof = [d[@"Enabled"] boolValue];
+    gSpoofModel = d[@"Model"] ?: @"iPad Pro (11-inch) (4th generation)";
+    gSpoofProductType = d[@"ProductType"] ?: @"iPad13,4";
+    gSpoofSystemVersion = d[@"SystemVersion"] ?: @"18.5";
+    gSpoofBuildVersion = d[@"BuildVersion"] ?: @"22F76";
+    LOGS(@"[spoof] 配置: enabled=%d model=%@ productType=%@ os=%@ build=%@",
+         gSpoof, gSpoofModel, gSpoofProductType, gSpoofSystemVersion, gSpoofBuildVersion);
+}
+static void saveSpoofConfig(void) {
+    NSDictionary *d = @{@"Enabled": @(gSpoof), @"Model": gSpoofModel ?: @"",
+                        @"ProductType": gSpoofProductType ?: @"",
+                        @"SystemVersion": gSpoofSystemVersion ?: @"",
+                        @"BuildVersion": gSpoofBuildVersion ?: @""};
+    [d writeToFile:spoofPath() atomically:YES];
+    LOGS(@"[spoof] 已保存 enabled=%d", gSpoof);
+}
 static BOOL gSkipAsync;
 
 @interface OASAppList : NSObject
@@ -78,6 +99,82 @@ static id tf_initMgr(id self, SEL _cmd, id mgr) {
     id r = ((id (*)(id, SEL, id))gOrigInitMgr)(self, _cmd, mgr);
     if (r) gAppList = r;
     return r;
+}
+
+// TFCurrentDevice 全是类方法：先记录原值，再按开关返回伪装值
+static Class tfCurrentDeviceClass(void) { return objc_getClass("TFCurrentDevice"); }
+
+static id cdStrValue(NSString *selName) {
+    Class c = tfCurrentDeviceClass();
+    if (!c) return nil;
+    SEL s = tfSel(selName);
+    if (![c respondsToSelector:s]) return nil;
+    Method m = class_getClassMethod(c, s);
+    const char *enc = m ? method_getTypeEncoding(m) : NULL;
+    if (!enc || enc[0] != '@') return nil;
+    @try { return ((id (*)(id, SEL))objc_msgSend)(c, s); } @catch (NSException *e) { return nil; }
+}
+static long cdIntValue(NSString *selName) {
+    Class c = tfCurrentDeviceClass();
+    if (!c) return -999;
+    SEL s = tfSel(selName);
+    if (![c respondsToSelector:s]) return -999;
+    @try { return ((long (*)(id, SEL))objc_msgSend)(c, s); } @catch (NSException *e) { return -999; }
+}
+static void logCurrentDevice(void) {
+    LOGS(@"[self] productType=%@ model=%@ systemVersion=%@ build=%@ UDID=%@ GUID=%@",
+         cdStrValue(@"productType"), cdStrValue(@"model"), cdStrValue(@"systemVersion"),
+         cdStrValue(@"buildVersion"), cdStrValue(@"UDID"), cdStrValue(@"GUID"));
+    LOGS(@"[self] compatibleProductType=%@ variants=%@ thinned=%@ arch=%@ platform(long)=%ld iosCompat=%ld",
+         cdStrValue(@"compatibleProductType"), cdStrValue(@"compatibleAppVariants"),
+         cdStrValue(@"thinnedAppVariantId"), cdStrValue(@"deviceArchitecture"),
+         cdIntValue(@"platform"), cdIntValue(@"supportsIOSAppCompatibility"));
+}
+
+// 类方法 hook：返回对象
+static IMP oSoftwareVersion, oModel, oProductType, oCompatibleProductType, oBuildVersion;
+static IMP oPlatform, oIOSCompat;
+
+static id hSystemVersion(id self, SEL _cmd) {
+    if (gSpoof && gSpoofSystemVersion.length) return gSpoofSystemVersion;
+    return ((id (*)(id, SEL))oSoftwareVersion)(self, _cmd);
+}
+static id hModel(id self, SEL _cmd) {
+    if (gSpoof && gSpoofModel.length) return gSpoofModel;
+    return ((id (*)(id, SEL))oModel)(self, _cmd);
+}
+static id hProductType(id self, SEL _cmd) {
+    if (gSpoof && gSpoofProductType.length) return gSpoofProductType;
+    return ((id (*)(id, SEL))oProductType)(self, _cmd);
+}
+static id hCompatibleProductType(id self, SEL _cmd) {
+    if (gSpoof && gSpoofProductType.length) return gSpoofProductType;
+    return ((id (*)(id, SEL))oCompatibleProductType)(self, _cmd);
+}
+static id hBuildVersion(id self, SEL _cmd) {
+    if (gSpoof && gSpoofBuildVersion.length) return gSpoofBuildVersion;
+    return ((id (*)(id, SEL))oBuildVersion)(self, _cmd);
+}
+static long hPlatform(id self, SEL _cmd) {
+    return ((long (*)(id, SEL))oPlatform)(self, _cmd);   // 平台枚举先不动，避免把 iOS 报成 tvOS
+}
+static BOOL hIOSCompat(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oIOSCompat)(self, _cmd);
+}
+
+static void installSpoofHooks(void) {
+    Class c = tfCurrentDeviceClass();
+    if (!c) { LOGS(@"[spoof] 没有 TFCurrentDevice"); return; }
+    Method m;
+    if ((m = class_getClassMethod(c, sel_registerName("systemVersion")))) { oSoftwareVersion = method_getImplementation(m); method_setImplementation(m, (IMP)hSystemVersion); }
+    if ((m = class_getClassMethod(c, sel_registerName("model")))) { oModel = method_getImplementation(m); method_setImplementation(m, (IMP)hModel); }
+    if ((m = class_getClassMethod(c, sel_registerName("productType")))) { oProductType = method_getImplementation(m); method_setImplementation(m, (IMP)hProductType); }
+    if ((m = class_getClassMethod(c, sel_registerName("compatibleProductType")))) { oCompatibleProductType = method_getImplementation(m); method_setImplementation(m, (IMP)hCompatibleProductType); }
+    if ((m = class_getClassMethod(c, sel_registerName("buildVersion")))) { oBuildVersion = method_getImplementation(m); method_setImplementation(m, (IMP)hBuildVersion); }
+    if ((m = class_getClassMethod(c, sel_registerName("platform")))) { oPlatform = method_getImplementation(m); method_setImplementation(m, (IMP)hPlatform); }
+    if ((m = class_getClassMethod(c, sel_registerName("supportsIOSAppCompatibility")))) { oIOSCompat = method_getImplementation(m); method_setImplementation(m, (IMP)hIOSCompat); }
+    LOGS(@"[spoof] hook 完成");
 }
 
 static void dumpMethods(NSString *clsName, int limit) {
@@ -138,30 +235,25 @@ static void reloadDevices(void (^done)(void)) {
             dumpMethods(@"TFCurrentDevice", 40);
         }
 
-        // 1) 同步 getter
-        for (NSString *sel in candidateSelectors()) {
-            id v = idSafe(gDeviceMgr, sel);
-            if (!v) continue;
-            NSArray *arr = [v isKindOfClass:[NSArray class]] ? v : @[v];
-            LOGS(@"[dev] 试 %@ → %@ (%lu)", sel, NSStringFromClass([v class]),
-                 (unsigned long)([v isKindOfClass:[NSArray class]] ? [v count] : 1));
-            if (arr.count) { gDevices = arr; logDevices(arr, sel); if (done) done(); return; }
-        }
-        // 2) 异步式刷新：回调签名未知，这里只传一个“无参 block”做完成通知（多传的参数会被忽略，安全）
-        if (!gSkipAsync) {
-            for (NSString *sel in @[@"fetchDevicesWithCompletion:", @"refreshDevicesWithCompletion:",
-                                    @"getDevicesWithCompletion:", @"loadDevicesWithCompletion:",
-                                    @"fetchAllDevicesWithCompletion:", @"refreshWithCompletion:"]) {
-                SEL s2 = tfSel(sel);
-                if (![gDeviceMgr respondsToSelector:s2]) continue;
-                LOGS(@"[dev] 试异步 %@（等待回调后重读同步 getter）", sel);
-                gSkipAsync = YES;
-                ((void (*)(id, SEL, id))objc_msgSend)(gDeviceMgr, s2, ^{
-                    LOGS(@"[dev] 异步完成: %@", sel);
-                    dispatch_async(dispatch_get_main_queue(), ^{ reloadDevices(done); });
-                });
-                return;
-            }
+        // 唯一的同步入口没有，只能走 loadDevicesWithCompletionBlock:
+        SEL ls = tfSel(@"loadDevicesWithCompletionBlock:");
+        if ([gDeviceMgr respondsToSelector:ls]) {
+            LOGS(@"[dev] 调 loadDevicesWithCompletionBlock:");
+            ((void (*)(id, SEL, id))objc_msgSend)(gDeviceMgr, ls, ^(id a, id b) {
+                uintptr_t pa = (uintptr_t)a;
+                BOOL looksObject = (pa > 0x100000000ULL && (pa & 0x7) == 0);
+                LOGS(@"[dev] 回调 a=%p(%@) b=%p", a, looksObject ? NSStringFromClass([a class]) : @"非对象", b);
+                if (looksObject) {
+                    @try {
+                        NSArray *arr = nil;
+                        if ([a isKindOfClass:[NSArray class]]) arr = a;
+                        else if ([a respondsToSelector:tfSel(@"devices")]) arr = idSafe(a, @"devices");
+                        if (arr.count) { gDevices = arr; logDevices(arr, @"loadDevices"); }
+                    } @catch (NSException *e) { LOGS(@"[dev] 解析 ex %@", e.name); }
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(); });
+            });
+            return;
         }
         LOGS(@"[dev] 没能拿到设备列表（见上面的方法清单）");
         if (done) done();
@@ -246,6 +338,7 @@ static NSString *deviceSubtitle(id d) {
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) NSArray *items;
 @property (nonatomic, copy) void (^onClose)(void);
+@property (nonatomic, strong) UIBarButtonItem *spoofItem;
 @end
 
 @implementation TFDevVC
@@ -255,9 +348,12 @@ static NSString *deviceSubtitle(id d) {
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"关闭" style:UIBarButtonItemStylePlain target:self action:@selector(close)];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh
-                                                      target:self action:@selector(refresh)];
+    UIBarButtonItem *refreshItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemRefresh target:self action:@selector(refresh)];
+    self.spoofItem = [[UIBarButtonItem alloc] initWithTitle:(gSpoof ? @"伪装中" : @"伪装")
+                                                     style:UIBarButtonItemStylePlain
+                                                    target:self action:@selector(toggleSpoof)];
+    self.navigationItem.rightBarButtonItems = @[self.spoofItem, refreshItem];
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
@@ -284,6 +380,21 @@ static NSString *deviceSubtitle(id d) {
             }
         });
     });
+}
+
+- (void)toggleSpoof {
+    gSpoof = !gSpoof;
+    saveSpoofConfig();
+    self.spoofItem.title = gSpoof ? @"伪装中" : @"伪装";
+    UIAlertController *ac = [UIAlertController
+        alertControllerWithTitle:(gSpoof ? @"已开启伪装" : @"已关闭伪装")
+                         message:(gSpoof
+                                  ? [NSString stringWithFormat:@"现在向服务器上报：\n型号 %@\n机型 %@\n系统 %@ (%@)\n\n需要重启 TestFlight 才会重新拉取列表。",
+                                     gSpoofModel, gSpoofProductType, gSpoofSystemVersion, gSpoofBuildVersion]
+                                  : @"已恢复真实设备信息，重启 TestFlight 生效。")
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:ac animated:YES completion:nil];
 }
 
 - (void)close { if (self.onClose) self.onClose(); [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -410,6 +521,9 @@ static void attachButton(void) {
 __attribute__((constructor)) static void tfdevices_init(void) {
     @try {
         LOGS(@"=== TFDevices loaded in %@ ===", [NSBundle mainBundle].bundleIdentifier);
+        loadSpoofConfig();
+        logCurrentDevice();
+        installSpoofHooks();
         Class c = objc_getClass("OASAppList");
         if (c) {
             Method m;
