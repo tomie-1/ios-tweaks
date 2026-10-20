@@ -573,6 +573,9 @@ static void hookViewDidAppear(Class c) {
 __attribute__((constructor)) static void init(void) {
     @try {
         LBL(@"=== LoonBatch loaded ===");
+        LNDCConfigModel *cfg = currentConfig();
+        LBL(@"启动配置 %@ plugins=%lu local=%lu remote=%lu", NSStringFromClass([cfg class]),
+            (unsigned long)[cfg.plugins count], (unsigned long)[cfg.localRule count], (unsigned long)[cfg.remoteRules count]);
         Class base = [UIViewController class];
         SEL baseSel = sel_registerName("viewDidAppear:");
         Method m = class_getInstanceMethod(base, baseSel);
