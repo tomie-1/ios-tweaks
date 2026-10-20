@@ -24,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tfdevices_iphoneos-arm.deb
-Size: 20612
-MD5sum: c3bc069169d649d6d365ea4820f2d98c
-SHA1: 38dffbecb95a142085f4730587fca98dae712f01
-SHA256: fe96d4a26e24fd276bd41745b0f7af807c65d54ed387386f9778dc3b3136312c
-SHA512: 929e31dab22ff1977b707e1b7e94d4d539a690601d0d3798b4a2efcacc11dd9486d51b84edf2b0996d4c2d077c42dd9ea7065d252b261f0f887eb857896b234f
+Size: 20708
+MD5sum: 665717f968bbeba64fef9648ec0a1d70
+SHA1: d3bf64f12c7f903a15593af80631269010e704b3
+SHA256: 193bed7d12f6948738d8129b6d6a9b69951a86b0d3016067084cb2e965084abe
+SHA512: 4ec0124c24c291797fc2ff8daffdcb7fc7be56e1a939cc0051fda2c7873e578110de5b222ea690fdc557b9ce1c1d6ce848f731bfb9c82c3322caf27d7050174b
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
@@ -104,11 +104,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tfdevices_iphoneos-arm64.deb
-Size: 20612
-MD5sum: f430fd9bdf0c611fb8ee5cc65e502b44
-SHA1: 33e3eca26de311da2c5b10206e70f6da9fa486cc
-SHA256: b29a4be823ae0b68f0294814e729b9930ba094a5098ffa593d6dfa9305b9a54f
-SHA512: 2ee8632dd67c42997105f13433f8846c00588057f5554364195ee0a22eeafd7523c597776c77bd06e27b77f18047082efe905231154ad83a960626be07d12776
+Size: 20728
+MD5sum: 957ffd9f1f2c6b547b768350417a4931
+SHA1: a49207bcf91b6dfb061cf769237760afdfd17b08
+SHA256: a6bac5aba8aa0a541ad324ae4a2d96293ec661ffe0661457edbcda1db6652fd3
+SHA512: 69a2d54ec7d34fdaa97bc561331ba0a24c1d0ca3f8f1af888eb4d624acc32c62b6fd98b12061aa756a622d37f09311e3076314151c4a9f2caa01ae36bf2c2d78
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
@@ -184,11 +184,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tfdevices_iphoneos-arm64e.deb
-Size: 20612
-MD5sum: 822970d4b34acf2bca05a104a9589ade
-SHA1: ee602ca6c6180062183347244c832c81d0a9a3fc
-SHA256: 4c7fa2889f3c6574dcd2dbf2b0805a2fa943ebd7f2a19cdc53f51734154dc1ba
-SHA512: 3ccb323b316d715309be97731a0bb07275cd0932a54651a0e573e6126517198c03d80b17c297fb1820dbf5a6bac53a502f4059255c66a703f8cde1a194f6b9ce
+Size: 20712
+MD5sum: ae49e0fd9cde42dddb7f3df9d74a9842
+SHA1: a4c1579ede87139a2a3efe6cee4aa2dd03f0c589
+SHA256: efee8170e82124bc175e902051a46aa106e5e9160a1b30e3733ec49d93ed1da5
+SHA512: 44e753414d739808a968e49bf020dde8352845290123945ad138915d4dec74cbfce25b6c2f69be45594b9c6d90a0566748a1ef4a4eb87136acc1d9d6943fb226
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
