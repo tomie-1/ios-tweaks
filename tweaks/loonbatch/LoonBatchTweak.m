@@ -187,6 +187,19 @@ static LNDCConfigModel *configFromObject(id obj) {
             if ([c isKindOfClass:modelClass]) return c;
         }
     } @catch (NSException *e) {}
+    // Swift VC 的 currentConfigModel 通常是 Swift 存储属性，KVC 取不到时读 ivar。
+    @try {
+        Class cls = object_getClass(obj);
+        while (cls) {
+            Ivar iv = class_getInstanceVariable(cls, "currentConfigModel");
+            if (iv) {
+                id c = object_getIvar(obj, iv);
+                if ([c isKindOfClass:modelClass]) return c;
+                break;
+            }
+            cls = class_getSuperclass(cls);
+        }
+    } @catch (NSException *e) {}
     return nil;
 }
 static LNDCConfigModel *configForHost(id host) {
@@ -500,6 +513,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     @try {
         if ([vc respondsToSelector:NSSelectorFromString(@"setRules:")]) [vc setValue:local forKey:@"rules"];
         if ([vc respondsToSelector:NSSelectorFromString(@"setRemoteAllRules:")]) [vc setValue:remote forKey:@"remoteAllRules"];
+        if ([vc respondsToSelector:NSSelectorFromString(@"setAllRemoteRules:")]) [vc setValue:remote forKey:@"allRemoteRules"];
         if ([vc respondsToSelector:NSSelectorFromString(@"refreshPlugins")]) msgv(vc, @"refreshPlugins");
         else if ([vc respondsToSelector:NSSelectorFromString(@"initData")]) msgv(vc, @"initData");
         id list = msg0(vc, @"listView");
