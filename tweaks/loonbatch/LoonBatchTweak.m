@@ -1,12 +1,13 @@
 //
 //  LoonBatchTweak.m — Loon 插件/规则批量管理
-//  在每个列表页右下角加「批量」按钮，打开自建多选页，读取当前配置的模型后批量删除。
+//  在每个列表页右下角加「批量」按钮，打开自建多选页，读取当前配置的模型后批量处理。
 //
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <CommonCrypto/CommonDigest.h>
 
 #pragma mark - 日志
 
@@ -100,6 +101,12 @@ static BOOL boolv(id o, NSString *s) {
     if (![o respondsToSelector:sel]) return NO;
     @try { return ((BOOL (*)(id, SEL))objc_msgSend)(o, sel); } @catch (NSException *e) { return NO; }
 }
+static BOOL setBoolv(id o, NSString *s, BOOL v) {
+    if (!o) return NO;
+    SEL sel = NSSelectorFromString(s);
+    if (![o respondsToSelector:sel]) return NO;
+    @try { ((void (*)(id, SEL, BOOL))objc_msgSend)(o, sel, v); return YES; } @catch (NSException *e) { return NO; }
+}
 
 static BOOL ptrContains(NSArray *arr, id item) {
     for (id x in arr) if (x == item) return YES;
@@ -116,21 +123,155 @@ static NSArray *arrayByRemovingPtrs(NSArray *src, NSArray *remove) {
     return out;
 }
 
-static NSString *pluginTitle(id p) {
-    NSString *s = strv(p, @"name");
-    if (!s.length) s = strv(p, @"tag");
-    if (!s.length) s = strv(p, @"pluginName");
-    if (!s.length) s = [strv(p, @"remoteUrl") lastPathComponent];
-    return s.length ? s : @"(未命名插件)";
+// 把选中项整体移动一格，保持它们之间的相对顺序。
+static NSArray *arrayByMovingSelected(NSArray *src, NSArray *selected, NSInteger delta, BOOL *changed) {
+    NSMutableArray *a = [src mutableCopy] ?: [NSMutableArray array];
+    if (delta < 0) {
+        for (NSUInteger i = 1; i < a.count; i++) {
+            if (ptrContains(selected, a[i]) && !ptrContains(selected, a[i - 1])) {
+                [a exchangeObjectAtIndex:i withObjectAtIndex:i - 1];
+                if (changed) *changed = YES;
+            }
+        }
+    } else if (delta > 0) {
+        for (NSInteger i = (NSInteger)a.count - 2; i >= 0; i--) {
+            if (ptrContains(selected, a[i]) && !ptrContains(selected, a[(NSUInteger)i + 1])) {
+                [a exchangeObjectAtIndex:(NSUInteger)i withObjectAtIndex:(NSUInteger)i + 1];
+                if (changed) *changed = YES;
+            }
+        }
+    }
+    return a;
 }
+
+#pragma mark - 插件原生名称
+
+static NSURL *loonGroupURL(void) {
+    static NSURL *url;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        @try {
+            url = [[NSFileManager defaultManager]
+                containerURLForSecurityApplicationGroupIdentifier:@"group.com.ruikq.decar"];
+        } @catch (NSException *e) { url = nil; }
+    });
+    return url;
+}
+
+static NSString *md5Hex(NSString *s) {
+    if (!s.length) return nil;
+    const char *utf8 = s.UTF8String;
+    if (!utf8) return nil;
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+    CC_MD5(utf8, (CC_LONG)strlen(utf8), digest);
+    NSMutableString *out = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_MD5_DIGEST_LENGTH; i++) [out appendFormat:@"%02x", digest[i]];
+    return out;
+}
+
+static NSString *trimmed(NSString *s) {
+    return [s stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static NSString *nameInPluginText(NSString *text) {
+    if (!text.length) return nil;
+    NSArray *lines = [text componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    for (NSString *line in lines) {
+        NSString *t = trimmed(line);
+        if (![t hasPrefix:@"#!name"]) continue;
+        NSRange eq = [t rangeOfString:@"="];
+        if (eq.location == NSNotFound) continue;
+        NSString *v = trimmed([t substringFromIndex:eq.location + 1]);
+        v = [v stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\"'"]];
+        if (v.length) return v;
+    }
+    return nil;
+}
+
+static NSString *pluginNameFromDisk(NSString *url) {
+    NSString *hash = md5Hex(url);
+    NSURL *group = loonGroupURL();
+    if (!group || !hash.length) return nil;
+    NSArray *dirs = @[@"remotePlugin", @"privatePlugin"];
+    NSArray *exts = @[@"lpx", @"plugin"];
+    for (NSString *d in dirs) {
+        for (NSString *e in exts) {
+            NSURL *f = [[[group URLByAppendingPathComponent:d isDirectory:YES]
+                          URLByAppendingPathComponent:hash] URLByAppendingPathExtension:e];
+            NSData *data = [NSData dataWithContentsOfURL:f options:NSDataReadingMappedIfSafe error:NULL];
+            if (!data.length) continue;
+            NSUInteger len = MIN(data.length, (NSUInteger)65536);
+            NSData *head = (len == data.length) ? data : [data subdataWithRange:NSMakeRange(0, len)];
+            NSString *text = [[NSString alloc] initWithData:head encoding:NSUTF8StringEncoding];
+            NSString *name = nameInPluginText(text);
+            if (name.length) return name;
+        }
+    }
+    return nil;
+}
+
+static NSString *pluginNativeName(NSString *url) {
+    if (!url.length) return nil;
+    static NSMutableDictionary *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSMutableDictionary dictionary]; });
+    @synchronized (cache) {
+        NSString *cached = cache[url];
+        if (cached.length) return cached;
+        NSString *name = pluginNameFromDisk(url);
+        if (name.length) cache[url] = name;
+        return name;
+    }
+}
+
+static BOOL looksLikeHash(NSString *s) {
+    if (s.length != 32) return NO;
+    for (NSUInteger i = 0; i < s.length; i++) {
+        unichar c = [s characterAtIndex:i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return NO;
+    }
+    return YES;
+}
+
+static id pluginObject(id p) {
+    id o = msg0(p, @"plugin");
+    return o ?: p;
+}
+
+static NSString *pluginTitle(id p) {
+    id o = pluginObject(p);
+    NSString *url = strv(o, @"remoteUrl");
+    NSString *name = pluginNativeName(url);
+    if (!name.length) {
+        NSString *n = strv(o, @"name");
+        if (n.length && !looksLikeHash(n)) name = n;
+    }
+    if (!name.length) {
+        NSString *n = strv(o, @"pluginName");
+        if (n.length && !looksLikeHash(n)) name = n;
+    }
+    if (!name.length) {
+        NSString *n = strv(o, @"tag");
+        if (n.length && !looksLikeHash(n)) name = n;
+    }
+    if (!name.length) {
+        NSString *n = strv(o, @"name");
+        if (n.length) name = n;
+    }
+    if (!name.length) name = [url lastPathComponent];
+    return name.length ? name : @"(未命名插件)";
+}
+
 static NSString *pluginSubtitle(id p) {
+    id o = pluginObject(p);
     NSMutableArray *a = [NSMutableArray array];
-    NSString *u = strv(p, @"remoteUrl");
+    NSString *u = strv(o, @"remoteUrl");
     if (u.length) [a addObject:u];
-    [a addObject:boolv(p, @"enable") ? @"已启用" : @"已禁用"];
-    if (boolv(p, @"pin")) [a addObject:@"已固定"];
+    [a addObject:boolv(o, @"enable") ? @"已启用" : @"已禁用"];
+    if (boolv(o, @"pin")) [a addObject:@"已固定"];
     return [a componentsJoinedByString:@" · "];
 }
+
 static NSString *ruleTitle(id r) {
     NSString *s = strv(r, @"playload");
     if (!s.length) {
@@ -140,12 +281,14 @@ static NSString *ruleTitle(id r) {
     }
     return s.length ? s : @"(空规则)";
 }
+
 static NSString *remoteRuleTitle(id r) {
     NSString *s = strv(r, @"name");
-    if (!s.length) s = strv(r, @"tag");
+    if (!s.length || looksLikeHash(s)) s = strv(r, @"tag");
     if (!s.length) s = [strv(r, @"remoteUrl") lastPathComponent];
     return s.length ? s : @"(未命名远程规则)";
 }
+
 static NSString *remoteRuleSubtitle(id r) {
     NSMutableArray *a = [NSMutableArray array];
     NSString *u = strv(r, @"remoteUrl");
@@ -154,6 +297,7 @@ static NSString *remoteRuleSubtitle(id r) {
     if (p.length) [a addObject:p];
     NSString *d = strv(r, @"desc");
     if (d.length) [a addObject:d];
+    if ([r respondsToSelector:NSSelectorFromString(@"enable")]) [a addObject:boolv(r, @"enable") ? @"已启用" : @"已禁用"];
     return [a componentsJoinedByString:@" · "];
 }
 
@@ -215,8 +359,7 @@ static void backupConfig(LNDCConfigModel *config) {
         NSString *fileName = strv(config, @"fileName");
         if (!fileName.length) fileName = msg0(dataManager(), @"currentConfigFileName");
         if (!fileName.length) return;
-        NSURL *group = [[NSFileManager defaultManager]
-            containerURLForSecurityApplicationGroupIdentifier:@"group.com.ruikq.decar"];
+        NSURL *group = loonGroupURL();
         if (!group) return;
         NSURL *src = [[group URLByAppendingPathComponent:@"config"] URLByAppendingPathComponent:fileName.lastPathComponent];
         if (![[NSFileManager defaultManager] fileExistsAtPath:src.path]) return;
@@ -248,9 +391,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, weak) UIViewController *host;
 @property (nonatomic, strong) NSMutableArray *sections;   // @{title, items}
 @property (nonatomic, strong) NSMutableArray *selected;   // 指针比较
-@property (nonatomic, strong) UIView *bottomBar;
-@property (nonatomic, strong) UIButton *selectAllButton;
-@property (nonatomic, strong) UIButton *deleteButton;
+@property (nonatomic, strong) UIBarButtonItem *selectAllItem;
+@property (nonatomic, strong) UIBarButtonItem *countItem;
+@property (nonatomic, strong) UIBarButtonItem *actionItem;
+@property (nonatomic, strong) UIBarButtonItem *deleteItem;
+@property (nonatomic, strong) UILabel *toastLabel;
 @end
 
 @implementation LNBatchVC
@@ -266,18 +411,45 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.tableView.rowHeight = 64;
+    self.tableView.rowHeight = 62;
     self.tableView.allowsMultipleSelection = YES;
+    self.tableView.decelerationRate = UIScrollViewDecelerationRateFast;
     self.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
                                         target:self action:@selector(cancel)];
+    [self setupToolbar];
     [self reloadData];
-    [self buildBottomBar];
+}
+
+- (void)setupToolbar {
+    self.selectAllItem = [[UIBarButtonItem alloc] initWithTitle:@"全选" style:UIBarButtonItemStylePlain
+                                                         target:self action:@selector(toggleSelectAll)];
+    self.countItem = [[UIBarButtonItem alloc] initWithTitle:@"已选 0" style:UIBarButtonItemStylePlain
+                                                     target:nil action:nil];
+    self.countItem.enabled = NO;
+    self.actionItem = [[UIBarButtonItem alloc] initWithTitle:@"操作" style:UIBarButtonItemStylePlain
+                                                      target:nil action:nil];
+    self.deleteItem = [[UIBarButtonItem alloc] initWithTitle:@"删除" style:UIBarButtonItemStyleDone
+                                                      target:self action:@selector(deleteTapped)];
+    self.deleteItem.tintColor = UIColor.systemRedColor;
+    UIBarButtonItem *f1 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                        target:nil action:nil];
+    UIBarButtonItem *f2 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                        target:nil action:nil];
+    self.toolbarItems = @[self.selectAllItem, f1, self.countItem, f2, self.actionItem, self.deleteItem];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     self.navigationController.navigationBarHidden = NO;
+    [self.navigationController setToolbarHidden:NO animated:NO];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed) {
+        [self.navigationController setToolbarHidden:YES animated:NO];
+    }
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -297,51 +469,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
 }
 
-- (void)buildBottomBar {
-    CGFloat h = 54;
-    self.bottomBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, h)];
-    self.bottomBar.backgroundColor = UIColor.secondarySystemBackgroundColor;
-    self.bottomBar.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
-
-    self.selectAllButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.selectAllButton.frame = CGRectMake(16, 0, 96, h);
-    self.selectAllButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    [self.selectAllButton setTitle:@"全选" forState:UIControlStateNormal];
-    self.selectAllButton.titleLabel.font = [UIFont systemFontOfSize:16];
-    [self.selectAllButton addTarget:self action:@selector(toggleSelectAll) forControlEvents:UIControlEventTouchUpInside];
-
-    self.deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.deleteButton.frame = CGRectMake(self.view.bounds.size.width - 180, 0, 164, h);
-    self.deleteButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
-    [self.deleteButton setTitle:@"删除" forState:UIControlStateNormal];
-    [self.deleteButton setTitleColor:UIColor.systemRedColor forState:UIControlStateNormal];
-    self.deleteButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    [self.deleteButton addTarget:self action:@selector(deleteTapped) forControlEvents:UIControlEventTouchUpInside];
-
-    [self.bottomBar addSubview:self.selectAllButton];
-    [self.bottomBar addSubview:self.deleteButton];
-    [self.view addSubview:self.bottomBar];
-    self.tableView.contentInset = UIEdgeInsetsMake(0, 0, h + 20, 0);
-    [self updateButtons];
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    CGFloat h = 54 + self.view.safeAreaInsets.bottom;
-    self.bottomBar.frame = CGRectMake(0, self.view.bounds.size.height - h, self.view.bounds.size.width, h);
-    self.selectAllButton.frame = CGRectMake(16, 0, 96, 54);
-    self.deleteButton.frame = CGRectMake(self.view.bounds.size.width - 180, 0, 164, 54);
-    [self.view bringSubviewToFront:self.bottomBar];
-}
-
 - (void)reloadData {
     LNDCConfigModel *config = configForHost(self.host);
     self.sections = [NSMutableArray array];
     if (!config) {
         self.title = @"批量";
         [self.tableView reloadData];
+        [self updateButtons];
         return;
     }
+    self.tableView.backgroundView = nil;
     if (self.mode == LNBLModePlugins) {
         NSArray *items = config.plugins ?: @[];
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
@@ -361,11 +498,21 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (local.count) [self.sections addObject:@{@"title": @"本地规则", @"items": local}];
         if (remote.count) [self.sections addObject:@{@"title": @"远程规则", @"items": remote}];
     }
-    NSUInteger total = 0;
-    for (NSDictionary *sec in self.sections) total += [sec[@"items"] count];
+    NSArray *all = [self allItems];
+    NSMutableArray *still = [NSMutableArray array];
+    for (id x in self.selected) if (ptrContains(all, x)) [still addObject:x];
+    self.selected = still;
+    NSUInteger total = all.count;
     LBL(@"批量页 mode=%ld config=%@ sections=%lu items=%lu", (long)self.mode,
         NSStringFromClass([config class]), (unsigned long)self.sections.count, (unsigned long)total);
     [self.tableView reloadData];
+    [self updateButtons];
+}
+
+- (NSArray *)allItems {
+    NSMutableArray *all = [NSMutableArray array];
+    for (NSDictionary *s in self.sections) [all addObjectsFromArray:s[@"items"]];
+    return all;
 }
 
 - (NSArray *)itemsForSection:(NSInteger)section {
@@ -390,9 +537,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         c.textLabel.text = remoteRuleTitle(item);
         c.detailTextLabel.text = remoteRuleSubtitle(item);
     } else {
-        c.textLabel.text = ruleTitle(item);
-        c.detailTextLabel.text = @"";
+        id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule");
+        if ([inner isKindOfClass:NSClassFromString(@"RemoteRule")]) {
+            c.textLabel.text = remoteRuleTitle(inner);
+            c.detailTextLabel.text = remoteRuleSubtitle(inner);
+        } else {
+            c.textLabel.text = ruleTitle(inner ?: item);
+            c.detailTextLabel.text = @"";
+        }
     }
+    c.textLabel.font = [UIFont systemFontOfSize:16];
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.accessoryType = ptrContains(self.selected, item) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
@@ -408,29 +562,156 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)toggleSelectAll {
-    NSMutableArray *all = [NSMutableArray array];
-    for (NSDictionary *s in self.sections) [all addObjectsFromArray:s[@"items"]];
+    NSArray *all = [self allItems];
     BOOL allSelected = all.count > 0;
     for (id x in all) if (!ptrContains(self.selected, x)) { allSelected = NO; break; }
-    if (allSelected) [self.selected removeAllObjects];
-    else {
-        [self.selected removeAllObjects];
-        for (id x in all) [self.selected addObject:x];
-    }
+    [self.selected removeAllObjects];
+    if (!allSelected) for (id x in all) [self.selected addObject:x];
     [self.tableView reloadData];
     [self updateButtons];
 }
 
 - (void)updateButtons {
     NSUInteger n = self.selected.count;
-    [self.deleteButton setTitle:(n ? [NSString stringWithFormat:@"删除 (%lu)", (unsigned long)n] : @"删除")
-                       forState:UIControlStateNormal];
-    self.deleteButton.enabled = n > 0;
-    NSMutableArray *all = [NSMutableArray array];
-    for (NSDictionary *s in self.sections) [all addObjectsFromArray:s[@"items"]];
+    self.countItem.title = [NSString stringWithFormat:@"已选 %lu", (unsigned long)n];
+    NSArray *all = [self allItems];
     BOOL allSelected = all.count > 0;
     for (id x in all) if (!ptrContains(self.selected, x)) { allSelected = NO; break; }
-    [self.selectAllButton setTitle:(allSelected ? @"全不选" : @"全选") forState:UIControlStateNormal];
+    self.selectAllItem.title = allSelected ? @"全不选" : @"全选";
+    self.selectAllItem.enabled = all.count > 0;
+    self.actionItem.enabled = all.count > 0;
+    self.actionItem.menu = [self buildActionMenu];
+    self.deleteItem.enabled = n > 0;
+}
+
+#pragma mark 操作菜单
+
+- (BOOL)canMoveBy:(NSInteger)delta {
+    LNDCConfigModel *config = configForHost(self.host);
+    if (!config || self.selected.count == 0) return NO;
+    NSArray *arrays;
+    if (self.mode == LNBLModePlugins) arrays = @[config.plugins ?: @[]];
+    else if (self.mode == LNBLModeLocalRules) arrays = @[config.localRule ?: @[]];
+    else if (self.mode == LNBLModeRemoteRules) arrays = @[config.remoteRules ?: @[]];
+    else arrays = @[config.localRule ?: @[], config.remoteRules ?: @[]];
+    for (NSArray *a in arrays) {
+        for (NSInteger i = 0; i < (NSInteger)a.count; i++) {
+            if (!ptrContains(self.selected, a[(NSUInteger)i])) continue;
+            NSInteger j = i + delta;
+            if (j >= 0 && j < (NSInteger)a.count && !ptrContains(self.selected, a[(NSUInteger)j])) return YES;
+        }
+    }
+    return NO;
+}
+
+- (UIMenu *)buildActionMenu {
+    BOOL has = self.selected.count > 0;
+    BOOL toggleable = NO, anyEnabled = NO, anyDisabled = NO;
+    for (id item in self.selected) {
+        id t = pluginObject(item);
+        if (![t respondsToSelector:NSSelectorFromString(@"setEnable:")]) continue;
+        toggleable = YES;
+        if (boolv(t, @"enable")) anyEnabled = YES;
+        else anyDisabled = YES;
+    }
+    BOOL canUp = [self canMoveBy:-1];
+    BOOL canDown = [self canMoveBy:1];
+
+    NSString *copyTitle = @"复制链接";
+    if (self.mode == LNBLModeLocalRules) copyTitle = @"复制规则文本";
+    else if (self.mode == LNBLModeRules) copyTitle = @"复制选中内容";
+
+    __weak LNBatchVC *ws = self;
+    UIAction *copy = [UIAction actionWithTitle:copyTitle image:[UIImage systemImageNamed:@"doc.on.doc"]
+                                     identifier:nil handler:^(UIAction *a) { [ws copySelected]; }];
+    UIAction *enable = [UIAction actionWithTitle:@"启用" image:[UIImage systemImageNamed:@"checkmark.circle"]
+                                      identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
+    UIAction *disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
+                                       identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
+    UIAction *up = [UIAction actionWithTitle:@"上移" image:[UIImage systemImageNamed:@"arrow.up"]
+                                  identifier:nil handler:^(UIAction *a) { [ws moveSelectedBy:-1]; }];
+    UIAction *down = [UIAction actionWithTitle:@"下移" image:[UIImage systemImageNamed:@"arrow.down"]
+                                    identifier:nil handler:^(UIAction *a) { [ws moveSelectedBy:1]; }];
+
+    if (!has) copy.attributes = UIMenuElementAttributesDisabled;
+    if (!toggleable || !anyDisabled) enable.attributes = UIMenuElementAttributesDisabled;
+    if (!toggleable || !anyEnabled) disable.attributes = UIMenuElementAttributesDisabled;
+    if (!canUp) up.attributes = UIMenuElementAttributesDisabled;
+    if (!canDown) down.attributes = UIMenuElementAttributesDisabled;
+    return [UIMenu menuWithTitle:@"" children:@[copy, enable, disable, up, down]];
+}
+
+- (void)copySelected {
+    NSMutableArray *lines = [NSMutableArray array];
+    for (id item in [self.selected copy]) {
+        NSString *s = nil;
+        if (self.mode == LNBLModePlugins) {
+            s = strv(pluginObject(item), @"remoteUrl");
+        } else {
+            id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule");
+            if ([item isKindOfClass:NSClassFromString(@"RemoteRule")] || [inner isKindOfClass:NSClassFromString(@"RemoteRule")]) {
+                s = strv([inner isKindOfClass:NSClassFromString(@"RemoteRule")] ? inner : item, @"remoteUrl");
+            } else {
+                s = strv(inner ?: item, @"playload");
+            }
+        }
+        if (s.length) [lines addObject:s];
+    }
+    if (!lines.count) {
+        [self showToast:@"没有可复制的内容"];
+        return;
+    }
+    UIPasteboard.generalPasteboard.string = [lines componentsJoinedByString:@"\n"];
+    [self showToast:[NSString stringWithFormat:@"已复制 %lu 项", (unsigned long)lines.count]];
+}
+
+- (void)setSelectedEnabled:(BOOL)enable {
+    NSInteger changed = 0;
+    for (id item in [self.selected copy]) {
+        if (setBoolv(pluginObject(item), @"setEnable:", enable)) changed++;
+    }
+    if (!changed) {
+        [self showToast:@"选中的项目不支持启用/禁用"];
+        return;
+    }
+    [self commitChange];
+    [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
+}
+
+- (void)moveSelectedBy:(NSInteger)delta {
+    LNDCConfigModel *config = configForHost(self.host);
+    if (!config) {
+        [self showToast:@"未取到当前配置"];
+        return;
+    }
+    BOOL changed = NO;
+    if (self.mode == LNBLModePlugins) {
+        config.plugins = arrayByMovingSelected(config.plugins ?: @[], self.selected, delta, &changed);
+    } else if (self.mode == LNBLModeLocalRules) {
+        config.localRule = arrayByMovingSelected(config.localRule ?: @[], self.selected, delta, &changed);
+    } else if (self.mode == LNBLModeRemoteRules) {
+        config.remoteRules = arrayByMovingSelected(config.remoteRules ?: @[], self.selected, delta, &changed);
+    } else {
+        config.localRule = arrayByMovingSelected(config.localRule ?: @[], self.selected, delta, &changed);
+        config.remoteRules = arrayByMovingSelected(config.remoteRules ?: @[], self.selected, delta, &changed);
+    }
+    if (!changed) {
+        [self showToast:(delta < 0 ? @"已经在最前面" : @"已经在最后面")];
+        return;
+    }
+    [self commitChange];
+}
+
+- (void)commitChange {
+    LNDCConfigModel *config = configForHost(self.host);
+    @try {
+        [config saveConfigPlayload];
+    } @catch (NSException *e) {
+        LBL(@"保存异常 %@", e);
+    }
+    msgv(dataManager(), @"postChangeNoti");
+    [self refreshHost];
+    [self reloadData];
 }
 
 - (void)cancel { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -470,7 +751,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (self.mode == LNBLModePlugins) {
             NSMutableArray *plugins = [NSMutableArray array];
             for (id x in picked) {
-                id p = [x respondsToSelector:NSSelectorFromString(@"plugin")] ? msg0(x, @"plugin") : x;
+                id p = pluginObject(x);
                 if (p) [plugins addObject:p];
             }
             config.plugins = arrayByRemovingPtrs(config.plugins, plugins);
@@ -501,15 +782,18 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
     }
-    [self refreshHostWithLocal:newLocal remote:newRemote];
+    [self refreshHost];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
     [self showResult:(error ? [NSString stringWithFormat:@"部分操作失败：%@", error.localizedDescription] : @"已删除")
                  ok:(error == nil)];
 }
 
-- (void)refreshHostWithLocal:(NSArray *)local remote:(NSArray *)remote {
+- (void)refreshHost {
     UIViewController *vc = self.host;
     if (!vc) return;
+    LNDCConfigModel *cfg = configForHost(vc);
+    NSArray *local = cfg.localRule ?: @[];
+    NSArray *remote = cfg.remoteRules ?: @[];
     @try {
         if ([vc respondsToSelector:NSSelectorFromString(@"setRules:")]) [vc setValue:local forKey:@"rules"];
         if ([vc respondsToSelector:NSSelectorFromString(@"setRemoteAllRules:")]) [vc setValue:remote forKey:@"remoteAllRules"];
@@ -520,7 +804,43 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if ([list respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(list, @"reloadData");
         id col = msg0(vc, @"iconView");
         if ([col respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(col, @"reloadData");
+        if ([vc respondsToSelector:NSSelectorFromString(@"tableView")]) {
+            id tv = msg0(vc, @"tableView");
+            if ([tv respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(tv, @"reloadData");
+        }
     } @catch (NSException *e) { LBL(@"刷新异常 %@", e); }
+}
+
+- (void)showToast:(NSString *)text {
+    if (!self.toastLabel) {
+        UILabel *l = [[UILabel alloc] init];
+        l.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        l.textColor = UIColor.whiteColor;
+        l.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.78];
+        l.textAlignment = NSTextAlignmentCenter;
+        l.layer.cornerRadius = 14;
+        l.clipsToBounds = YES;
+        l.alpha = 0;
+        l.userInteractionEnabled = NO;
+        l.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:l];
+        [NSLayoutConstraint activateConstraints:@[
+            [l.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+            [l.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-20],
+            [l.heightAnchor constraintEqualToConstant:36],
+            [l.widthAnchor constraintGreaterThanOrEqualToConstant:100],
+        ]];
+        self.toastLabel = l;
+    }
+    self.toastLabel.text = [NSString stringWithFormat:@"  %@  ", text];
+    self.toastLabel.alpha = 1;
+    [self.view bringSubviewToFront:self.toastLabel];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideToast) object:nil];
+    [self performSelector:@selector(hideToast) withObject:nil afterDelay:1.4];
+}
+
+- (void)hideToast {
+    [UIView animateWithDuration:0.25 animations:^{ self.toastLabel.alpha = 0; }];
 }
 
 - (void)showResult:(NSString *)msg ok:(BOOL)ok {
