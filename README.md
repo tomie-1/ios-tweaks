@@ -40,3 +40,5 @@ scripts/build_tweak.sh 通用构建脚本
 - **souldicetweak** — SOUL 6.17 助手（`com.soulfx.souldicetweak`）：自定义骰子/猜拳、防撤回、无水印保存、去掉送礼与礼仪分等限制，配置存在 App 沙盒 `Library/Preferences/SoulFX/`。
 - **trollfoolsnoads** — TrollFools 去广告（`com.tomie.trollfoolsnoads`）：接管 `isAdvertisementHiddenV2`，应用列表里的推广卡片不再出现（官方版/修改版通用）。
 - **tftool** — TestFlight 批量「停止测试」（`com.tomie.tftool`）：在 TestFlight 里多选后一次性停掉多个 App 的测试，并标出每个 App 装的是测试版还是正式版。
+- **tfdevices** — TestFlight 设备伪装（`com.tomie.tfdevices`）：可切成 iPad / Apple TV / Mac 的机型与系统信息，并管理账号下的测试设备。
+- **tfinstallbypass** — 安装兼容性放行（`com.tomie.tfinstallbypass`）：默认关闭，存在标记文件时让 installd 跳过最低系统版本和设备家族检查。
