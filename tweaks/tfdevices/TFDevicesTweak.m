@@ -396,6 +396,24 @@ static void installEligibilityHooks(void) {
     hookBoolGetter(@"TFAppBuildEmbeddedBuild", @"installableByHostDevice", (IMP)hHostInstallable, &oHostInstallable);
 }
 
+// 兜底捕获 TFDeviceManager，避免 sessionContext 不暴露 deviceManager 时设备页取不到
+static IMP oDevMgrInit;
+static id hDevMgrInit(id self, SEL _cmd, id networkManager) {
+    id r = ((id (*)(id, SEL, id))oDevMgrInit)(self, _cmd, networkManager);
+    if (r) gDeviceMgr = r;
+    return r;
+}
+static void installDeviceManagerHook(void) {
+    Class c = objc_getClass("TFDeviceManager");
+    if (!c) { LOGS(@"[dev] 没有 TFDeviceManager"); return; }
+    Method m = class_getInstanceMethod(c, sel_registerName("initWithNetworkManager:"));
+    if (m) {
+        oDevMgrInit = method_getImplementation(m);
+        method_setImplementation(m, (IMP)hDevMgrInit);
+        LOGS(@"[dev] hook TFDeviceManager");
+    }
+}
+
 static void dumpMethods(NSString *clsName, int limit) {
     Class c = objc_getClass(clsName.UTF8String);
     if (!c) { LOGS(@"[api] 没有类 %@", clsName); return; }
@@ -781,6 +799,7 @@ __attribute__((constructor)) static void tfdevices_init(void) {
         installNetworkHook();
         installBuildLogHook();
         installEligibilityHooks();
+        installDeviceManagerHook();
         Class c = objc_getClass("OASAppList");
         if (c) {
             Method m;
