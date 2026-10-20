@@ -176,6 +176,27 @@ static LNDCConfigModel *currentConfig(void) {
     return [c isKindOfClass:NSClassFromString(@"DCConfigModel")] ? c : nil;
 }
 
+static LNDCConfigModel *configFromObject(id obj) {
+    if (!obj) return nil;
+    Class modelClass = NSClassFromString(@"DCConfigModel");
+    if (!modelClass) return nil;
+    @try {
+        SEL sel = NSSelectorFromString(@"currentConfigModel");
+        if ([obj respondsToSelector:sel]) {
+            id c = ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+            if ([c isKindOfClass:modelClass]) return c;
+        }
+    } @catch (NSException *e) {}
+    return nil;
+}
+static LNDCConfigModel *configForHost(id host) {
+    LNDCConfigModel *c = currentConfig();
+    if (c) return c;
+    c = configFromObject(host);
+    if (c) return c;
+    return currentConfig();
+}
+
 static void backupConfig(LNDCConfigModel *config) {
     @try {
         NSString *fileName = strv(config, @"fileName");
@@ -246,6 +267,23 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.navigationController.navigationBarHidden = NO;
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (self.sections.count == 0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self reloadData];
+            if (self.sections.count == 0) {
+                UILabel *l = [[UILabel alloc] initWithFrame:self.tableView.bounds];
+                l.text = @"没有可管理的项目\n或配置尚未就绪，请返回列表后重试";
+                l.numberOfLines = 2;
+                l.textAlignment = NSTextAlignmentCenter;
+                l.textColor = UIColor.secondaryLabelColor;
+                self.tableView.backgroundView = l;
+            }
+        });
+    }
+}
+
 - (void)buildBottomBar {
     CGFloat h = 54;
     self.bottomBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, h)];
@@ -284,7 +322,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)reloadData {
-    LNDCConfigModel *config = currentConfig();
+    LNDCConfigModel *config = configForHost(self.host);
     self.sections = [NSMutableArray array];
     if (!config) {
         self.title = @"批量";
@@ -404,7 +442,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)performDelete {
-    LNDCConfigModel *config = currentConfig();
+    LNDCConfigModel *config = configForHost(self.host);
     if (!config) {
         [self showResult:@"未取到当前配置" ok:NO];
         return;
