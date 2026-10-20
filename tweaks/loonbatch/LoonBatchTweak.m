@@ -424,9 +424,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)setupToolbar {
     self.selectAllItem = [[UIBarButtonItem alloc] initWithTitle:@"全选" style:UIBarButtonItemStylePlain
                                                          target:self action:@selector(toggleSelectAll)];
-    self.countItem = [[UIBarButtonItem alloc] initWithTitle:@"已选 0" style:UIBarButtonItemStylePlain
-                                                     target:nil action:nil];
-    self.countItem.enabled = NO;
+    UILabel *countLabel = [[UILabel alloc] init];
+    countLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    countLabel.textColor = UIColor.secondaryLabelColor;
+    countLabel.text = @"已选 0";
+    [countLabel sizeToFit];
+    self.countItem = [[UIBarButtonItem alloc] initWithCustomView:countLabel];
     self.actionItem = [[UIBarButtonItem alloc] initWithTitle:@"操作" style:UIBarButtonItemStylePlain
                                                       target:nil action:nil];
     self.deleteItem = [[UIBarButtonItem alloc] initWithTitle:@"删除" style:UIBarButtonItemStyleDone
@@ -573,7 +576,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)updateButtons {
     NSUInteger n = self.selected.count;
-    self.countItem.title = [NSString stringWithFormat:@"已选 %lu", (unsigned long)n];
+    UILabel *countLabel = (UILabel *)self.countItem.customView;
+    if ([countLabel isKindOfClass:[UILabel class]]) {
+        countLabel.text = [NSString stringWithFormat:@"已选 %lu", (unsigned long)n];
+        [countLabel sizeToFit];
+    }
     NSArray *all = [self allItems];
     BOOL allSelected = all.count > 0;
     for (id x in all) if (!ptrContains(self.selected, x)) { allSelected = NO; break; }
