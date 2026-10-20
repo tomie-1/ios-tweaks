@@ -30,6 +30,22 @@ SHA1: 0f2ea0af2bc5b6d4402b7be00ad61f4e1d110eb6
 SHA256: 06a3e3f3518c6670ce590760c3d563c6220be2ac60a34f5e72915c0af3fc567a
 SHA512: e9e5ffe7743016ff2112d1de4fde5ba87f52eef85462be716a526cad77444341063e36218bab0982bc5cdf36483ca4602577722c2adf14f312ccf7f42a64f8b5
 
+Package: com.tomie.tfinstallbypass
+Name: TFInstallBypass
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: 让 installd 跳过最低系统版本与设备家族检查（默认关闭，标记文件开启）
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm/com.tomie.tfinstallbypass_iphoneos-arm.deb
+Size: 4928
+MD5sum: b8bf3ffd99d44f983e9a5ccf5b3b3834
+SHA1: 3d02ed7b2deefbf5974710d8c55c856d70b0caa2
+SHA256: 7baa16e6f5fcf6d6fdf61db04b850862dd8b75e1f3969e95041c009896f6edd9
+SHA512: f111a3b8a2e49400073f9f1ffb12ff103735ec5d83bf25d467029e8428514a17f3c405037fbd971b1389ce2b35a752b22568cba152967148b499dcf7c81472c7
+
 Package: com.tomie.tftool
 Name: TFTool
 Version: 1.0.0
@@ -94,6 +110,22 @@ SHA1: 942b4e69c3166d90d3661e0e03cc0da99e98ccab
 SHA256: b20dfe16e9dff36d1dbba0b47c3ee556e74d94acd7f9c3f9616df21d99bba480
 SHA512: d1664c11736fd57192a8b82fb25a534d8104787539d8dcc89d96a669b78d09cfebb2095eee40c44280e31599b1c9af6bf4095d6f2e4159df7f534b87daefd236
 
+Package: com.tomie.tfinstallbypass
+Name: TFInstallBypass
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: 让 installd 跳过最低系统版本与设备家族检查（默认关闭，标记文件开启）
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64/com.tomie.tfinstallbypass_iphoneos-arm64.deb
+Size: 4944
+MD5sum: 955fc6a06a5cc9ab987776a3c9a99b76
+SHA1: c1ee29ffee2b70a2ec6dfd7049a29e910c421a41
+SHA256: 1c58a564dc46b8d33a73547e6d542cad928c801f3be98f01320ed3b8113e735e
+SHA512: 79007f3f3ed7bb8db9bed0a2c531a79cd52cdee4a1163c325116ebcfe96fdfaca117a1bd46e9a4b20af047c8f0c07c670250e897aa4ec7baa1e6a230825c1187
+
 Package: com.tomie.tftool
 Name: TFTool
 Version: 1.0.0
@@ -157,6 +189,22 @@ MD5sum: 96850ec264700c0adbb7c694bcf133bd
 SHA1: fe936da90a4957f239ff639ab280e20f6a7981fd
 SHA256: 182e5a6c0a7ce64d0a938847a0f568167925457b761be6bae5300b49cd2c427c
 SHA512: 287afa6d5321da1988ad09236c01ec8d998e52891ad5a846af0c02d535b009956d7a21728edb3efcaa7186820b710d8b99a3527aadc46ca5bd1b068e0f983683
+
+Package: com.tomie.tfinstallbypass
+Name: TFInstallBypass
+Version: 1.0.0
+Architecture: iphoneos-arm64e
+Description: 让 installd 跳过最低系统版本与设备家族检查（默认关闭，标记文件开启）
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64e/com.tomie.tfinstallbypass_iphoneos-arm64e.deb
+Size: 4928
+MD5sum: 69d354aa7e93081bd7fb6f01e2ab948c
+SHA1: e1fd323c938a487d91db1355c51442e894d823fc
+SHA256: f5ffa4583738ed9374bf48a0ab80b3719a5a914730aa161244bf3cf76eacba45
+SHA512: 21df851e8dfc770cfc5c7077b2dfe00a77c1038726f55b59bc79df2cbafa99876f7dda7386fab595b5361c6d53120d86c3c69b2db328307fd478808009ef5fce
 
 Package: com.tomie.tftool
 Name: TFTool
