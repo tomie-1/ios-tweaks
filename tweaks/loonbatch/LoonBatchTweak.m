@@ -655,7 +655,11 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
         insertRow = hover.row + (p.y > CGRectGetMidY(r) ? 1 : 0);
     } else if (dest && dest.section == section) {
         insertRow = MIN((NSInteger)dest.row, (NSInteger)old.count);
+    } else {
+        CGRect first = [tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:section]];
+        insertRow = (p.y < CGRectGetMinY(first)) ? 0 : (NSInteger)old.count;
     }
+    LBL(@"拖动释放 dest=%@ hover=%@ y=%.1f insertRow=%ld", dest, hover, p.y, (long)insertRow);
 
     NSMutableArray *rest = [NSMutableArray array];
     NSInteger insertIndex = 0;
