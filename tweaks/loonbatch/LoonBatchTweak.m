@@ -310,6 +310,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (local.count) [self.sections addObject:@{@"title": @"本地规则", @"items": local}];
         if (remote.count) [self.sections addObject:@{@"title": @"远程规则", @"items": remote}];
     }
+    NSUInteger total = 0;
+    for (NSDictionary *sec in self.sections) total += [sec[@"items"] count];
+    LBL(@"批量页 mode=%ld config=%@ sections=%lu items=%lu", (long)self.mode,
+        NSStringFromClass([config class]), (unsigned long)self.sections.count, (unsigned long)total);
     [self.tableView reloadData];
 }
 
@@ -499,9 +503,9 @@ static char kLBModeKey;
 
 - (LNBLMode)modeForClass:(NSString *)cn {
     if ([cn containsString:@"PluginList"]) return LNBLModePlugins;
-    if ([cn isEqualToString:@"AllRulesVC"]) return LNBLModeRules;
-    if ([cn isEqualToString:@"LNLocalRuleListVC"]) return LNBLModeLocalRules;
-    if ([cn isEqualToString:@"RemoteRuleListVC"]) return LNBLModeRemoteRules;
+    if ([cn containsString:@"AllRulesVC"]) return LNBLModeRules;
+    if ([cn containsString:@"LNLocalRuleListVC"]) return LNBLModeLocalRules;
+    if ([cn containsString:@"RemoteRuleListVC"]) return LNBLModeRemoteRules;
     return 0;
 }
 
