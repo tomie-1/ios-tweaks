@@ -14,6 +14,22 @@ SHA1: e67be53e902e56d8716cae178a3d53a7f3590f5e
 SHA256: 62b6d43914bd457f94a4f96fb0263257e00aef6d067eec3f08e7fae17209785d
 SHA512: 5c2f8653df059b1bc2e9329ec6d9b6b74e7fbef3187f0eaaa9d837d6615c237459b569776e3bdd0183962fcf468820d577fc8a15b157abb12ad194207d2aaa60
 
+Package: com.tomie.loonbatch
+Name: LoonBatch
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Loon 插件/规则批量选择与删除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm/com.tomie.loonbatch_iphoneos-arm.deb
+Size: 14752
+MD5sum: 31d2cc2c9bd12ce6b670d25a6f4f0094
+SHA1: 1e216aa9a25e7092cc9e303eae6887c4da0d0750
+SHA256: 0a70599b71fa726bdc5aa547de4bdcdd7d606294633776dcc710d4d5db2b02c2
+SHA512: 88eea5f3924e1482911bd9929dba2008f807c1456ce378f65366caed09abf821d175ffff0623775637a36a4c185e01bf109f178f7531dce3451c2aa0e84d28e2
+
 Package: com.tomie.tfdevices
 Name: TFDevices
 Version: 1.0.0
@@ -94,6 +110,22 @@ SHA1: 981ab3f05f5e030882df380d862baa4952bbba74
 SHA256: 21cd83622987575a1c32284ca4fd0382a735f310e3e309e70bc22d5972caf123
 SHA512: 2c0c32cd6285c64b33e45894bfa07754c73eecfbe35b001c8a4115f37b6a008362dcaa564e627317aeadb27fcb3d4b855b092bd7f4bf566995e78eeb4d82762c
 
+Package: com.tomie.loonbatch
+Name: LoonBatch
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Loon 插件/规则批量选择与删除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64/com.tomie.loonbatch_iphoneos-arm64.deb
+Size: 14780
+MD5sum: 441cd1e6d6e44a359a70a8dd4523bf58
+SHA1: 4980f5a323e731aa04c5fdea928cac505b39beae
+SHA256: 7424ceb590561018caa6f9c5b33a7526b62152f552975ebb8d69ff48548e64fc
+SHA512: 65cdd77f137faab89b156f5c8d33d917a5f44cbf6310d4caa3cb2938fe07133d7d39d07a21bd183a2b3769acd118f52dd218ad72a8b6969cae2a87b85fc0e140
+
 Package: com.tomie.tfdevices
 Name: TFDevices
 Version: 1.0.0
@@ -173,6 +205,22 @@ MD5sum: 2c7e4c3d8e8709521a9cfd4b29cbceac
 SHA1: be35d966cd71fbf73d061dd2c466f09f6ea3fd6e
 SHA256: 89e18c8b41c6248b5b7d08c108788f4a164b3de1dd3fde4eb56bd31816c3551f
 SHA512: ccee90e60c6bb66e5ff67d73704ef5db7568c3ea1ca479b8a5eeaa9d47ad608a587103a3e3a5d9fedda0bae264c1d9ea00cd05df9d69dcfe9709208aa3061bdf
+
+Package: com.tomie.loonbatch
+Name: LoonBatch
+Version: 1.0.0
+Architecture: iphoneos-arm64e
+Description: Loon 插件/规则批量选择与删除
+Maintainer: tomie
+Author: tomie
+Section: Tweaks
+Depends: mobilesubstrate
+Filename: ./debs/iphoneos-arm64e/com.tomie.loonbatch_iphoneos-arm64e.deb
+Size: 14756
+MD5sum: cc749ac3572374c7d85a648384c8a22f
+SHA1: fb031c70598929b6d235ffe726538e33ed93cff2
+SHA256: d211d77e776d58744001ea4ddde6001298603e15551b7fe99e0dc0c23a5cf073
+SHA512: 73a81d872d3974dc36b021f2969b71faddc4ebe707108f3eb02d292ed6d068e462a99ff0437c4e01b78b3785e1195ac5a84bb5be001a55ab3b884edb4b6ac418
 
 Package: com.tomie.tfdevices
 Name: TFDevices
