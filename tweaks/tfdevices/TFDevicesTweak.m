@@ -62,24 +62,82 @@ static id gAppList, gSession, gDeviceMgr;
 static NSArray *gDevices;
 static BOOL gSpoof;                  // 是否启用伪装
 static NSString *gSpoofModel, *gSpoofProductType, *gSpoofSystemVersion, *gSpoofBuildVersion;
+static NSString *gSpoofOSName, *gSpoofPlatformName;
+static BOOL gSpoofIOSCompat;
+static long gSpoofPlatformValue;
 static NSString *spoofPath(void) { return docPath(@"tfspoof.plist"); }
+static long platformValueForName(NSString *name);
+
+// 预设只改 App 自己看到的设备信息；真正安装时 installd 仍会检查系统版本/设备家族。
+static NSArray<NSDictionary *> *spoofPresets(void) {
+    return @[
+        @{@"Title": @"iPad Pro 11 英寸 (第 4 代)",
+          @"Model": @"iPad Pro (11-inch) (4th generation)",
+          @"ProductType": @"iPad13,4",
+          @"SystemVersion": @"18.5",
+          @"BuildVersion": @"22F76",
+          @"OSName": @"iOS",
+          @"PlatformName": @"ios",
+          @"IOSCompat": @YES},
+        @{@"Title": @"Apple TV 4K (第 3 代)",
+          @"Model": @"Apple TV 4K (3rd generation)",
+          @"ProductType": @"AppleTV14,1",
+          @"SystemVersion": @"18.5",
+          @"BuildVersion": @"22L256",
+          @"OSName": @"tvOS",
+          @"PlatformName": @"appletvos",
+          @"IOSCompat": @NO},
+        @{@"Title": @"MacBook Pro 14 英寸 (M1 Pro)",
+          @"Model": @"MacBook Pro (14-inch, 2021)",
+          @"ProductType": @"MacBookPro18,3",
+          @"SystemVersion": @"15.5",
+          @"BuildVersion": @"24F74",
+          @"OSName": @"macOS",
+          @"PlatformName": @"osx",
+          @"IOSCompat": @YES},
+    ];
+}
+
+static void applySpoofPreset(NSDictionary *p) {
+    gSpoofModel = p[@"Model"];
+    gSpoofProductType = p[@"ProductType"];
+    gSpoofSystemVersion = p[@"SystemVersion"];
+    gSpoofBuildVersion = p[@"BuildVersion"];
+    gSpoofOSName = p[@"OSName"];
+    gSpoofPlatformName = p[@"PlatformName"];
+    gSpoofIOSCompat = [p[@"IOSCompat"] boolValue];
+    gSpoofPlatformValue = platformValueForName(gSpoofPlatformName);
+}
+
 static void loadSpoofConfig(void) {
     NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:spoofPath()];
     gSpoof = [d[@"Enabled"] boolValue];
-    gSpoofModel = d[@"Model"] ?: @"iPad Pro (11-inch) (4th generation)";
-    gSpoofProductType = d[@"ProductType"] ?: @"iPad13,4";
-    gSpoofSystemVersion = d[@"SystemVersion"] ?: @"18.5";
-    gSpoofBuildVersion = d[@"BuildVersion"] ?: @"22F76";
-    LOGS(@"[spoof] 配置: enabled=%d model=%@ productType=%@ os=%@ build=%@",
-         gSpoof, gSpoofModel, gSpoofProductType, gSpoofSystemVersion, gSpoofBuildVersion);
+    if (d[@"ProductType"] || d[@"Model"]) {
+        gSpoofModel = d[@"Model"] ?: @"iPad Pro (11-inch) (4th generation)";
+        gSpoofProductType = d[@"ProductType"] ?: @"iPad13,4";
+        gSpoofSystemVersion = d[@"SystemVersion"] ?: @"18.5";
+        gSpoofBuildVersion = d[@"BuildVersion"] ?: @"22F76";
+        gSpoofOSName = d[@"OSName"] ?: @"iOS";
+        gSpoofPlatformName = d[@"PlatformName"] ?: @"ios";
+        gSpoofIOSCompat = d[@"IOSCompat"] ? [d[@"IOSCompat"] boolValue] : YES;
+    } else {
+        applySpoofPreset(spoofPresets().firstObject);
+    }
+    gSpoofPlatformValue = platformValueForName(gSpoofPlatformName);
+    LOGS(@"[spoof] 配置: enabled=%d model=%@ productType=%@ os=%@ build=%@ platform=%@/%@ iosCompat=%d",
+         gSpoof, gSpoofModel, gSpoofProductType, gSpoofSystemVersion, gSpoofBuildVersion,
+         gSpoofPlatformName, gSpoofOSName, gSpoofIOSCompat);
 }
 static void saveSpoofConfig(void) {
     NSDictionary *d = @{@"Enabled": @(gSpoof), @"Model": gSpoofModel ?: @"",
                         @"ProductType": gSpoofProductType ?: @"",
                         @"SystemVersion": gSpoofSystemVersion ?: @"",
-                        @"BuildVersion": gSpoofBuildVersion ?: @""};
+                        @"BuildVersion": gSpoofBuildVersion ?: @"",
+                        @"OSName": gSpoofOSName ?: @"",
+                        @"PlatformName": gSpoofPlatformName ?: @"",
+                        @"IOSCompat": @(gSpoofIOSCompat)};
     [d writeToFile:spoofPath() atomically:YES];
-    LOGS(@"[spoof] 已保存 enabled=%d", gSpoof);
+    LOGS(@"[spoof] 已保存 enabled=%d platform=%@", gSpoof, gSpoofPlatformName);
 }
 static BOOL gSkipAsync;
 
@@ -121,10 +179,23 @@ static long cdIntValue(NSString *selName) {
     if (![c respondsToSelector:s]) return -999;
     @try { return ((long (*)(id, SEL))objc_msgSend)(c, s); } @catch (NSException *e) { return -999; }
 }
+static long platformValueForName(NSString *name) {
+    // 这些值来自 TestFlight 的平台顺序：iOS=1、macOS=2、tvOS=3、visionOS=4。
+    if ([name isEqualToString:@"osx"]) return 2;
+    if ([name isEqualToString:@"appletvos"]) return 3;
+    if ([name isEqualToString:@"xros"]) return 4;
+    if ([name isEqualToString:@"watchos"]) return 5;
+    return 1;
+}
+
 static void logCurrentDevice(void) {
     LOGS(@"[self] productType=%@ model=%@ systemVersion=%@ build=%@ UDID=%@ GUID=%@",
          cdStrValue(@"productType"), cdStrValue(@"model"), cdStrValue(@"systemVersion"),
          cdStrValue(@"buildVersion"), cdStrValue(@"UDID"), cdStrValue(@"GUID"));
+    LOGS(@"[self] platformName=%@ OS=%@ systemName=%@ productName=%@ hardwareName=%@ deviceName=%@ rosetta=%ld",
+         cdStrValue(@"platformName"), cdStrValue(@"OS"), cdStrValue(@"systemName"),
+         cdStrValue(@"productName"), cdStrValue(@"hardwareName"), cdStrValue(@"deviceName"),
+         cdIntValue(@"rosettaIsPermitted"));
     LOGS(@"[self] compatibleProductType=%@ variants=%@ thinned=%@ arch=%@ platform(long)=%ld iosCompat=%ld",
          cdStrValue(@"compatibleProductType"), cdStrValue(@"compatibleAppVariants"),
          cdStrValue(@"thinnedAppVariantId"), cdStrValue(@"deviceArchitecture"),
@@ -133,14 +204,15 @@ static void logCurrentDevice(void) {
 
 // 类方法 hook：返回对象
 static IMP oSoftwareVersion, oModel, oProductType, oCompatibleProductType, oBuildVersion;
-static IMP oPlatform, oIOSCompat;
+static IMP oPlatform, oIOSCompat, oPlatformName, oOSName, oSystemName;
+static IMP oCompatibleVariants, oThinnedVariant;
 
 static id hSystemVersion(id self, SEL _cmd) {
     if (gSpoof && gSpoofSystemVersion.length) return gSpoofSystemVersion;
     return ((id (*)(id, SEL))oSoftwareVersion)(self, _cmd);
 }
 static id hModel(id self, SEL _cmd) {
-    if (gSpoof && gSpoofModel.length) return gSpoofModel;
+    if (gSpoof && gSpoofProductType.length) return gSpoofProductType;
     return ((id (*)(id, SEL))oModel)(self, _cmd);
 }
 static id hProductType(id self, SEL _cmd) {
@@ -156,11 +228,32 @@ static id hBuildVersion(id self, SEL _cmd) {
     return ((id (*)(id, SEL))oBuildVersion)(self, _cmd);
 }
 static long hPlatform(id self, SEL _cmd) {
-    return ((long (*)(id, SEL))oPlatform)(self, _cmd);   // 平台枚举先不动，避免把 iOS 报成 tvOS
+    if (gSpoof) return gSpoofPlatformValue;
+    return ((long (*)(id, SEL))oPlatform)(self, _cmd);
 }
 static BOOL hIOSCompat(id self, SEL _cmd) {
-    if (gSpoof) return YES;
+    if (gSpoof) return gSpoofIOSCompat;
     return ((BOOL (*)(id, SEL))oIOSCompat)(self, _cmd);
+}
+static id hPlatformName(id self, SEL _cmd) {
+    if (gSpoof && gSpoofPlatformName.length) return gSpoofPlatformName;
+    return ((id (*)(id, SEL))oPlatformName)(self, _cmd);
+}
+static id hOSName(id self, SEL _cmd) {
+    if (gSpoof && gSpoofOSName.length) return gSpoofOSName;
+    return ((id (*)(id, SEL))oOSName)(self, _cmd);
+}
+static id hSystemName(id self, SEL _cmd) {
+    if (gSpoof && gSpoofOSName.length) return gSpoofOSName;
+    return ((id (*)(id, SEL))oSystemName)(self, _cmd);
+}
+static id hCompatibleVariants(id self, SEL _cmd) {
+    if (gSpoof && gSpoofProductType.length) return @[gSpoofProductType];
+    return ((id (*)(id, SEL))oCompatibleVariants)(self, _cmd);
+}
+static id hThinnedVariant(id self, SEL _cmd) {
+    if (gSpoof && gSpoofProductType.length) return gSpoofProductType;
+    return ((id (*)(id, SEL))oThinnedVariant)(self, _cmd);
 }
 
 static void installSpoofHooks(void) {
@@ -174,7 +267,54 @@ static void installSpoofHooks(void) {
     if ((m = class_getClassMethod(c, sel_registerName("buildVersion")))) { oBuildVersion = method_getImplementation(m); method_setImplementation(m, (IMP)hBuildVersion); }
     if ((m = class_getClassMethod(c, sel_registerName("platform")))) { oPlatform = method_getImplementation(m); method_setImplementation(m, (IMP)hPlatform); }
     if ((m = class_getClassMethod(c, sel_registerName("supportsIOSAppCompatibility")))) { oIOSCompat = method_getImplementation(m); method_setImplementation(m, (IMP)hIOSCompat); }
-    LOGS(@"[spoof] hook 完成");
+    if ((m = class_getClassMethod(c, sel_registerName("platformName")))) { oPlatformName = method_getImplementation(m); method_setImplementation(m, (IMP)hPlatformName); }
+    if ((m = class_getClassMethod(c, sel_registerName("OS")))) { oOSName = method_getImplementation(m); method_setImplementation(m, (IMP)hOSName); }
+    if ((m = class_getClassMethod(c, sel_registerName("systemName")))) { oSystemName = method_getImplementation(m); method_setImplementation(m, (IMP)hSystemName); }
+    if ((m = class_getClassMethod(c, sel_registerName("compatibleAppVariants")))) { oCompatibleVariants = method_getImplementation(m); method_setImplementation(m, (IMP)hCompatibleVariants); }
+    if ((m = class_getClassMethod(c, sel_registerName("thinnedAppVariantId")))) { oThinnedVariant = method_getImplementation(m); method_setImplementation(m, (IMP)hThinnedVariant); }
+    LOGS(@"[spoof] hook 完成 platformValue=%ld", gSpoofPlatformValue);
+}
+
+// 记录网络请求头，确认 TestFlight 实际带上了哪个机型
+static IMP oEncodeRequest;
+static id hEncodeRequest(id self, SEL _cmd, id request, id parameters) {
+    id out = ((id (*)(id, SEL, id, id))oEncodeRequest)(self, _cmd, request, parameters);
+    @try {
+        if ([out isKindOfClass:[NSURLRequest class]]) {
+            NSURLRequest *r = (NSURLRequest *)out;
+            NSMutableString *hs = [NSMutableString string];
+            NSArray *secretKeys = @[@"Cookie", @"X-Session-Id", @"X-Session-Digest",
+                                    @"X-Apple-AMD", @"X-Apple-AMD-M", @"X-Apple-TA-Device"];
+            [r.allHTTPHeaderFields enumerateKeysAndObjectsUsingBlock:^(NSString *k, NSString *v, BOOL *stop) {
+                [hs appendFormat:@"%@=%@; ", k, [secretKeys containsObject:k] ? @"<隐藏>" : v];
+            }];
+            NSString *body = @"";
+            NSString *url = r.URL.absoluteString ?: @"";
+            BOOL sensitive = [url containsString:@"/session/"] || [url containsString:@"/authenticate"] || [url containsString:@"/redeem"];
+            if (sensitive) {
+                body = @"<隐藏>";
+            } else if (r.HTTPBody.length) {
+                body = [[NSString alloc] initWithData:r.HTTPBody encoding:NSUTF8StringEncoding] ?: @"";
+                if (!body.length) body = [NSString stringWithFormat:@"<%lu bytes>", (unsigned long)r.HTTPBody.length];
+                if (body.length > 1200) body = [[body substringToIndex:1200] stringByAppendingString:@"…"];
+            }
+            LOGS(@"[net] %@ %@ heads=[%@] body=%@", r.HTTPMethod, r.URL.absoluteString, hs, body);
+        }
+    } @catch (NSException *e) { LOGS(@"[net] ex %@", e.name); }
+    return out;
+}
+
+static void installNetworkHook(void) {
+    Class c = objc_getClass("TFURLRequestEncoder");
+    if (!c) { LOGS(@"[net] 没有 TFURLRequestEncoder"); return; }
+    Method m = class_getClassMethod(c, sel_registerName("requestByEncodingRequest:parameters:"));
+    if (m) {
+        oEncodeRequest = method_getImplementation(m);
+        method_setImplementation(m, (IMP)hEncodeRequest);
+        LOGS(@"[net] hook 完成");
+    } else {
+        LOGS(@"[net] 没有 requestByEncodingRequest:parameters:");
+    }
 }
 
 static void dumpMethods(NSString *clsName, int limit) {
@@ -240,14 +380,21 @@ static void reloadDevices(void (^done)(void)) {
         if ([gDeviceMgr respondsToSelector:ls]) {
             LOGS(@"[dev] 调 loadDevicesWithCompletionBlock:");
             ((void (*)(id, SEL, id))objc_msgSend)(gDeviceMgr, ls, ^(id a, id b) {
-                uintptr_t pa = (uintptr_t)a;
+                uintptr_t pa = (uintptr_t)a, pb = (uintptr_t)b;
                 BOOL looksObject = (pa > 0x100000000ULL && (pa & 0x7) == 0);
-                LOGS(@"[dev] 回调 a=%p(%@) b=%p", a, looksObject ? NSStringFromClass([a class]) : @"非对象", b);
+                BOOL bLooksObject = (pb > 0x100000000ULL && (pb & 0x7) == 0);
+                NSString *bInfo = @"-";
+                if (bLooksObject) {
+                    @try { bInfo = [b isKindOfClass:[NSError class]] ? [(NSError *)b description] : NSStringFromClass([b class]); }
+                    @catch (NSException *e) { bInfo = @"<读取失败>"; }
+                }
+                LOGS(@"[dev] 回调 a=%p(%@) b=%p(%@)", a, looksObject ? NSStringFromClass([a class]) : @"非对象", b, bInfo);
                 if (looksObject) {
                     @try {
                         NSArray *arr = nil;
                         if ([a isKindOfClass:[NSArray class]]) arr = a;
                         else if ([a respondsToSelector:tfSel(@"devices")]) arr = idSafe(a, @"devices");
+                        if (!arr.count && bLooksObject && [b isKindOfClass:[NSArray class]]) arr = b;
                         if (arr.count) { gDevices = arr; logDevices(arr, @"loadDevices"); }
                     } @catch (NSException *e) { LOGS(@"[dev] 解析 ex %@", e.name); }
                 }
@@ -383,15 +530,43 @@ static NSString *deviceSubtitle(id d) {
 }
 
 - (void)toggleSpoof {
-    gSpoof = !gSpoof;
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:@"伪装设备"
+                         message:@"只影响 TestFlight 自己的识别结果；安装时系统仍会校验。切换后需重启 TestFlight。"
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *presets = spoofPresets();
+    for (NSUInteger i = 0; i < presets.count; i++) {
+        NSDictionary *p = presets[i];
+        BOOL current = gSpoof && [gSpoofProductType isEqualToString:p[@"ProductType"]];
+        NSString *title = current ? [NSString stringWithFormat:@"✓ %@", p[@"Title"]] : p[@"Title"];
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self applyPreset:p];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"恢复真实设备" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+        gSpoof = NO;
+        saveSpoofConfig();
+        self.spoofItem.title = @"伪装";
+        [self showRestartAlert:@"已恢复真实设备信息。"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.barButtonItem = self.spoofItem;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (void)applyPreset:(NSDictionary *)p {
+    applySpoofPreset(p);
+    gSpoof = YES;
     saveSpoofConfig();
-    self.spoofItem.title = gSpoof ? @"伪装中" : @"伪装";
+    self.spoofItem.title = @"伪装中";
+    [self showRestartAlert:[NSString stringWithFormat:@"已设为 %@\n%@ / %@ %@",
+                             p[@"Title"], gSpoofProductType, gSpoofOSName, gSpoofSystemVersion]];
+}
+
+- (void)showRestartAlert:(NSString *)message {
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:(gSpoof ? @"已开启伪装" : @"已关闭伪装")
-                         message:(gSpoof
-                                  ? [NSString stringWithFormat:@"现在向服务器上报：\n型号 %@\n机型 %@\n系统 %@ (%@)\n\n需要重启 TestFlight 才会重新拉取列表。",
-                                     gSpoofModel, gSpoofProductType, gSpoofSystemVersion, gSpoofBuildVersion]
-                                  : @"已恢复真实设备信息，重启 TestFlight 生效。")
+        alertControllerWithTitle:@"重启 TestFlight 生效"
+                         message:[message stringByAppendingString:@"\n\n请从后台划掉 TestFlight 再重新打开。"]
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:ac animated:YES completion:nil];
@@ -524,6 +699,7 @@ __attribute__((constructor)) static void tfdevices_init(void) {
         loadSpoofConfig();
         logCurrentDevice();
         installSpoofHooks();
+        installNetworkHook();
         Class c = objc_getClass("OASAppList");
         if (c) {
             Method m;
