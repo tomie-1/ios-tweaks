@@ -317,6 +317,36 @@ static void installNetworkHook(void) {
     }
 }
 
+// 记录每个 build 的兼容状态，判断“只能在此设备测试”是服务器下发还是客户端算的
+static IMP oSetCompatState;
+static void hSetCompatState(id self, SEL _cmd, unsigned long state) {
+    static int n = 0;
+    if (n++ < 80) {
+        @try {
+            LOGS(@"[build] state=%lu name=%@ key=%@ platform=%@/%ld family=%ld minOS=%@ platCompat=%ld hwCompat=%ld compat=%ld minOSCompat=%ld universal=%ld variant=%@",
+                 state, strSafe(self, @"name"), strSafe(self, @"platformKey"),
+                 strSafe(self, @"platform"), (long)intSafe(self, @"platform"),
+                 (long)intSafe(self, @"deviceFamily"), strSafe(self, @"minOS"),
+                 (long)intSafe(self, @"platformCompatible"), (long)intSafe(self, @"hardwareCompatible"),
+                 (long)intSafe(self, @"compatible"), (long)intSafe(self, @"minOSCompatible"),
+                 (long)intSafe(self, @"universal"), strSafe(self, @"variantId"));
+        } @catch (NSException *e) {}
+    }
+    ((void (*)(id, SEL, unsigned long))oSetCompatState)(self, _cmd, state);
+}
+static void installBuildLogHook(void) {
+    Class c = objc_getClass("TFAppBuild");
+    if (!c) { LOGS(@"[build] 没有 TFAppBuild"); return; }
+    Method m = class_getInstanceMethod(c, sel_registerName("setCompatibilityState:"));
+    if (m) {
+        LOGS(@"[build] setCompatibilityState 编码 %s", method_getTypeEncoding(m) ?: "?");
+        oSetCompatState = method_getImplementation(m);
+        method_setImplementation(m, (IMP)hSetCompatState);
+    } else {
+        LOGS(@"[build] 没有 setCompatibilityState:");
+    }
+}
+
 static void dumpMethods(NSString *clsName, int limit) {
     Class c = objc_getClass(clsName.UTF8String);
     if (!c) { LOGS(@"[api] 没有类 %@", clsName); return; }
@@ -700,6 +730,7 @@ __attribute__((constructor)) static void tfdevices_init(void) {
         logCurrentDevice();
         installSpoofHooks();
         installNetworkHook();
+        installBuildLogHook();
         Class c = objc_getClass("OASAppList");
         if (c) {
             Method m;
