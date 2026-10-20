@@ -347,6 +347,55 @@ static void installBuildLogHook(void) {
     }
 }
 
+// 伪装时把安装资格相关字段强制为可用，让 UI 愿意显示/点击“安装”
+static IMP oEligible, oPlatCompat, oMinOSCompat, oHWCompat, oBuildCompat, oHostInstallable;
+static BOOL hEligible(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oEligible)(self, _cmd);
+}
+static BOOL hPlatCompat(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oPlatCompat)(self, _cmd);
+}
+static BOOL hMinOSCompat(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oMinOSCompat)(self, _cmd);
+}
+static BOOL hHWCompat(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oHWCompat)(self, _cmd);
+}
+static BOOL hBuildCompat(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oBuildCompat)(self, _cmd);
+}
+static BOOL hHostInstallable(id self, SEL _cmd) {
+    if (gSpoof) return YES;
+    return ((BOOL (*)(id, SEL))oHostInstallable)(self, _cmd);
+}
+static void hookBoolGetter(NSString *clsName, NSString *selName, IMP newImp, IMP *oldImp) {
+    Class c = objc_getClass(clsName.UTF8String);
+    if (!c) { LOGS(@"[elig] 没有 %@", clsName); return; }
+    Method m = class_getInstanceMethod(c, NSSelectorFromString(selName));
+    if (!m) { LOGS(@"[elig] 没有 -[%@ %@]", clsName, selName); return; }
+    const char *enc = method_getTypeEncoding(m);
+    if (!enc || (enc[0] != 'B' && enc[0] != 'c')) {
+        LOGS(@"[elig] 跳过 -[%@ %@] 编码 %s", clsName, selName, enc ?: "?");
+        return;
+    }
+    *oldImp = method_getImplementation(m);
+    method_setImplementation(m, newImp);
+    LOGS(@"[elig] hook -[%@ %@]", clsName, selName);
+}
+static void installEligibilityHooks(void) {
+    hookBoolGetter(@"TFApp", @"isEligibleForInstallOrUpdate", (IMP)hEligible, &oEligible);
+    hookBoolGetter(@"TFAppBuild", @"platformCompatible", (IMP)hPlatCompat, &oPlatCompat);
+    hookBoolGetter(@"TFAppBuild", @"minOSCompatible", (IMP)hMinOSCompat, &oMinOSCompat);
+    hookBoolGetter(@"TFAppBuild", @"hardwareCompatible", (IMP)hHWCompat, &oHWCompat);
+    hookBoolGetter(@"TFAppBuild", @"compatible", (IMP)hBuildCompat, &oBuildCompat);
+    hookBoolGetter(@"TFAppBuildEmbeddedBuild", @"installableByHostDevice", (IMP)hHostInstallable, &oHostInstallable);
+}
+
 static void dumpMethods(NSString *clsName, int limit) {
     Class c = objc_getClass(clsName.UTF8String);
     if (!c) { LOGS(@"[api] 没有类 %@", clsName); return; }
@@ -731,6 +780,7 @@ __attribute__((constructor)) static void tfdevices_init(void) {
         installSpoofHooks();
         installNetworkHook();
         installBuildLogHook();
+        installEligibilityHooks();
         Class c = objc_getClass("OASAppList");
         if (c) {
             Method m;
