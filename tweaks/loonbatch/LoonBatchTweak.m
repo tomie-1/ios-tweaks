@@ -157,6 +157,17 @@ static NSString *remoteRuleSubtitle(id r) {
     return [a componentsJoinedByString:@" · "];
 }
 
+static id dataManager(void) {
+    Class c = NSClassFromString(@"DataManager");
+    if (!c) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("shareInstance"));
+}
+static id ruleManager(void) {
+    Class c = NSClassFromString(@"RuleArchieveManager");
+    if (!c) return nil;
+    return ((id (*)(id, SEL))objc_msgSend)(c, sel_registerName("shareInstance"));
+}
+
 static LNDCConfigModel *currentConfig(void) {
     Class dmc = NSClassFromString(@"DataManager");
     if (!dmc) return nil;
@@ -168,7 +179,7 @@ static LNDCConfigModel *currentConfig(void) {
 static void backupConfig(LNDCConfigModel *config) {
     @try {
         NSString *fileName = strv(config, @"fileName");
-        if (!fileName.length) fileName = msg0([LNDataManager shareInstance], @"currentConfigFileName");
+        if (!fileName.length) fileName = msg0(dataManager(), @"currentConfigFileName");
         if (!fileName.length) return;
         NSURL *group = [[NSFileManager defaultManager]
             containerURLForSecurityApplicationGroupIdentifier:@"group.com.ruikq.decar"];
@@ -400,7 +411,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSArray *newRemote = config.remoteRules ?: @[];
     NSError *error = nil;
     @try {
-        LNRuleArchieveManager *mgr = [LNRuleArchieveManager shareInstance];
+        LNRuleArchieveManager *mgr = (LNRuleArchieveManager *)ruleManager();
         if (self.mode == LNBLModePlugins) {
             NSMutableArray *plugins = [NSMutableArray array];
             for (id x in picked) {
@@ -430,7 +441,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             for (id r in remote) [mgr deleteRemoteRule:r];
         }
         [config saveConfigPlayload];
-        [[LNDataManager shareInstance] postChangeNoti];
+        msgv(dataManager(), @"postChangeNoti");
     } @catch (NSException *e) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
