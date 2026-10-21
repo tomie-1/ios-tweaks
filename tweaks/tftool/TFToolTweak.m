@@ -813,6 +813,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     UILongPressGestureRecognizer *lp =
         [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
     lp.minimumPressDuration = 0.35;
+    lp.numberOfTouchesRequired = 2;
     [self.table addGestureRecognizer:lp];
 
     [self reload];
@@ -1145,6 +1146,11 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     NSString *t = self.sections[s][@"title"];
     return t.length ? t : nil;
 }
+- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
+    if (s == (NSInteger)self.sections.count - 1 && [self allApps].count > 1)
+        return @"双指长按并拖动可连续选择";
+    return nil;
+}
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [tv deselectRowAtIndexPath:ip animated:YES];
     id app = self.sections[ip.section][@"apps"][ip.row];
@@ -1242,19 +1248,63 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 
 #pragma mark - 入口按钮
 
-@interface TFDrag : NSObject @end
+static BOOL gFabCustomPosition;
+static CGPoint gFabCustomCenter;
+static BOOL gFabDidDrag;
+static UIButton *gButton;
+static __weak UIWindow *gHostWindow;
+
+static CGFloat tftoolButtonBottomY(UIWindow *w);
+static CGPoint tftoolClampFabCenter(CGPoint center, UIWindow *w, CGSize size);
+
+static void tftoolLoadFabPosition(void) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d objectForKey:@"TFToolFabCenterX"] && [d objectForKey:@"TFToolFabCenterY"]) {
+        gFabCustomPosition = YES;
+        gFabCustomCenter = CGPointMake([d doubleForKey:@"TFToolFabCenterX"],
+                                       [d doubleForKey:@"TFToolFabCenterY"]);
+    }
+}
+
+@interface TFDrag : NSObject
+@property (nonatomic, assign) CGPoint startCenter;
+@end
 @implementation TFDrag
 - (void)pan:(UIPanGestureRecognizer *)g {
-    UIView *v = g.view; if (!v.superview) return;
-    CGPoint t = [g translationInView:v.superview];
-    v.center = CGPointMake(v.center.x + t.x, v.center.y + t.y);
-    [g setTranslation:CGPointZero inView:v.superview];
+    UIView *v = g.view;
+    UIWindow *w = v.window;
+    if (!v || !w) return;
+    CGPoint t = [g translationInView:w];
+    if (g.state == UIGestureRecognizerStateBegan) {
+        gFabDidDrag = YES;
+        self.startCenter = v.center;
+        [v.layer removeAllAnimations];
+        v.transform = CGAffineTransformMakeScale(1.04, 1.04);
+        v.layer.shadowOpacity = 0.42;
+    } else if (g.state == UIGestureRecognizerStateChanged) {
+        CGPoint c = CGPointMake(self.startCenter.x + t.x, self.startCenter.y + t.y);
+        v.center = tftoolClampFabCenter(c, w, v.bounds.size);
+    } else if (g.state == UIGestureRecognizerStateEnded ||
+               g.state == UIGestureRecognizerStateCancelled ||
+               g.state == UIGestureRecognizerStateFailed) {
+        gFabCustomPosition = YES;
+        gFabCustomCenter = v.center;
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        [d setDouble:gFabCustomCenter.x forKey:@"TFToolFabCenterX"];
+        [d setDouble:gFabCustomCenter.y forKey:@"TFToolFabCenterY"];
+        [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.62 initialSpringVelocity:0.5
+                            options:UIViewAnimationOptionAllowUserInteraction
+                         animations:^{
+                             v.transform = CGAffineTransformIdentity;
+                             v.layer.shadowOpacity = 0.30;
+                         } completion:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ gFabDidDrag = NO; });
+    }
 }
 @end
 
 static TFDrag *gDrag;
-static UIButton *gButton;
-static __weak UIWindow *gHostWindow;
 
 static UIWindow *tftoolKeyWindow(void) {
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
@@ -1277,6 +1327,27 @@ static UITabBar *tftoolVisibleTabBar(UIView *root, int depth) {
         if (bar) return bar;
     }
     return nil;
+}
+
+static CGFloat tftoolButtonBottomY(UIWindow *w) {
+    CGFloat bottomY = w.bounds.size.height - w.safeAreaInsets.bottom;
+    UITabBar *tab = tftoolVisibleTabBar(w, 0);
+    if (tab) {
+        CGRect tf = [tab convertRect:tab.bounds toView:w];
+        if (tf.size.height > 1 && CGRectGetMinY(tf) < bottomY) bottomY = CGRectGetMinY(tf);
+    }
+    return bottomY;
+}
+
+static CGPoint tftoolClampFabCenter(CGPoint center, UIWindow *w, CGSize size) {
+    CGFloat minX = size.width / 2.0 + 8.0;
+    CGFloat maxX = w.bounds.size.width - size.width / 2.0 - 8.0;
+    CGFloat minY = w.safeAreaInsets.top + size.height / 2.0 + 8.0;
+    CGFloat maxY = tftoolButtonBottomY(w) - size.height / 2.0 - 8.0;
+    if (maxX < minX) maxX = minX;
+    if (maxY < minY) maxY = minY;
+    return CGPointMake(MIN(MAX(center.x, minX), maxX),
+                       MIN(MAX(center.y, minY), maxY));
 }
 
 static void tftoolPresentList(void) {
@@ -1331,22 +1402,18 @@ static UIImage *tftoolFloatingBackground(CGSize size) {
 }
 
 static void tftoolPlaceButton(UIWindow *w) {
+    if (gFabDidDrag) return;   // 拖动期间不要被 3 秒定时器拉回
     if (!gButton.superview) [w addSubview:gButton];
     [w bringSubviewToFront:gButton];
     CGSize sz = w.bounds.size;
     CGRect bb = gButton.bounds;
-    CGFloat bottomY = sz.height - w.safeAreaInsets.bottom;
-    UITabBar *tab = tftoolVisibleTabBar(w, 0);
-    if (tab) {
-        CGRect tf = [tab convertRect:tab.bounds toView:w];
-        if (tf.size.height > 1 && CGRectGetMinY(tf) < bottomY) bottomY = CGRectGetMinY(tf);
-    }
-    CGRect f = CGRectMake(sz.width - bb.size.width - 16,
-                          bottomY - bb.size.height - 16,
-                          bb.size.width, bb.size.height);
-    if (!CGRectEqualToRect(gButton.frame, f)) {
-        gButton.frame = f;
-        LOG(@"[ui] 悬浮按钮 %@", NSStringFromCGRect(f));
+    CGPoint fallback = CGPointMake(sz.width - bb.size.width / 2.0 - 16.0,
+                                   tftoolButtonBottomY(w) - bb.size.height / 2.0 - 16.0);
+    CGPoint center = gFabCustomPosition ? gFabCustomCenter : fallback;
+    center = tftoolClampFabCenter(center, w, bb.size);
+    if (!CGPointEqualToPoint(gButton.center, center)) {
+        gButton.center = center;
+        LOG(@"[ui] 悬浮按钮 center=%@", NSStringFromCGPoint(center));
     }
 }
 
@@ -1390,8 +1457,15 @@ static void tftoolAttachButton(void) {
             }] forControlEvents:UIControlEventTouchUpInside |
                        UIControlEventTouchUpOutside |
                        UIControlEventTouchCancel];
-            [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) { tftoolPresentList(); }]
-                    forControlEvents:UIControlEventTouchUpInside];
+            if (!gDrag) gDrag = [TFDrag new];
+            UIPanGestureRecognizer *fabPan = [[UIPanGestureRecognizer alloc] initWithTarget:gDrag
+                                                                                    action:@selector(pan:)];
+            fabPan.maximumNumberOfTouches = 1;
+            [gButton addGestureRecognizer:fabPan];
+            [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) {
+                if (gFabDidDrag) return;
+                tftoolPresentList();
+            }] forControlEvents:UIControlEventTouchUpInside];
         }
         if (!w.rootViewController.presentedViewController) {
             gButton.transform = CGAffineTransformIdentity;
@@ -1409,6 +1483,7 @@ __attribute__((constructor)) static void tftool_init(void) {
             LOG(@"[init] 检测到 tftool.off，停止加载");
             return;
         }
+        tftoolLoadFabPosition();
         tftoolInstallHooks();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             tftoolAttachButton();
