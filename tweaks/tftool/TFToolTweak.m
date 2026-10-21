@@ -1285,6 +1285,33 @@ static void tftoolPresentList(void) {
     } @catch (NSException *e) { LOG(@"[ui] ex %@ %@", e.name, e.reason); }
 }
 
+static UIImage *tftoolFloatingBackground(CGSize size) {
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextRef c = ctx.CGContext;
+        CGFloat radius = size.height / 2.0;
+        UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, size.width, size.height)
+                                                            cornerRadius:radius];
+        [clip addClip];
+        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+        CGFloat components[] = {
+            0.04, 0.52, 1.00, 1.0,   // #0A84FF
+            0.37, 0.36, 0.90, 1.0    // #5E5CE6
+        };
+        CGFloat locations[] = {0.0, 1.0};
+        CGGradientRef gradient = CGGradientCreateWithColorComponents(space, components, locations, 2);
+        CGContextDrawLinearGradient(c, gradient, CGPointMake(0, 0),
+                                    CGPointMake(size.width, size.height), 0);
+        CGGradientRelease(gradient);
+        CGColorSpaceRelease(space);
+        [[UIColor colorWithWhite:1.0 alpha:0.20] setStroke];
+        UIBezierPath *border = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(CGRectMake(0, 0, size.width, size.height), 0.5, 0.5)
+                                                              cornerRadius:radius - 0.5];
+        border.lineWidth = 1.0;
+        [border stroke];
+    }];
+}
+
 static void tftoolPlaceButton(UIWindow *w) {
     if (!gButton.superview) [w addSubview:gButton];
     [w bringSubviewToFront:gButton];
@@ -1310,18 +1337,48 @@ static void tftoolAttachButton(void) {
         UIWindow *w = tftoolKeyWindow();
         if (!w) return;
         if (!gButton) {
-            gButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            gButton.frame = CGRectMake(0, 0, 64, 36);
-            [gButton setTitle:@"批量" forState:UIControlStateNormal];
-            gButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-            [gButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-            gButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.92];
-            gButton.layer.cornerRadius = 18;
-            gButton.clipsToBounds = YES;
+            gButton = [UIButton buttonWithType:UIButtonTypeCustom];
+            gButton.frame = CGRectMake(0, 0, 54, 54);
+            gButton.adjustsImageWhenHighlighted = NO;
+            gButton.showsTouchWhenHighlighted = NO;
+            gButton.tintColor = UIColor.whiteColor;
+            gButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentCenter;
+            UIImageSymbolConfiguration *iconCfg =
+                [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightSemibold];
+            UIImage *icon = [UIImage systemImageNamed:@"checklist" withConfiguration:iconCfg];
+            if (!icon) icon = [UIImage systemImageNamed:@"checkmark.circle" withConfiguration:iconCfg];
+            [gButton setImage:icon forState:UIControlStateNormal];
+            gButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
+            UIImage *fabBG = tftoolFloatingBackground(gButton.bounds.size);
+            [gButton setBackgroundImage:fabBG forState:UIControlStateNormal];
+            [gButton setBackgroundImage:fabBG forState:UIControlStateHighlighted];
+            gButton.layer.shadowColor = [UIColor colorWithRed:0.05 green:0.35 blue:0.85 alpha:1.0].CGColor;
+            gButton.layer.shadowOpacity = 0.30;
+            gButton.layer.shadowRadius = 12;
+            gButton.layer.shadowOffset = CGSizeMake(0, 6);
+            gButton.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:gButton.bounds].CGPath;
+            gButton.accessibilityLabel = @"批量停止测试";
+            gButton.accessibilityHint = @"选择要停止测试的 App";
+            [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) {
+                [UIView animateWithDuration:0.10 animations:^{
+                    gButton.transform = CGAffineTransformMakeScale(0.94, 0.94);
+                }];
+            }] forControlEvents:UIControlEventTouchDown];
+            [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) {
+                [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.55 initialSpringVelocity:0.6
+                                    options:UIViewAnimationOptionAllowUserInteraction
+                                 animations:^{ gButton.transform = CGAffineTransformIdentity; }
+                                 completion:nil];
+            }] forControlEvents:UIControlEventTouchUpInside |
+                       UIControlEventTouchUpOutside |
+                       UIControlEventTouchCancel];
             [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) { tftoolPresentList(); }]
                     forControlEvents:UIControlEventTouchUpInside];
         }
-        if (!w.rootViewController.presentedViewController) gButton.hidden = NO;
+        if (!w.rootViewController.presentedViewController) {
+            gButton.transform = CGAffineTransformIdentity;
+            gButton.hidden = NO;
+        }
         gHostWindow = w;
         tftoolPlaceButton(w);
     } @catch (NSException *e) { LOG(@"[ui] ex %@ %@", e.name, e.reason); }
