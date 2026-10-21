@@ -290,7 +290,6 @@ static NSString *pluginSubtitle(id p) {
     NSMutableArray *a = [NSMutableArray array];
     NSString *u = strv(o, @"remoteUrl");
     if (u.length) [a addObject:u];
-    [a addObject:boolv(o, @"enable") ? @"已启用" : @"已禁用"];
     if (boolv(o, @"pin")) [a addObject:@"已固定"];
     return [a componentsJoinedByString:@" · "];
 }
@@ -320,7 +319,6 @@ static NSString *remoteRuleSubtitle(id r) {
     if (p.length) [a addObject:p];
     NSString *d = strv(r, @"desc");
     if (d.length) [a addObject:d];
-    if ([r respondsToSelector:NSSelectorFromString(@"enable")]) [a addObject:boolv(r, @"enable") ? @"已启用" : @"已禁用"];
     return [a componentsJoinedByString:@" · "];
 }
 
@@ -340,7 +338,6 @@ static NSString *nodeSubtitle(id n) {
     if (host.length) [a addObject:(port > 0 ? [NSString stringWithFormat:@"%@:%ld", host, (long)port] : host)];
     NSString *url = strv(n, @"remoteUrl");
     if (url.length) [a addObject:url];
-    if ([n respondsToSelector:NSSelectorFromString(@"enabled")]) [a addObject:boolv(n, @"enabled") ? @"已启用" : @"已禁用"];
     return [a componentsJoinedByString:@" · "];
 }
 
@@ -647,6 +644,39 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     return @"长按拖动可排序；勾选多行后拖动会整组移动";
 }
 
+- (UIView *)statusAccessoryForItem:(id)item selected:(BOOL)selected {
+    BOOL hasStatus = NO, enabled = NO;
+    id t = pluginObject(item);
+    if ([t respondsToSelector:NSSelectorFromString(@"enabled")]) {
+        hasStatus = YES;
+        enabled = boolv(t, @"enabled");
+    } else if ([t respondsToSelector:NSSelectorFromString(@"enable")]) {
+        hasStatus = YES;
+        enabled = boolv(t, @"enable");
+    }
+    CGFloat w = hasStatus ? 98 : 26;
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, 30)];
+    if (hasStatus) {
+        UILabel *pill = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 64, 22)];
+        pill.text = enabled ? @"已启用" : @"已禁用";
+        pill.font = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+        pill.textAlignment = NSTextAlignmentCenter;
+        pill.textColor = enabled ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
+        pill.backgroundColor = enabled
+            ? [UIColor.systemGreenColor colorWithAlphaComponent:0.14]
+            : [UIColor.systemGrayColor colorWithAlphaComponent:0.14];
+        pill.layer.cornerRadius = 11;
+        pill.clipsToBounds = YES;
+        [box addSubview:pill];
+    }
+    UIImageView *check = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark"]];
+    check.frame = CGRectMake(hasStatus ? 72 : 3, 5, 20, 20);
+    check.tintColor = UIColor.systemBlueColor;
+    check.hidden = !selected;
+    [box addSubview:check];
+    return box;
+}
+
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"cell"];
     if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
@@ -671,9 +701,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         }
     }
     c.textLabel.font = [UIFont systemFontOfSize:16];
-    c.detailTextLabel.numberOfLines = 2;
+    c.detailTextLabel.numberOfLines = 1;
+    c.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    c.accessoryType = ptrContains(self.selected, item) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    c.accessoryType = UITableViewCellAccessoryNone;
+    c.accessoryView = [self statusAccessoryForItem:item selected:ptrContains(self.selected, item)];
     setCellDimmed(c, self.dragGroup.count && ptrContains(self.dragGroup, item));
     return c;
 }
@@ -808,7 +840,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             [NSIndexPath indexPathForRow:(NSInteger)r inSection:self.dragSection]];
         if (!c) continue;
         cellSize = c.bounds.size;
+        BOOL wasHighlighted = c.highlighted;
+        c.highlighted = NO;
         UIImage *img = renderCellImage(c);
+        c.highlighted = wasHighlighted;
         if (img) [images addObject:img];
     }
     if (!images.count) return nil;
@@ -818,10 +853,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         cellSize.width + off * (layers - 1), cellSize.height + off * (layers - 1))];
     box.backgroundColor = UIColor.clearColor;
     box.userInteractionEnabled = NO;
+    box.transform = CGAffineTransformMakeScale(0.86, 0.86);
     box.layer.shadowColor = UIColor.blackColor.CGColor;
-    box.layer.shadowOpacity = 0.18;
-    box.layer.shadowRadius = 10;
-    box.layer.shadowOffset = CGSizeMake(0, 5);
+    box.layer.shadowOpacity = 0.22;
+    box.layer.shadowRadius = 6;
+    box.layer.shadowOffset = CGSizeMake(0, 3);
     for (NSUInteger i = 0; i < layers; i++) {
         UIImageView *iv = [[UIImageView alloc] initWithImage:images[i]];
         iv.frame = CGRectMake(off * i, off * i, cellSize.width, cellSize.height);
@@ -850,10 +886,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     UIView *host = [self dragOverlayHost];
     CGPoint vp = self.dragViewPoint;
     if (self.dragPreview) {
-        CGFloat halfW = self.dragPreview.bounds.size.width / 2;
-        CGFloat x = MIN(MAX(vp.x, halfW + 8), host.bounds.size.width - halfW - 8);
-        CGFloat top = host.safeAreaInsets.top + self.dragPreview.bounds.size.height / 2 + 4;
-        CGFloat y = MAX(vp.y - 34, top);
+        CGFloat scale = 0.86;
+        CGFloat halfW = self.dragPreview.bounds.size.width * scale / 2;
+        CGFloat halfH = self.dragPreview.bounds.size.height * scale / 2;
+        CGFloat x = MIN(MAX(vp.x + 8, halfW + 8), host.bounds.size.width - halfW - 8);
+        CGFloat top = host.safeAreaInsets.top + halfH + 4;
+        CGFloat y = MAX(vp.y - 24, top);
         self.dragPreview.center = CGPointMake(x, y);
     }
     CGPoint tp = [host convertPoint:vp toView:self.tableView];
