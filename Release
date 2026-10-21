@@ -7,12 +7,12 @@ Codename: ios
 Architectures: iphoneos-arm iphoneos-arm64 iphoneos-arm64e
 Components: main
 MD5Sum:
- bcb7895affcd3aec2c06cd683db1179d            11331 Packages
- 8500b53df51cc4306b38df563f659f3e             4067 Packages.gz
- 7f135eb6c235886b44f827a677fa9f3b             3922 Packages.bz2
- 148eb3e1b404c38c6698f888cfe47f25             3600 Packages.xz
+ f601eefbf15072f98a843a8ed3a7317b            11331 Packages
+ ea8e0fb717db2a13cb23014c7ab9b02b             4068 Packages.gz
+ 84e6515d57edceb7024f46fd5df08bed             3921 Packages.bz2
+ 111450ab5185a456982b9dec0afa6bb1             3600 Packages.xz
 SHA256:
- cddf073b3fe812a5e8fab3d6201724cb3a8cc1743186a2a034ecacded3486e00            11331 Packages
- 7ab4d1ab60edd23218e051272c234a90fa0a4e1d14a79e4addffd0ecefd64982             4067 Packages.gz
- b14019ae5d9c8edb469bdd86efcb806e637422e4fcf9efd845eab64314a92c0d             3922 Packages.bz2
- 308336d9300bc3bd3417c9c7eb608702460394be67ae7af7a0234efc856894ed             3600 Packages.xz
+ bf9a7b8ae2ec9aee3dcffd44c741f14bc0677126a87c89829d5fcf2a0ba6d3f9            11331 Packages
+ 2cdf2c25f790e15145cd5ff311e096e712557d305cd080b30743df6cabddd2f1             4068 Packages.gz
+ fe70c666c3dda15df0c2d6fb4453a08b062923b0d996b7a9fd217a3955103e52             3921 Packages.bz2
+ ee72ef7ec482ed739a708aa57768613722875ad68e57fd93ad3339634ed4c72f             3600 Packages.xz
