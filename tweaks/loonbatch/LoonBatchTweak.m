@@ -111,6 +111,12 @@ static BOOL boolv(id o, NSString *s) {
     if (![o respondsToSelector:sel]) return NO;
     @try { return ((BOOL (*)(id, SEL))objc_msgSend)(o, sel); } @catch (NSException *e) { return NO; }
 }
+static NSInteger intv(id o, NSString *s) {
+    if (!o) return 0;
+    SEL sel = NSSelectorFromString(s);
+    if (![o respondsToSelector:sel]) return 0;
+    @try { return ((NSInteger (*)(id, SEL))objc_msgSend)(o, sel); } @catch (NSException *e) { return 0; }
+}
 static BOOL setBoolv(id o, NSString *s, BOOL v) {
     if (!o) return NO;
     SEL sel = NSSelectorFromString(s);
@@ -330,8 +336,8 @@ static NSString *nodeSubtitle(id n) {
     NSString *proto = strv(n, @"protocol");
     if (proto.length) [a addObject:proto];
     NSString *host = strv(n, @"serverAddress");
-    id port = msg0(n, @"serverPort");
-    if (host.length) [a addObject:(port ? [NSString stringWithFormat:@"%@:%@", host, port] : host)];
+    NSInteger port = intv(n, @"serverPort");
+    if (host.length) [a addObject:(port > 0 ? [NSString stringWithFormat:@"%@:%ld", host, (long)port] : host)];
     NSString *url = strv(n, @"remoteUrl");
     if (url.length) [a addObject:url];
     if ([n respondsToSelector:NSSelectorFromString(@"enabled")]) [a addObject:boolv(n, @"enabled") ? @"已启用" : @"已禁用"];
