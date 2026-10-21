@@ -1228,6 +1228,7 @@ static char kLBModeKey;
 }
 
 - (LNBLMode)modeForClass:(NSString *)cn {
+    if ([cn isEqualToString:@"PolicyGroupSelectVC"]) return LNBLModeNodes;
     if ([cn isEqualToString:@"SubscriptionNodeVC"] || [cn hasSuffix:@".SubscriptionNodeVC"]) return LNBLModeNodes;
     if ([cn containsString:@"PluginList"]) return LNBLModePlugins;
     if ([cn containsString:@"AllRulesVC"]) return LNBLModeRules;
@@ -1239,6 +1240,29 @@ static char kLBModeKey;
     NSString *cn = NSStringFromClass([vc class]);
     LNBLMode mode = [self modeForClass:cn];
     if (!mode) return;
+    if ([cn isEqualToString:@"PolicyGroupSelectVC"]) {
+        static dispatch_once_t onceP;
+        dispatch_once(&onceP, ^{
+            NSMutableArray *ivs = [NSMutableArray array];
+            unsigned int n = 0;
+            Ivar *list = class_copyIvarList([vc class], &n);
+            for (unsigned i = 0; i < n; i++) {
+                [ivs addObject:[NSString stringWithFormat:@"%s:%s", ivar_getName(list[i]), ivar_getTypeEncoding(list[i])]];
+            }
+            free(list);
+            LBL(@"PolicyGroupSelectVC ivars=[%@]", [ivs componentsJoinedByString:@", "]);
+            LNDCConfigModel *cfg = configFromObject(vc);
+            LBL(@"PolicyGroupSelectVC cfg=%@ local=%lu remote=%lu", NSStringFromClass([cfg class]),
+                (unsigned long)[cfg.proxys count], (unsigned long)[cfg.remoteProxys count]);
+            @try {
+                id vms = [vc valueForKey:@"sectionVMs"];
+                LBL(@"PolicyGroupSelectVC sectionVMs=%@", vms);
+                for (id vm in vms) {
+                    LBL(@"  vm title=%@ proxys=%lu", strv(vm, @"title"), (unsigned long)[[vm valueForKey:@"proxys"] count]);
+                }
+            } @catch (NSException *e) { LBL(@"sectionVMs 异常 %@", e); }
+        });
+    }
     for (UIView *v in vc.view.subviews) if (v.tag == kLoonBatchButtonTag) return;
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     b.tag = kLoonBatchButtonTag;
@@ -1324,5 +1348,6 @@ __attribute__((constructor)) static void init(void) {
         hookViewDidAppear(NSClassFromString(@"_TtC4Loon17PluginListSwiftVC"));
         hookViewDidAppear(NSClassFromString(@"AllRulesVC"));
         hookViewDidAppear(NSClassFromString(@"SubscriptionNodeVC"));
+        hookViewDidAppear(NSClassFromString(@"PolicyGroupSelectVC"));
     } @catch (NSException *e) { LBL(@"init 异常 %@", e); }
 }
