@@ -281,13 +281,7 @@ static NSString *pluginTitle(id p) {
 }
 
 static NSString *pluginSubtitle(id p) {
-    id o = pluginObject(p);
-    NSString *u = strv(o, @"remoteUrl");
-    NSString *tag = strv(o, @"tag");
-    NSString *name = pluginNativeName(u);
-    if (tag.length && name.length && ![tag isEqualToString:name]) return name;
-    if (u.length) return u;
-    return name ?: @"";
+    return @"";
 }
 
 static NSString *ruleTitle(id r) {
@@ -466,6 +460,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     LNBLModeNodes = 5,
 };
 
+@interface LNBatchCell : UITableViewCell
+@end
+
+@implementation LNBatchCell
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.detailTextLabel.text.length == 0 && self.textLabel.text.length > 0) {
+        CGRect f = self.textLabel.frame;
+        f.origin.y = (CGRectGetHeight(self.contentView.bounds) - CGRectGetHeight(f)) / 2.0;
+        self.textLabel.frame = f;
+    }
+}
+@end
+
 @interface LNBatchVC : UITableViewController <UIGestureRecognizerDelegate>
 @property (nonatomic, assign) LNBLMode mode;
 @property (nonatomic, weak) UIViewController *host;
@@ -577,6 +585,9 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         NSArray *items = config.plugins ?: @[];
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
         [self.sections addObject:@{@"title": @"插件", @"items": items, @"kind": @"plugins"}];
+        for (id p in items) {
+            LBL(@"插件 tag=[%@] name=[%@] pluginName=[%@]", strv(p, @"tag"), strv(p, @"name"), strv(p, @"pluginName"));
+        }
     } else if (self.mode == LNBLModeLocalRules) {
         NSArray *items = config.localRule ?: @[];
         self.title = [NSString stringWithFormat:@"批量本地规则 (%lu)", (unsigned long)items.count];
@@ -674,8 +685,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *c = [tv dequeueReusableCellWithIdentifier:@"cell"];
-    if (!c) c = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
+    LNBatchCell *c = [tv dequeueReusableCellWithIdentifier:@"cell"];
+    if (!c) c = [[LNBatchCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     id item = [self itemsForSection:ip.section][ip.row];
     if (self.mode == LNBLModePlugins) {
         c.textLabel.text = pluginTitle(item);
