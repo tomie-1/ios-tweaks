@@ -94,6 +94,12 @@ static void msgv(id o, NSString *s) {
     if (![o respondsToSelector:sel]) return;
     @try { ((void (*)(id, SEL))objc_msgSend)(o, sel); } @catch (NSException *e) {}
 }
+static void msg1(id o, NSString *s, id arg) {
+    if (!o) return;
+    SEL sel = NSSelectorFromString(s);
+    if (![o respondsToSelector:sel]) return;
+    @try { ((void (*)(id, SEL, id))objc_msgSend)(o, sel, arg); } @catch (NSException *e) {}
+}
 static NSString *strv(id o, NSString *s) {
     @try { id v = msg0(o, s); return [v isKindOfClass:[NSString class]] ? v : nil; } @catch (NSException *e) { return nil; }
 }
@@ -219,6 +225,31 @@ static id pluginObject(id p) {
     return o ?: p;
 }
 
+static BOOL itemEnabled(id item) {
+    id t = pluginObject(item);
+    if ([t respondsToSelector:NSSelectorFromString(@"enable")]) return boolv(t, @"enable");
+    if ([t respondsToSelector:NSSelectorFromString(@"enabled")]) return boolv(t, @"enabled");
+    return NO;
+}
+
+static BOOL itemSetEnabled(id item, BOOL enable) {
+    id t = pluginObject(item);
+    if ([t respondsToSelector:NSSelectorFromString(@"setEnable:")]) return setBoolv(t, @"setEnable:", enable);
+    if ([t respondsToSelector:NSSelectorFromString(@"setEnabled:")]) return setBoolv(t, @"setEnabled:", enable);
+    return NO;
+}
+
+static BOOL itemCanToggle(id item) {
+    id t = pluginObject(item);
+    return [t respondsToSelector:NSSelectorFromString(@"setEnable:")]
+        || [t respondsToSelector:NSSelectorFromString(@"setEnabled:")];
+}
+
+static BOOL isRemoteProxy(id x) {
+    Class c = NSClassFromString(@"RemoteProxy");
+    return c && [x isKindOfClass:c];
+}
+
 static NSString *pluginTitle(id p) {
     id o = pluginObject(p);
     NSString *url = strv(o, @"remoteUrl");
@@ -285,6 +316,26 @@ static NSString *remoteRuleSubtitle(id r) {
     return [a componentsJoinedByString:@" · "];
 }
 
+static NSString *nodeTitle(id n) {
+    NSString *s = strv(n, @"proxyName");
+    if (!s.length) s = strv(n, @"remarks");
+    if (!s.length) s = strv(n, @"name");
+    return s.length ? s : @"(未命名节点)";
+}
+
+static NSString *nodeSubtitle(id n) {
+    NSMutableArray *a = [NSMutableArray array];
+    NSString *proto = strv(n, @"protocol");
+    if (proto.length) [a addObject:proto];
+    NSString *host = strv(n, @"serverAddress");
+    id port = msg0(n, @"serverPort");
+    if (host.length) [a addObject:(port ? [NSString stringWithFormat:@"%@:%@", host, port] : host)];
+    NSString *url = strv(n, @"remoteUrl");
+    if (url.length) [a addObject:url];
+    if ([n respondsToSelector:NSSelectorFromString(@"enabled")]) [a addObject:boolv(n, @"enabled") ? @"已启用" : @"已禁用"];
+    return [a componentsJoinedByString:@" · "];
+}
+
 static id dataManager(void) {
     Class c = NSClassFromString(@"DataManager");
     if (!c) return nil;
@@ -309,6 +360,10 @@ static LNDCConfigModel *configFromObject(id obj) {
     Class modelClass = NSClassFromString(@"DCConfigModel");
     if (!modelClass) return nil;
     @try {
+        id c = msg0(obj, @"configModel");
+        if ([c isKindOfClass:modelClass]) return c;
+    } @catch (NSException *e) {}
+    @try {
         SEL sel = NSSelectorFromString(@"currentConfigModel");
         if ([obj respondsToSelector:sel]) {
             id c = ((id (*)(id, SEL))objc_msgSend)(obj, sel);
@@ -319,7 +374,8 @@ static LNDCConfigModel *configFromObject(id obj) {
     @try {
         Class cls = object_getClass(obj);
         while (cls) {
-            Ivar iv = class_getInstanceVariable(cls, "currentConfigModel");
+            Ivar iv = class_getInstanceVariable(cls, "configModel");
+            if (!iv) iv = class_getInstanceVariable(cls, "currentConfigModel");
             if (iv) {
                 id c = object_getIvar(obj, iv);
                 if ([c isKindOfClass:modelClass]) return c;
@@ -406,6 +462,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     LNBLModeRules = 2,
     LNBLModeLocalRules = 3,
     LNBLModeRemoteRules = 4,
+    LNBLModeNodes = 5,
 };
 
 @interface LNBatchVC : UITableViewController <UIGestureRecognizerDelegate>
@@ -518,21 +575,27 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (self.mode == LNBLModePlugins) {
         NSArray *items = config.plugins ?: @[];
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
-        [self.sections addObject:@{@"title": @"插件", @"items": items}];
+        [self.sections addObject:@{@"title": @"插件", @"items": items, @"kind": @"plugins"}];
     } else if (self.mode == LNBLModeLocalRules) {
         NSArray *items = config.localRule ?: @[];
         self.title = [NSString stringWithFormat:@"批量本地规则 (%lu)", (unsigned long)items.count];
-        [self.sections addObject:@{@"title": @"本地规则", @"items": items}];
+        [self.sections addObject:@{@"title": @"本地规则", @"items": items, @"kind": @"localRules"}];
     } else if (self.mode == LNBLModeRemoteRules) {
         NSArray *items = config.remoteRules ?: @[];
         self.title = [NSString stringWithFormat:@"批量远程规则 (%lu)", (unsigned long)items.count];
-        [self.sections addObject:@{@"title": @"远程规则", @"items": items}];
+        [self.sections addObject:@{@"title": @"远程规则", @"items": items, @"kind": @"remoteRules"}];
+    } else if (self.mode == LNBLModeNodes) {
+        NSArray *local = config.proxys ?: @[];
+        NSArray *remote = config.remoteProxys ?: @[];
+        self.title = [NSString stringWithFormat:@"批量节点 (%lu)", (unsigned long)(local.count + remote.count)];
+        if (local.count) [self.sections addObject:@{@"title": @"本地节点", @"items": local, @"kind": @"localNodes"}];
+        if (remote.count) [self.sections addObject:@{@"title": @"订阅", @"items": remote, @"kind": @"remoteProxies"}];
     } else {
         NSArray *local = config.localRule ?: @[];
         NSArray *remote = config.remoteRules ?: @[];
         self.title = [NSString stringWithFormat:@"批量规则 (%lu)", (unsigned long)(local.count + remote.count)];
-        if (local.count) [self.sections addObject:@{@"title": @"本地规则", @"items": local}];
-        if (remote.count) [self.sections addObject:@{@"title": @"远程规则", @"items": remote}];
+        if (local.count) [self.sections addObject:@{@"title": @"本地规则", @"items": local, @"kind": @"localRules"}];
+        if (remote.count) [self.sections addObject:@{@"title": @"远程规则", @"items": remote, @"kind": @"remoteRules"}];
     }
     NSArray *all = [self allItems];
     NSMutableArray *still = [NSMutableArray array];
@@ -574,6 +637,9 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (self.mode == LNBLModePlugins) {
         c.textLabel.text = pluginTitle(item);
         c.detailTextLabel.text = pluginSubtitle(item);
+    } else if (self.mode == LNBLModeNodes) {
+        c.textLabel.text = nodeTitle(item);
+        c.detailTextLabel.text = nodeSubtitle(item);
     } else if ([item isKindOfClass:NSClassFromString(@"RemoteRule")]) {
         c.textLabel.text = remoteRuleTitle(item);
         c.detailTextLabel.text = remoteRuleSubtitle(item);
@@ -863,16 +929,18 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)applyReorder:(NSArray *)items inSection:(NSInteger)section {
     LNDCConfigModel *config = configForHost(self.host);
     if (!config) return;
-    if (self.mode == LNBLModePlugins) {
+    NSString *kind = (section >= 0 && section < (NSInteger)self.sections.count)
+        ? self.sections[(NSUInteger)section][@"kind"] : nil;
+    if ([kind isEqualToString:@"plugins"]) {
         config.plugins = items;
-    } else if (self.mode == LNBLModeLocalRules) {
+    } else if ([kind isEqualToString:@"localRules"]) {
         config.localRule = items;
-    } else if (self.mode == LNBLModeRemoteRules) {
+    } else if ([kind isEqualToString:@"remoteRules"]) {
         config.remoteRules = items;
-    } else if (section == 0 && [(config.localRule ?: @[]) count] > 0) {
-        config.localRule = items;
-    } else {
-        config.remoteRules = items;
+    } else if ([kind isEqualToString:@"localNodes"]) {
+        config.proxys = items;
+    } else if ([kind isEqualToString:@"remoteProxies"]) {
+        config.remoteProxys = items;
     }
     [self commitChange];
 }
@@ -883,25 +951,26 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     BOOL has = self.selected.count > 0;
     BOOL toggleable = NO, anyEnabled = NO, anyDisabled = NO;
     for (id item in self.selected) {
-        id t = pluginObject(item);
-        if (![t respondsToSelector:NSSelectorFromString(@"setEnable:")]) continue;
+        if (!itemCanToggle(item)) continue;
         toggleable = YES;
-        if (boolv(t, @"enable")) anyEnabled = YES;
+        if (itemEnabled(item)) anyEnabled = YES;
         else anyDisabled = YES;
     }
 
     NSString *copyTitle = @"复制链接";
     if (self.mode == LNBLModeLocalRules) copyTitle = @"复制规则文本";
     else if (self.mode == LNBLModeRules) copyTitle = @"复制选中内容";
+    else if (self.mode == LNBLModeNodes) copyTitle = @"复制节点";
 
     __weak LNBatchVC *ws = self;
     UIAction *copy = [UIAction actionWithTitle:copyTitle image:[UIImage systemImageNamed:@"doc.on.doc"]
                                      identifier:nil handler:^(UIAction *a) { [ws copySelected]; }];
-    BOOL ruleMode = (self.mode == LNBLModeRules || self.mode == LNBLModeLocalRules || self.mode == LNBLModeRemoteRules);
+    BOOL singleToggle = (self.mode == LNBLModeRules || self.mode == LNBLModeLocalRules
+        || self.mode == LNBLModeRemoteRules || self.mode == LNBLModeNodes);
     UIAction *enable = nil;
     UIAction *disable = nil;
     UIAction *toggle = nil;
-    if (ruleMode) {
+    if (singleToggle) {
         toggle = [UIAction actionWithTitle:@"开关" image:[UIImage systemImageNamed:@"power"]
                                 identifier:nil handler:^(UIAction *a) { [ws toggleSelectedEnabled]; }];
     } else {
@@ -933,6 +1002,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         NSString *s = nil;
         if (self.mode == LNBLModePlugins) {
             s = strv(pluginObject(item), @"remoteUrl");
+        } else if (self.mode == LNBLModeNodes) {
+            if (isRemoteProxy(item)) s = strv(item, @"remoteUrl");
+            else {
+                s = strv(item, @"playload");
+                if (!s.length) s = msg0(item, @"generateLoonFormat");
+            }
         } else {
             id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule");
             if ([item isKindOfClass:NSClassFromString(@"RemoteRule")] || [inner isKindOfClass:NSClassFromString(@"RemoteRule")]) {
@@ -954,7 +1029,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)setSelectedEnabled:(BOOL)enable {
     NSInteger changed = 0;
     for (id item in [self.selected copy]) {
-        if (setBoolv(pluginObject(item), @"setEnable:", enable)) changed++;
+        if (itemSetEnabled(item, enable)) changed++;
     }
     if (!changed) {
         [self showToast:@"选中的项目不支持启用/禁用"];
@@ -967,13 +1042,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)toggleSelectedEnabled {
     BOOL anyDisabled = NO, toggleable = NO;
     for (id item in self.selected) {
-        id t = pluginObject(item);
-        if (![t respondsToSelector:NSSelectorFromString(@"setEnable:")]) continue;
+        if (!itemCanToggle(item)) continue;
         toggleable = YES;
-        if (!boolv(t, @"enable")) anyDisabled = YES;
+        if (!itemEnabled(item)) anyDisabled = YES;
     }
     if (!toggleable) {
-        [self showToast:@"选中的规则不支持开关"];
+        [self showToast:@"选中的项目不支持开关"];
         return;
     }
     [self setSelectedEnabled:anyDisabled];
@@ -996,10 +1070,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)deleteTapped {
     NSUInteger n = self.selected.count;
     if (!n) return;
-    NSString *what = (self.mode == LNBLModePlugins) ? @"插件" : @"规则";
-    NSString *extra = (self.mode == LNBLModePlugins)
-        ? @"\n相关插件规则也会被移除。"
-        : @"\n远程规则只会移除引用，不会删除已下载的规则文件。";
+    NSString *what = (self.mode == LNBLModePlugins) ? @"插件" : ((self.mode == LNBLModeNodes) ? @"节点" : @"规则");
+    NSString *extra;
+    if (self.mode == LNBLModePlugins) extra = @"\n相关插件规则也会被移除。";
+    else if (self.mode == LNBLModeNodes) extra = @"\n本地节点会从配置删除；订阅只会移除引用，不会删除已下载的节点文件。";
+    else extra = @"\n远程规则只会移除引用，不会删除已下载的规则文件。";
     UIAlertController *ac = [UIAlertController
         alertControllerWithTitle:[NSString stringWithFormat:@"删除 %lu 个%@？", (unsigned long)n, what]
                          message:[NSString stringWithFormat:@"会先备份当前配置。%@", extra]
@@ -1033,6 +1108,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             }
             config.plugins = arrayByRemovingPtrs(config.plugins, plugins);
             for (id p in plugins) [mgr deletePluginRules:p];
+        } else if (self.mode == LNBLModeNodes) {
+            NSMutableArray *local = [NSMutableArray array];
+            NSMutableArray *remote = [NSMutableArray array];
+            for (id x in picked) {
+                if (isRemoteProxy(x)) [remote addObject:x];
+                else [local addObject:x];
+            }
+            config.proxys = arrayByRemovingPtrs(config.proxys, local);
+            config.remoteProxys = arrayByRemovingPtrs(config.remoteProxys, remote);
+            for (id n in local) {
+                if ([config respondsToSelector:NSSelectorFromString(@"deleteNode:")]) msg1(config, @"deleteNode:", n);
+                else msgv(n, @"deleteProxy");
+            }
+            for (id r in remote) msg1(config, @"deleteRemoteProxy:", r);
         } else {
             NSMutableArray *local = [NSMutableArray array];
             NSMutableArray *remote = [NSMutableArray array];
@@ -1151,6 +1240,7 @@ static char kLBModeKey;
 }
 
 - (LNBLMode)modeForClass:(NSString *)cn {
+    if ([cn isEqualToString:@"SubscriptionNodeVC"] || [cn hasSuffix:@".SubscriptionNodeVC"]) return LNBLModeNodes;
     if ([cn containsString:@"PluginList"]) return LNBLModePlugins;
     if ([cn containsString:@"AllRulesVC"]) return LNBLModeRules;
     if ([cn containsString:@"LNLocalRuleListVC"]) return LNBLModeLocalRules;
@@ -1219,33 +1309,12 @@ static void hookViewDidAppear(Class c) {
     method_setImplementation(m, repl);
 }
 
-static void LBLClassShape(NSString *name) {
-    Class c = NSClassFromString(name);
-    if (!c) { LBL(@"诊断 %@ 不存在", name); return; }
-    unsigned int n = 0;
-    objc_property_t *props = class_copyPropertyList(c, &n);
-    NSMutableArray *ps = [NSMutableArray array];
-    for (unsigned i = 0; i < n; i++) {
-        [ps addObject:[NSString stringWithFormat:@"%s:%s", property_getName(props[i]), property_getAttributes(props[i])]];
-    }
-    free(props);
-    unsigned int m = 0;
-    Method *ms = class_copyMethodList(c, &m);
-    NSMutableArray *names = [NSMutableArray array];
-    for (unsigned i = 0; i < m; i++) [names addObject:NSStringFromSelector(method_getName(ms[i]))];
-    free(ms);
-    LBL(@"诊断 %@ props=[%@] methods=[%@]", name, [ps componentsJoinedByString:@", "], [names componentsJoinedByString:@","]);
-}
-
 __attribute__((constructor)) static void init(void) {
     @try {
         LBL(@"=== LoonBatch loaded ===");
         LNDCConfigModel *cfg = currentConfig();
         LBL(@"启动配置 %@ plugins=%lu local=%lu remote=%lu", NSStringFromClass([cfg class]),
             (unsigned long)[cfg.plugins count], (unsigned long)[cfg.localRule count], (unsigned long)[cfg.remoteRules count]);
-        for (NSString *n in @[@"DCConfigModel", @"Proxy", @"RemoteProxy", @"SubscriptionNodeVC", @"SubscriptionNodeListVC", @"ServerNodeVM", @"ProxyGroupListVC"]) {
-            LBLClassShape(n);
-        }
         Class base = [UIViewController class];
         SEL baseSel = sel_registerName("viewDidAppear:");
         Method m = class_getInstanceMethod(base, baseSel);
@@ -1270,5 +1339,6 @@ __attribute__((constructor)) static void init(void) {
         hookViewDidAppear(NSClassFromString(@"AllRulesVC"));
         hookViewDidAppear(NSClassFromString(@"LNLocalRuleListVC"));
         hookViewDidAppear(NSClassFromString(@"RemoteRuleListVC"));
+        hookViewDidAppear(NSClassFromString(@"SubscriptionNodeVC"));
     } @catch (NSException *e) { LBL(@"init 异常 %@", e); }
 }
