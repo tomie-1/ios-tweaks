@@ -897,10 +897,19 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     __weak LNBatchVC *ws = self;
     UIAction *copy = [UIAction actionWithTitle:copyTitle image:[UIImage systemImageNamed:@"doc.on.doc"]
                                      identifier:nil handler:^(UIAction *a) { [ws copySelected]; }];
-    UIAction *enable = [UIAction actionWithTitle:@"启用" image:[UIImage systemImageNamed:@"checkmark.circle"]
-                                      identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
-    UIAction *disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
-                                       identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
+    BOOL ruleMode = (self.mode == LNBLModeRules || self.mode == LNBLModeLocalRules || self.mode == LNBLModeRemoteRules);
+    UIAction *enable = nil;
+    UIAction *disable = nil;
+    UIAction *toggle = nil;
+    if (ruleMode) {
+        toggle = [UIAction actionWithTitle:@"开关" image:[UIImage systemImageNamed:@"power"]
+                                identifier:nil handler:^(UIAction *a) { [ws toggleSelectedEnabled]; }];
+    } else {
+        enable = [UIAction actionWithTitle:@"启用" image:[UIImage systemImageNamed:@"checkmark.circle"]
+                                identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
+        disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
+                                 identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
+    }
     UIAction *del = [UIAction actionWithTitle:@"删除" image:[UIImage systemImageNamed:@"trash"]
                                    identifier:nil handler:^(UIAction *a) { [ws deleteTapped]; }];
     del.attributes = UIMenuElementAttributesDestructive;
@@ -908,6 +917,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (!has) {
         copy.attributes = UIMenuElementAttributesDisabled;
         del.attributes |= UIMenuElementAttributesDisabled;
+    }
+    if (toggle) {
+        if (!toggleable) toggle.attributes = UIMenuElementAttributesDisabled;
+        return [UIMenu menuWithTitle:@"" children:@[copy, toggle, del]];
     }
     if (!toggleable || !anyDisabled) enable.attributes = UIMenuElementAttributesDisabled;
     if (!toggleable || !anyEnabled) disable.attributes = UIMenuElementAttributesDisabled;
@@ -949,6 +962,21 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
     [self commitChange];
     [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
+}
+
+- (void)toggleSelectedEnabled {
+    BOOL anyDisabled = NO, toggleable = NO;
+    for (id item in self.selected) {
+        id t = pluginObject(item);
+        if (![t respondsToSelector:NSSelectorFromString(@"setEnable:")]) continue;
+        toggleable = YES;
+        if (!boolv(t, @"enable")) anyDisabled = YES;
+    }
+    if (!toggleable) {
+        [self showToast:@"选中的规则不支持开关"];
+        return;
+    }
+    [self setSelectedEnabled:anyDisabled];
 }
 
 - (void)commitChange {
@@ -1191,12 +1219,33 @@ static void hookViewDidAppear(Class c) {
     method_setImplementation(m, repl);
 }
 
+static void LBLClassShape(NSString *name) {
+    Class c = NSClassFromString(name);
+    if (!c) { LBL(@"诊断 %@ 不存在", name); return; }
+    unsigned int n = 0;
+    objc_property_t *props = class_copyPropertyList(c, &n);
+    NSMutableArray *ps = [NSMutableArray array];
+    for (unsigned i = 0; i < n; i++) {
+        [ps addObject:[NSString stringWithFormat:@"%s:%s", property_getName(props[i]), property_getAttributes(props[i])]];
+    }
+    free(props);
+    unsigned int m = 0;
+    Method *ms = class_copyMethodList(c, &m);
+    NSMutableArray *names = [NSMutableArray array];
+    for (unsigned i = 0; i < m; i++) [names addObject:NSStringFromSelector(method_getName(ms[i]))];
+    free(ms);
+    LBL(@"诊断 %@ props=[%@] methods=[%@]", name, [ps componentsJoinedByString:@", "], [names componentsJoinedByString:@","]);
+}
+
 __attribute__((constructor)) static void init(void) {
     @try {
         LBL(@"=== LoonBatch loaded ===");
         LNDCConfigModel *cfg = currentConfig();
         LBL(@"启动配置 %@ plugins=%lu local=%lu remote=%lu", NSStringFromClass([cfg class]),
             (unsigned long)[cfg.plugins count], (unsigned long)[cfg.localRule count], (unsigned long)[cfg.remoteRules count]);
+        for (NSString *n in @[@"DCConfigModel", @"Proxy", @"RemoteProxy", @"SubscriptionNodeVC", @"SubscriptionNodeListVC", @"ServerNodeVM", @"ProxyGroupListVC"]) {
+            LBLClassShape(n);
+        }
         Class base = [UIViewController class];
         SEL baseSel = sel_registerName("viewDidAppear:");
         Method m = class_getInstanceMethod(base, baseSel);
@@ -1204,6 +1253,14 @@ __attribute__((constructor)) static void init(void) {
             IMP old = method_getImplementation(m);
             IMP repl = imp_implementationWithBlock(^(id recv, BOOL animated) {
                 ((void (*)(id, SEL, BOOL))old)(recv, baseSel, animated);
+                static NSMutableSet *seen;
+                static dispatch_once_t once;
+                dispatch_once(&once, ^{ seen = [NSMutableSet set]; });
+                NSString *cn = NSStringFromClass([recv class]);
+                if (([cn containsString:@"Node"] || [cn containsString:@"Proxy"] || [cn containsString:@"Server"]) && ![seen containsObject:cn]) {
+                    [seen addObject:cn];
+                    LBL(@"页面出现 %@", cn);
+                }
                 [[LNBLShared shared] installOn:recv];
             });
             method_setImplementation(m, repl);
