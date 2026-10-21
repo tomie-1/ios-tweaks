@@ -1029,6 +1029,10 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 #pragma mark 已安装
 
 - (void)applyInstalledSet:(NSSet *)set note:(NSString *)note {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self applyInstalledSet:set note:note]; });
+        return;
+    }
     NSUInteger hit = 0, total = 0;
     NSMutableArray *sample = [NSMutableArray array];
     for (NSDictionary *sec in self.sections) {
@@ -1312,8 +1316,12 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
             [self.table reloadData];
             [self updateGo];
 
+            __weak TFListVC *weakSelf = self;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self reload];
+                TFListVC *vc = weakSelf;
+                if (!vc) return;
+                [vc reload];
+                if (!vc.view.window) return;
                 NSString *msg = failed
                     ? [NSString stringWithFormat:@"成功 %lu 个，失败或未完成 %lu 个。",
                                                  (unsigned long)removed.count, (unsigned long)failed]
@@ -1321,7 +1329,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
                 UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"批量停止测试"
                     message:msg preferredStyle:UIAlertControllerStyleAlert];
                 [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:ac animated:YES completion:nil];
+                [vc presentViewController:ac animated:YES completion:nil];
             });
         };
         if ([NSThread isMainThread]) work();
