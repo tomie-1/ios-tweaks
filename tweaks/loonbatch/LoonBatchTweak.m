@@ -1320,19 +1320,19 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             for (id r in remote) [mgr deleteRemoteRule:r];
         }
         [config saveConfigPlayload];
-        if (light && pluginSurvivors) {
-            config.plugins = pluginSurvivors;
-            dropDeletedPluginCache(config, removedPluginURLs);
-            NSString *path = configFilePath(config);
-            repairPluginSection(path, removedPluginURLs);
-            // 防止原生异步落盘把旧内容写回来。
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{ repairPluginSection(path, removedPluginURLs); });
-        }
         if (!light) msgv(dataManager(), @"postChangeNoti");
     } @catch (NSException *e) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
+    }
+    if (light && pluginSurvivors) {
+        config.plugins = pluginSurvivors;
+        dropDeletedPluginCache(config, removedPluginURLs);
+        NSString *path = configFilePath(config);
+        repairPluginSection(path, removedPluginURLs);
+        // 防止原生异步落盘把旧内容写回来。
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ repairPluginSection(path, removedPluginURLs); });
     }
     if (light) [self refreshPluginHostLight];
     else [self refreshHost];
