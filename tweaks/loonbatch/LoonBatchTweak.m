@@ -1026,7 +1026,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } else if ([kind isEqualToString:@"remoteProxies"]) {
         config.remoteProxys = items;
     }
-    [self commitReorder];
+    [self commitLight];
 }
 
 #pragma mark 操作菜单
@@ -1105,7 +1105,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         [self showToast:@"选中的项目不支持启用/禁用"];
         return;
     }
-    [self commitChange];
+    if (self.mode == LNBLModePlugins) [self commitLight];
+    else [self commitChange];
     [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
 }
 
@@ -1135,7 +1136,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [self reloadData];
 }
 
-- (void)commitReorder {
+- (void)commitLight {
     LNDCConfigModel *config = configForHost(self.host);
     @try {
         [config saveConfigPlayload];
