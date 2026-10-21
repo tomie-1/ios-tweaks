@@ -638,7 +638,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
     LBL(@"长按状态 %ld group=%lu", (long)g.state, (unsigned long)self.dragGroup.count);
-    CGPoint vp = [g locationInView:self.view];
+    CGPoint vp = [g locationInView:[self dragOverlayHost]];
     CGPoint tp = [g locationInView:self.tableView];
     if (g.state == UIGestureRecognizerStateBegan) {
         NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:tp];
@@ -670,7 +670,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)beginCustomDrag {
     self.tableView.panGestureRecognizer.enabled = NO;
     self.dragPreview = [self buildDragPreview];
-    if (self.dragPreview) [self.view addSubview:self.dragPreview];
+    if (self.dragPreview) [[self dragOverlayHost] addSubview:self.dragPreview];
     for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
         NSArray *items = [self itemsForSection:ip.section];
         if (ip.row < 0 || ip.row >= (NSInteger)items.count) continue;
@@ -678,8 +678,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                       ptrContains(self.dragGroup, items[(NSUInteger)ip.row]));
     }
     self.dropIndicator = [[UIView alloc] initWithFrame:CGRectZero];
-    self.dropIndicator.backgroundColor = UIColor.systemBlueColor;
-    self.dropIndicator.layer.cornerRadius = 1.5;
+    self.dropIndicator.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.85];
+    self.dropIndicator.layer.cornerRadius = 1;
     self.dropIndicator.hidden = YES;
     self.dropIndicator.userInteractionEnabled = NO;
     [self.tableView addSubview:self.dropIndicator];
@@ -743,14 +743,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)updateCustomDrag {
     if (self.dragGroup.count == 0) return;
+    UIView *host = [self dragOverlayHost];
     CGPoint vp = self.dragViewPoint;
     if (self.dragPreview) {
         CGFloat halfW = self.dragPreview.bounds.size.width / 2;
-        CGFloat x = MIN(MAX(vp.x, halfW + 8), self.view.bounds.size.width - halfW - 8);
-        CGFloat y = MAX(vp.y - 34, self.dragPreview.bounds.size.height / 2 + 4);
+        CGFloat x = MIN(MAX(vp.x, halfW + 8), host.bounds.size.width - halfW - 8);
+        CGFloat top = host.safeAreaInsets.top + self.dragPreview.bounds.size.height / 2 + 4;
+        CGFloat y = MAX(vp.y - 34, top);
         self.dragPreview.center = CGPointMake(x, y);
     }
-    CGPoint tp = [self.view convertPoint:vp toView:self.tableView];
+    CGPoint tp = [host convertPoint:vp toView:self.tableView];
     NSInteger row = [self insertionRowForTablePoint:tp];
     if (row != self.dragInsertRow) {
         self.dragInsertRow = row;
@@ -794,16 +796,17 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         y = CGRectGetMinY([self.tableView rectForRowAtIndexPath:
             [NSIndexPath indexPathForRow:self.dragInsertRow inSection:self.dragSection]]);
     }
-    self.dropIndicator.frame = CGRectMake(16, y - 1, self.tableView.bounds.size.width - 32, 3);
+    self.dropIndicator.frame = CGRectMake(16, y - 1, self.tableView.bounds.size.width - 32, 2);
     self.dropIndicator.hidden = NO;
     [self.tableView bringSubviewToFront:self.dropIndicator];
 }
 
 - (void)dragScrollTick {
     if (self.dragGroup.count == 0) return;
-    CGFloat tableTop = CGRectGetMinY(self.tableView.frame);
-    CGFloat yInTable = self.dragViewPoint.y - tableTop;
-    CGFloat h = self.tableView.bounds.size.height;
+    UIView *host = [self dragOverlayHost];
+    CGRect visible = [self.tableView convertRect:self.tableView.bounds toView:host];
+    CGFloat yInTable = self.dragViewPoint.y - CGRectGetMinY(visible);
+    CGFloat h = visible.size.height;
     CGFloat margin = 72;
     CGFloat dy = 0;
     if (yInTable < margin) dy = -9;
