@@ -1,35 +1,32 @@
 # LoonBatch
 
-Loon 插件/规则批量管理。包名 `com.tomie.loonbatch`，注入 `com.ruikq.decar`（Loon 3.5.x）。
+Loon 插件、规则和节点批量管理。包名 `com.tomie.loonbatch`，注入 `com.ruikq.decar`（Loon 3.5.x）。
 
 ## 功能
 
-- 在插件列表、本地规则、远程规则、全部规则页和节点页加一个「批量」按钮。
-- 独立批量页：逐项勾选、全选/全不选，底部工具栏固定不随列表滚动。
-- 底部「操作」菜单：批量复制链接（本地规则复制规则文本/节点复制节点配置）、开关、删除。
-- 规则和节点页使用单个「开关」动作；插件页仍分开提供启用/禁用。
-- 长按拖动排序；勾选多行后拖动其中一行，整组一起移动。
-- 插件标题读取已下载插件文件里的 `#!name`，与原生列表名称一致。
-- 节点页分「本地节点 / 订阅」，支持拖动排序、开关订阅、删除本地节点或订阅。
+- 插件列表、总规则页和「所有节点」页右下角提供「批量」入口。
+- 批量页从底部以 sheet 弹出，逐项勾选、全选/全不选，底部工具栏固定。
+- 操作菜单：复制、启用/禁用、删除；插件启用/禁用和拖动排序使用轻量保存，不触发全量插件更新。
+- 长按拖动排序；勾选多行后拖动其中一行会整组移动，落点线在手指移动后出现。
+- 插件标题优先读取 Loon 配置中的 `tag`，没有 tag 时依次用 `pluginName`、文件名；副标题显示插件链接。
+- 插件、远程规则、远程订阅用右侧状态胶囊显示启用状态，勾选独立显示。
 - 插件删除会同时清理该插件生成的规则；删除前备份当前 `.lcf`。
-- 列表使用快速减速，长列表滚动更快。
 
 ## 入口
 
 - 插件列表：`PluginListSwiftVC` / `PluginListVC`
-- 规则列表：`AllRulesVC`
-- 本地规则列表：`LNLocalRuleListVC`
-- 远程规则列表：`RemoteRuleListVC`
-- 节点列表：`SubscriptionNodeVC`
+- 总规则页：`AllRulesVC`（本地规则和远程规则都在这里批量操作，子页不重复加入口）
+- 所有节点页：`PolicyGroupSelectVC`
 
 ## 实现说明
 
-- 从 `DataManager.shareInstance.currentConfigModel` 读取 `DCConfigModel`。
-- 插件来自 `config.plugins`（`LNPlugin`），本地规则来自 `config.localRule`（`Rule`），远程规则来自 `config.remoteRules`（`RemoteRule`）。
-- 原生插件名：`MD5(remoteUrl)` 对应 App Group `remotePlugin/<hash>.lpx|.plugin` 里的 `#!name`。
-- 删除使用 `RuleArchieveManager.shareInstance` 的 `deletePluginRules:`、`deleteLocalRule:`、`deleteRemoteRule:`，最后调用 `saveConfigPlayload`。
+- 从 `DataManager.shareInstance.currentConfigModel` 读取 `DCConfigModel`；节点页优先读页面的 `configModel`。
+- 插件来自 `config.plugins`，规则来自 `config.localRule` / `config.remoteRules`，节点来自 `config.proxys` / `config.remoteProxys`。
+- 插件原生标题：配置 `tag` → `LNPlugin.pluginName` → 下载文件里的 `#!name`。
+- 节点删除使用 `DCConfigModel` 的 `deleteNode:` / `deleteRemoteProxy:`，规则删除使用 `RuleArchieveManager` 的对应接口。
+- 拖动只会在同一个分组（分组 kind）内排序。
 - 调试日志：App 沙盒 `Documents/loonbatch.log`。
 
 ## 状态
 
-批量页和各项操作已在真实配置上跑通；Swift 插件页的刷新依赖 `postChangeNoti` 和页面自身刷新方法。
+插件、规则、节点三类的批量选择、启停、拖动排序、复制和删除已在真实配置上跑通。

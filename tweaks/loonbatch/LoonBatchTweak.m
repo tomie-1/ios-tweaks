@@ -450,9 +450,7 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
 typedef NS_ENUM(NSInteger, LNBLMode) {
     LNBLModePlugins = 1,
     LNBLModeRules = 2,
-    LNBLModeLocalRules = 3,
-    LNBLModeRemoteRules = 4,
-    LNBLModeNodes = 5,
+    LNBLModeNodes = 3,
 };
 
 @interface LNBatchCell : UITableViewCell
@@ -582,14 +580,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         NSArray *items = config.plugins ?: @[];
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
         [self.sections addObject:@{@"title": @"插件", @"items": items, @"kind": @"plugins"}];
-    } else if (self.mode == LNBLModeLocalRules) {
-        NSArray *items = config.localRule ?: @[];
-        self.title = [NSString stringWithFormat:@"批量本地规则 (%lu)", (unsigned long)items.count];
-        [self.sections addObject:@{@"title": @"本地规则", @"items": items, @"kind": @"localRules"}];
-    } else if (self.mode == LNBLModeRemoteRules) {
-        NSArray *items = config.remoteRules ?: @[];
-        self.title = [NSString stringWithFormat:@"批量远程规则 (%lu)", (unsigned long)items.count];
-        [self.sections addObject:@{@"title": @"远程规则", @"items": items, @"kind": @"remoteRules"}];
     } else if (self.mode == LNBLModeNodes) {
         NSArray *local = config.proxys ?: @[];
         NSArray *remote = config.remoteProxys ?: @[];
@@ -758,22 +748,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)setSheetPansEnabled:(BOOL)enabled {
-    NSMutableArray *names = [NSMutableArray array];
     UIView *v = self.navigationController.view;
     while (v) {
         for (UIGestureRecognizer *g in v.gestureRecognizers) {
-            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) {
-                g.enabled = enabled;
-                [names addObject:NSStringFromClass([g class])];
-            }
+            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) g.enabled = enabled;
         }
         v = v.superview;
     }
-    LBL(@"sheet 拖动手势 %@ %@", enabled ? @"恢复" : @"暂停", [names componentsJoinedByString:@","]);
 }
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
-    LBL(@"长按状态 %ld group=%lu", (long)g.state, (unsigned long)self.dragGroup.count);
     CGPoint vp = [g locationInView:[self dragOverlayHost]];
     CGPoint tp = [g locationInView:self.tableView];
     if (g.state == UIGestureRecognizerStateBegan) {
@@ -832,7 +816,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [h impactOccurred];
     self.dragScrollLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(dragScrollTick)];
     [self.dragScrollLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    LBL(@"自定义拖动开始 rows=%lu", (unsigned long)self.dragGroup.count);
 }
 
 - (UIView *)buildDragPreview {
@@ -990,7 +973,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSInteger section = self.dragSection;
     NSInteger insertRow = self.dragInsertRow;
     self.dragGroup = nil;
-    LBL(@"自定义拖动结束 commit=%d group=%lu insert=%ld", commit, (unsigned long)group.count, (long)insertRow);
     if (!commit || group.count == 0) return;
     NSArray *old = [self itemsForSection:section];
     if (!old.count) return;
@@ -1007,7 +989,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         NSMakeRange((NSUInteger)insertIndex, group.count)]];
     if (samePtrOrder(old, rest)) return;
     [self applyReorder:rest inSection:section];
-    LBL(@"自定义拖动完成 group=%lu insert=%ld", (unsigned long)group.count, (long)insertIndex);
 }
 
 - (void)applyReorder:(NSArray *)items inSection:(NSInteger)section {
@@ -1042,8 +1023,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
 
     NSString *copyTitle = @"复制链接";
-    if (self.mode == LNBLModeLocalRules) copyTitle = @"复制规则文本";
-    else if (self.mode == LNBLModeRules) copyTitle = @"复制选中内容";
+    if (self.mode == LNBLModeRules) copyTitle = @"复制选中内容";
     else if (self.mode == LNBLModeNodes) copyTitle = @"复制节点";
 
     __weak LNBatchVC *ws = self;
@@ -1108,20 +1088,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (self.mode == LNBLModePlugins) [self commitLight];
     else [self commitChange];
     [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
-}
-
-- (void)toggleSelectedEnabled {
-    BOOL anyDisabled = NO, toggleable = NO;
-    for (id item in self.selected) {
-        if (!itemCanToggle(item)) continue;
-        toggleable = YES;
-        if (!itemEnabled(item)) anyDisabled = YES;
-    }
-    if (!toggleable) {
-        [self showToast:@"选中的项目不支持开关"];
-        return;
-    }
-    [self setSelectedEnabled:anyDisabled];
 }
 
 - (void)commitChange {
@@ -1200,6 +1166,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         return;
     }
     backupConfig(config);
+    BOOL light = (self.mode == LNBLModePlugins);
     NSArray *picked = [self.selected copy];
     NSArray *newLocal = config.localRule ?: @[];
     NSArray *newRemote = config.remoteRules ?: @[];
@@ -1249,12 +1216,13 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             for (id r in remote) [mgr deleteRemoteRule:r];
         }
         [config saveConfigPlayload];
-        msgv(dataManager(), @"postChangeNoti");
+        if (!light) msgv(dataManager(), @"postChangeNoti");
     } @catch (NSException *e) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
     }
-    [self refreshHost];
+    if (light) [self reloadHostListsOnly];
+    else [self refreshHost];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
     [self showResult:(error ? [NSString stringWithFormat:@"部分操作失败：%@", error.localizedDescription] : @"已删除")
                  ok:(error == nil)];
@@ -1347,7 +1315,6 @@ static char kLBModeKey;
 
 - (LNBLMode)modeForClass:(NSString *)cn {
     if ([cn isEqualToString:@"PolicyGroupSelectVC"]) return LNBLModeNodes;
-    if ([cn isEqualToString:@"SubscriptionNodeVC"] || [cn hasSuffix:@".SubscriptionNodeVC"]) return LNBLModeNodes;
     if ([cn containsString:@"PluginList"]) return LNBLModePlugins;
     if ([cn containsString:@"AllRulesVC"]) return LNBLModeRules;
     return 0;
@@ -1358,29 +1325,6 @@ static char kLBModeKey;
     NSString *cn = NSStringFromClass([vc class]);
     LNBLMode mode = [self modeForClass:cn];
     if (!mode) return;
-    if ([cn isEqualToString:@"PolicyGroupSelectVC"]) {
-        static dispatch_once_t onceP;
-        dispatch_once(&onceP, ^{
-            NSMutableArray *ivs = [NSMutableArray array];
-            unsigned int n = 0;
-            Ivar *list = class_copyIvarList([vc class], &n);
-            for (unsigned i = 0; i < n; i++) {
-                [ivs addObject:[NSString stringWithFormat:@"%s:%s", ivar_getName(list[i]), ivar_getTypeEncoding(list[i])]];
-            }
-            free(list);
-            LBL(@"PolicyGroupSelectVC ivars=[%@]", [ivs componentsJoinedByString:@", "]);
-            LNDCConfigModel *cfg = configFromObject(vc);
-            LBL(@"PolicyGroupSelectVC cfg=%@ local=%lu remote=%lu", NSStringFromClass([cfg class]),
-                (unsigned long)[cfg.proxys count], (unsigned long)[cfg.remoteProxys count]);
-            @try {
-                id vms = [vc valueForKey:@"sectionVMs"];
-                LBL(@"PolicyGroupSelectVC sectionVMs=%@", vms);
-                for (id vm in vms) {
-                    LBL(@"  vm title=%@ proxys=%lu", strv(vm, @"title"), (unsigned long)[[vm valueForKey:@"proxys"] count]);
-                }
-            } @catch (NSException *e) { LBL(@"sectionVMs 异常 %@", e); }
-        });
-    }
     for (UIView *v in vc.view.subviews) if (v.tag == kLoonBatchButtonTag) return;
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     b.tag = kLoonBatchButtonTag;
@@ -1459,14 +1403,6 @@ __attribute__((constructor)) static void init(void) {
             IMP old = method_getImplementation(m);
             IMP repl = imp_implementationWithBlock(^(id recv, BOOL animated) {
                 ((void (*)(id, SEL, BOOL))old)(recv, baseSel, animated);
-                static NSMutableSet *seen;
-                static dispatch_once_t once;
-                dispatch_once(&once, ^{ seen = [NSMutableSet set]; });
-                NSString *cn = NSStringFromClass([recv class]);
-                if (![seen containsObject:cn]) {
-                    [seen addObject:cn];
-                    LBL(@"页面出现 %@ title=%@", cn, ((UIViewController *)recv).navigationItem.title ?: @"");
-                }
                 [[LNBLShared shared] installOn:recv];
             });
             method_setImplementation(m, repl);
@@ -1474,7 +1410,6 @@ __attribute__((constructor)) static void init(void) {
         hookViewDidAppear(NSClassFromString(@"PluginListVC"));
         hookViewDidAppear(NSClassFromString(@"_TtC4Loon17PluginListSwiftVC"));
         hookViewDidAppear(NSClassFromString(@"AllRulesVC"));
-        hookViewDidAppear(NSClassFromString(@"SubscriptionNodeVC"));
         hookViewDidAppear(NSClassFromString(@"PolicyGroupSelectVC"));
     } @catch (NSException *e) { LBL(@"init 异常 %@", e); }
 }

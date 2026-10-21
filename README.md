@@ -11,7 +11,7 @@
 | [trollfoolsnoads](tweaks/trollfoolsnoads/README.md) | `com.tomie.trollfoolsnoads` | TrollFools 去广告 | 自用 |
 | [tfdevices](tweaks/tfdevices/README.md) | `com.tomie.tfdevices` | TestFlight 设备伪装 | 实验性，已停用 |
 | [tfinstallbypass](tweaks/tfinstallbypass/README.md) | `com.tomie.tfinstallbypass` | installd 兼容性放行 | 实验性，已停用 |
-| [loonbatch](tweaks/loonbatch/README.md) | `com.tomie.loonbatch` | Loon 插件/规则批量管理 | 自用，测试中 |
+| [loonbatch](tweaks/loonbatch/README.md) | `com.tomie.loonbatch` | Loon 插件/规则/节点批量管理 | 自用 |
 
 功能、入口和已知问题见各插件目录下的 `README.md`。
 
