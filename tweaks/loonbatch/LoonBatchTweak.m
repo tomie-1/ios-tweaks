@@ -260,6 +260,8 @@ static BOOL isRemoteProxy(id x) {
 
 static NSString *pluginTitle(id p) {
     id o = pluginObject(p);
+    NSString *tag = strv(o, @"tag");
+    if (tag.length && !looksLikeHash(tag)) return tag;
     NSString *url = strv(o, @"remoteUrl");
     NSString *name = pluginNativeName(url);
     if (!name.length) {
@@ -271,27 +273,21 @@ static NSString *pluginTitle(id p) {
         if (n.length && !looksLikeHash(n)) name = n;
     }
     if (!name.length) {
-        NSString *n = strv(o, @"tag");
-        if (n.length && !looksLikeHash(n)) name = n;
-    }
-    if (!name.length) {
         NSString *file = [url lastPathComponent].stringByDeletingPathExtension;
         if (file.length && !looksLikeHash(file)) name = file;
     }
-    if (!name.length) {
-        NSString *n = strv(o, @"name");
-        if (n.length) name = n;
-    }
+    if (!name.length) name = strv(o, @"name");
     return name.length ? name : @"(未命名插件)";
 }
 
 static NSString *pluginSubtitle(id p) {
     id o = pluginObject(p);
-    NSMutableArray *a = [NSMutableArray array];
     NSString *u = strv(o, @"remoteUrl");
-    if (u.length) [a addObject:u];
-    if (boolv(o, @"pin")) [a addObject:@"已固定"];
-    return [a componentsJoinedByString:@" · "];
+    NSString *tag = strv(o, @"tag");
+    NSString *name = pluginNativeName(u);
+    if (tag.length && name.length && ![tag isEqualToString:name]) return name;
+    if (u.length) return u;
+    return name ?: @"";
 }
 
 static NSString *ruleTitle(id r) {
