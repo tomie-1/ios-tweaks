@@ -8,6 +8,8 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <QuartzCore/QuartzCore.h>
+#import <math.h>
 
 #pragma mark - 日志
 
@@ -359,6 +361,44 @@ static void backupConfig(LNDCConfigModel *config) {
     } @catch (NSException *e) { LBL(@"备份异常 %@", e); }
 }
 
+static const NSInteger kLBDimTag = 0x4C43;
+
+static void setCellDimmed(UITableViewCell *cell, BOOL dimmed) {
+    if (!cell) return;
+    UIView *overlay = [cell viewWithTag:kLBDimTag];
+    if (dimmed) {
+        cell.alpha = 1.0;
+        if (!overlay) {
+            overlay = [[UIView alloc] initWithFrame:cell.bounds];
+            overlay.tag = kLBDimTag;
+            overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            overlay.backgroundColor = [UIColor.secondarySystemGroupedBackgroundColor colorWithAlphaComponent:0.55];
+            overlay.userInteractionEnabled = NO;
+            [cell addSubview:overlay];
+        }
+    } else {
+        if (overlay) [overlay removeFromSuperview];
+        cell.alpha = 1.0;
+    }
+}
+
+static UIImage *renderCellImage(UITableViewCell *cell) {
+    if (!cell || cell.bounds.size.width < 1 || cell.bounds.size.height < 1) return nil;
+    CGSize size = cell.bounds.size;
+    UIGraphicsImageRenderer *ren = [[UIGraphicsImageRenderer alloc] initWithSize:size];
+    return [ren imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        [UIColor.secondarySystemGroupedBackgroundColor setFill];
+        [ctx fillRect:CGRectMake(0, 0, size.width, size.height)];
+        [cell.layer renderInContext:ctx.CGContext];
+    }];
+}
+
+static BOOL samePtrOrder(NSArray *a, NSArray *b) {
+    if (a.count != b.count) return NO;
+    for (NSUInteger i = 0; i < a.count; i++) if (a[i] != b[i]) return NO;
+    return YES;
+}
+
 #pragma mark - 批量页
 
 typedef NS_ENUM(NSInteger, LNBLMode) {
@@ -368,7 +408,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     LNBLModeRemoteRules = 4,
 };
 
-@interface LNBatchVC : UITableViewController <UITableViewDragDelegate, UITableViewDropDelegate>
+@interface LNBatchVC : UITableViewController <UIGestureRecognizerDelegate>
 @property (nonatomic, assign) LNBLMode mode;
 @property (nonatomic, weak) UIViewController *host;
 @property (nonatomic, strong) NSMutableArray *sections;   // @{title, items}
@@ -377,8 +417,13 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, strong) UIBarButtonItem *countItem;
 @property (nonatomic, strong) UIBarButtonItem *actionItem;
 @property (nonatomic, strong) UILabel *toastLabel;
-@property (nonatomic, strong) NSArray *draggingItems;
-@property (nonatomic, assign) NSInteger draggingSection;
+@property (nonatomic, strong) NSArray *dragGroup;
+@property (nonatomic, assign) NSInteger dragSection;
+@property (nonatomic, assign) NSInteger dragInsertRow;
+@property (nonatomic, assign) CGPoint dragViewPoint;
+@property (nonatomic, strong) UIView *dragPreview;
+@property (nonatomic, strong) UIView *dropIndicator;
+@property (nonatomic, strong) CADisplayLink *dragScrollLink;
 @end
 
 @implementation LNBatchVC
@@ -397,9 +442,13 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.tableView.rowHeight = 62;
     self.tableView.allowsMultipleSelection = YES;
     self.tableView.decelerationRate = UIScrollViewDecelerationRateFast;
-    self.tableView.dragInteractionEnabled = YES;
-    self.tableView.dragDelegate = self;
-    self.tableView.dropDelegate = self;
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleLongPress:)];
+    lp.minimumPressDuration = 0.35;
+    lp.allowableMovement = 12;
+    lp.cancelsTouchesInView = YES;
+    lp.delegate = self;
+    [self.tableView addGestureRecognizer:lp];
     self.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
                                         target:self action:@selector(cancel)];
@@ -433,6 +482,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    if (self.dragGroup.count) [self endCustomDrag:NO];
     if (self.isMovingFromParentViewController || self.isBeingDismissed) {
         [self.navigationController setToolbarHidden:YES animated:NO];
     }
@@ -541,7 +591,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.accessoryType = ptrContains(self.selected, item) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    setCellDimmed(c, self.draggingItems.count && ptrContains(self.draggingItems, item));
+    setCellDimmed(c, self.dragGroup.count && ptrContains(self.dragGroup, item));
     return c;
 }
 
@@ -579,196 +629,225 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.actionItem.menu = [self buildActionMenu];
 }
 
-#pragma mark 拖动排序
-
-static BOOL samePtrOrder(NSArray *a, NSArray *b) {
-    if (a.count != b.count) return NO;
-    for (NSUInteger i = 0; i < a.count; i++) if (a[i] != b[i]) return NO;
+#pragma mark 自定义拖动排序
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
     return YES;
 }
 
-static const NSInteger kLBDimTag = 0x4C43;
 
-static void setCellDimmed(UITableViewCell *cell, BOOL dimmed) {
-    UIView *overlay = [cell viewWithTag:kLBDimTag];
-    if (dimmed) {
-        cell.alpha = 1.0;
-        if (!overlay) {
-            overlay = [[UIView alloc] initWithFrame:cell.bounds];
-            overlay.tag = kLBDimTag;
-            overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-            overlay.backgroundColor = [UIColor.secondarySystemGroupedBackgroundColor colorWithAlphaComponent:0.55];
-            overlay.userInteractionEnabled = NO;
-            [cell addSubview:overlay];
+- (void)handleLongPress:(UILongPressGestureRecognizer *)g {
+    CGPoint vp = [g locationInView:self.view];
+    CGPoint tp = [g locationInView:self.tableView];
+    if (g.state == UIGestureRecognizerStateBegan) {
+        NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:tp];
+        if (!ip) return;
+        NSArray *items = [self itemsForSection:ip.section];
+        if (ip.row < 0 || ip.row >= (NSInteger)items.count) return;
+        id item = items[(NSUInteger)ip.row];
+        NSMutableArray *group = [NSMutableArray array];
+        if (ptrContains(self.selected, item) && self.selected.count > 1) {
+            for (id x in items) if (ptrContains(self.selected, x)) [group addObject:x];
+        } else {
+            [group addObject:item];
         }
-    } else {
-        if (overlay) [overlay removeFromSuperview];
-        cell.alpha = 1.0;
+        self.dragGroup = group;
+        self.dragSection = ip.section;
+        self.dragInsertRow = ip.row;
+        self.dragViewPoint = vp;
+        [self beginCustomDrag];
+    } else if (g.state == UIGestureRecognizerStateChanged) {
+        self.dragViewPoint = vp;
+        [self updateCustomDrag];
+    } else if (g.state == UIGestureRecognizerStateEnded) {
+        [self endCustomDrag:YES];
+    } else if (g.state == UIGestureRecognizerStateCancelled || g.state == UIGestureRecognizerStateFailed) {
+        [self endCustomDrag:NO];
     }
 }
 
-- (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView
-    itemsForBeginningDragSession:(id<UIDragSession>)session
-                     atIndexPath:(NSIndexPath *)indexPath {
-    NSArray *items = [self itemsForSection:indexPath.section];
-    if (indexPath.row < 0 || indexPath.row >= (NSInteger)items.count) return @[];
-    id item = items[(NSUInteger)indexPath.row];
-    NSMutableArray *drag = [NSMutableArray array];
-    if (ptrContains(self.selected, item) && self.selected.count > 1) {
-        for (id x in items) if (ptrContains(self.selected, x)) [drag addObject:x];
-    } else {
-        [drag addObject:item];
-    }
-    self.draggingItems = drag;
-    self.draggingSection = indexPath.section;
-    NSMutableArray<UIDragItem *> *out = [NSMutableArray array];
-    for (id x in drag) {
-        UIDragItem *d = [[UIDragItem alloc] initWithItemProvider:[[NSItemProvider alloc] init]];
-        d.localObject = x;
-        NSUInteger r = [items indexOfObjectIdenticalTo:x];
-        UITableViewCell *cell = (r != NSNotFound)
-            ? [tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)r inSection:indexPath.section]]
-            : nil;
-        if (cell && cell.bounds.size.width > 1 && cell.bounds.size.height > 1) {
-            CGSize size = cell.bounds.size;
-            UIGraphicsImageRenderer *ren = [[UIGraphicsImageRenderer alloc] initWithSize:size];
-            UIImage *image = [ren imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [UIColor.secondarySystemGroupedBackgroundColor setFill];
-                [ctx fillRect:CGRectMake(0, 0, size.width, size.height)];
-                [cell.layer renderInContext:ctx.CGContext];
-            }];
-            d.previewProvider = ^UIDragPreview * _Nullable{
-                if (!image) return nil;
-                UIImageView *iv = [[UIImageView alloc] initWithImage:image];
-                iv.frame = CGRectMake(0, 0, size.width, size.height);
-                UIDragPreviewParameters *pp = [[UIDragPreviewParameters alloc] init];
-                pp.backgroundColor = UIColor.clearColor;
-                pp.visiblePath = [UIBezierPath bezierPathWithRoundedRect:iv.bounds cornerRadius:12];
-                return [[UIDragPreview alloc] initWithView:iv parameters:pp];
-            };
-        }
-        [out addObject:d];
-    }
-    LBL(@"开始拖动 section=%ld rows=%lu", (long)indexPath.section, (unsigned long)drag.count);
-    __weak LNBatchVC *ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [ws applyDragDim];
-    });
-    return out;
-}
-
-- (void)applyDragDim {
-    if (self.draggingItems.count == 0) return;
-    NSInteger changed = 0;
+- (void)beginCustomDrag {
+    self.tableView.scrollEnabled = NO;
+    self.dragPreview = [self buildDragPreview];
+    if (self.dragPreview) [self.view addSubview:self.dragPreview];
     for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
         NSArray *items = [self itemsForSection:ip.section];
         if (ip.row < 0 || ip.row >= (NSInteger)items.count) continue;
-        UITableViewCell *c = [self.tableView cellForRowAtIndexPath:ip];
+        setCellDimmed([self.tableView cellForRowAtIndexPath:ip],
+                      ptrContains(self.dragGroup, items[(NSUInteger)ip.row]));
+    }
+    self.dropIndicator = [[UIView alloc] initWithFrame:CGRectZero];
+    self.dropIndicator.backgroundColor = UIColor.systemBlueColor;
+    self.dropIndicator.layer.cornerRadius = 1.5;
+    self.dropIndicator.hidden = YES;
+    self.dropIndicator.userInteractionEnabled = NO;
+    [self.tableView addSubview:self.dropIndicator];
+
+    [self updateCustomDrag];
+
+    UIImpactFeedbackGenerator *h = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [h impactOccurred];
+    self.dragScrollLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(dragScrollTick)];
+    [self.dragScrollLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    LBL(@"自定义拖动开始 rows=%lu", (unsigned long)self.dragGroup.count);
+}
+
+- (UIView *)buildDragPreview {
+    NSArray *sectionItems = [self itemsForSection:self.dragSection];
+    NSMutableArray<UIImage *> *images = [NSMutableArray array];
+    CGSize cellSize = CGSizeMake(300, 62);
+    for (id x in self.dragGroup) {
+        NSUInteger r = [sectionItems indexOfObjectIdenticalTo:x];
+        if (r == NSNotFound) continue;
+        UITableViewCell *c = [self.tableView cellForRowAtIndexPath:
+            [NSIndexPath indexPathForRow:(NSInteger)r inSection:self.dragSection]];
         if (!c) continue;
-        BOOL dimmed = ptrContains(self.draggingItems, items[(NSUInteger)ip.row]);
-        setCellDimmed(c, dimmed);
-        if (dimmed) changed++;
+        cellSize = c.bounds.size;
+        UIImage *img = renderCellImage(c);
+        if (img) [images addObject:img];
     }
-    LBL(@"拖动变淡 rows=%lu cells=%ld", (unsigned long)self.draggingItems.count, (long)changed);
+    if (!images.count) return nil;
+    NSUInteger layers = MIN(images.count, (NSUInteger)3);
+    CGFloat off = 7;
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0,
+        cellSize.width + off * (layers - 1), cellSize.height + off * (layers - 1))];
+    box.backgroundColor = UIColor.clearColor;
+    box.userInteractionEnabled = NO;
+    box.layer.shadowColor = UIColor.blackColor.CGColor;
+    box.layer.shadowOpacity = 0.18;
+    box.layer.shadowRadius = 10;
+    box.layer.shadowOffset = CGSizeMake(0, 5);
+    for (NSUInteger i = 0; i < layers; i++) {
+        UIImageView *iv = [[UIImageView alloc] initWithImage:images[i]];
+        iv.frame = CGRectMake(off * i, off * i, cellSize.width, cellSize.height);
+        iv.layer.cornerRadius = 12;
+        iv.clipsToBounds = YES;
+        iv.layer.borderWidth = 0.5;
+        iv.layer.borderColor = UIColor.separatorColor.CGColor;
+        [box addSubview:iv];
+    }
+    if (self.dragGroup.count > 1) {
+        UILabel *badge = [[UILabel alloc] initWithFrame:CGRectMake(box.bounds.size.width - 30, -10, 30, 30)];
+        badge.text = [NSString stringWithFormat:@"%lu", (unsigned long)self.dragGroup.count];
+        badge.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+        badge.textColor = UIColor.whiteColor;
+        badge.backgroundColor = UIColor.systemBlueColor;
+        badge.textAlignment = NSTextAlignmentCenter;
+        badge.layer.cornerRadius = 15;
+        badge.clipsToBounds = YES;
+        [box addSubview:badge];
+    }
+    return box;
 }
 
-- (void)tableView:(UITableView *)tableView dragSessionWillBegin:(id<UIDragSession>)session {
-    [self applyDragDim];
+- (void)updateCustomDrag {
+    if (self.dragGroup.count == 0) return;
+    CGPoint vp = self.dragViewPoint;
+    if (self.dragPreview) {
+        CGFloat halfW = self.dragPreview.bounds.size.width / 2;
+        CGFloat x = MIN(MAX(vp.x, halfW + 8), self.view.bounds.size.width - halfW - 8);
+        CGFloat y = MAX(vp.y - 34, self.dragPreview.bounds.size.height / 2 + 4);
+        self.dragPreview.center = CGPointMake(x, y);
+    }
+    CGPoint tp = [self.view convertPoint:vp toView:self.tableView];
+    NSInteger row = [self insertionRowForTablePoint:tp];
+    if (row != self.dragInsertRow) {
+        self.dragInsertRow = row;
+        UISelectionFeedbackGenerator *sf = [[UISelectionFeedbackGenerator alloc] init];
+        [sf selectionChanged];
+    }
+    [self updateDropIndicator];
 }
 
-- (void)tableView:(UITableView *)tableView dragSessionDidEnd:(id<UIDragSession>)session {
-    self.draggingItems = nil;
-    for (NSIndexPath *ip in tableView.indexPathsForVisibleRows) {
-        UITableViewCell *c = [tableView cellForRowAtIndexPath:ip];
-        setCellDimmed(c, NO);
+- (NSInteger)insertionRowForTablePoint:(CGPoint)p {
+    NSArray *items = [self itemsForSection:self.dragSection];
+    if (!items.count) return 0;
+    CGRect first = [self.tableView rectForRowAtIndexPath:
+        [NSIndexPath indexPathForRow:0 inSection:self.dragSection]];
+    CGRect last = [self.tableView rectForRowAtIndexPath:
+        [NSIndexPath indexPathForRow:(NSInteger)items.count - 1 inSection:self.dragSection]];
+    if (p.y <= CGRectGetMinY(first)) return 0;
+    if (p.y >= CGRectGetMaxY(last)) return (NSInteger)items.count;
+    for (NSInteger i = 0; i < (NSInteger)items.count; i++) {
+        CGRect r = [self.tableView rectForRowAtIndexPath:
+            [NSIndexPath indexPathForRow:i inSection:self.dragSection]];
+        if (p.y < CGRectGetMaxY(r)) return (p.y > CGRectGetMidY(r)) ? i + 1 : i;
     }
+    return (NSInteger)items.count;
 }
 
-- (UITableViewDropProposal *)tableView:(UITableView *)tableView
-                  dropSessionDidUpdate:(id<UIDropSession>)session
-              withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
-    if (!session.localDragSession || self.draggingItems.count == 0) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel
-                                                              intent:UITableViewDropIntentUnspecified];
+- (void)updateDropIndicator {
+    NSArray *items = [self itemsForSection:self.dragSection];
+    if (!items.count || !self.dropIndicator) {
+        self.dropIndicator.hidden = YES;
+        return;
     }
-    NSInteger section = destinationIndexPath ? destinationIndexPath.section : self.draggingSection;
-    if (section != self.draggingSection) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel
-                                                              intent:UITableViewDropIntentUnspecified];
-    }
-    return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove
-                                                          intent:UITableViewDropIntentInsertAtDestinationIndexPath];
-}
-
-- (void)tableView:(UITableView *)tableView
-    performDropWithCoordinator:(id<UITableViewDropCoordinator>)coordinator {
-    NSArray *drag = self.draggingItems;
-    NSInteger section = self.draggingSection;
-    self.draggingItems = nil;
-    if (drag.count == 0) return;
-    NSIndexPath *dest = coordinator.destinationIndexPath;
-    if (dest && dest.section != section) return;
-
-    NSArray *old = [self itemsForSection:section];
-    if (old.count == 0) return;
-
-    CGPoint p = [coordinator.session locationInView:tableView];
-    NSIndexPath *hover = [tableView indexPathForRowAtPoint:p];
-    NSInteger insertRow = (NSInteger)old.count;
-    if (hover && hover.section == section && hover.row < (NSInteger)old.count) {
-        CGRect r = [tableView rectForRowAtIndexPath:hover];
-        insertRow = hover.row + (p.y > CGRectGetMidY(r) ? 1 : 0);
-    } else if (dest && dest.section == section) {
-        insertRow = MIN((NSInteger)dest.row, (NSInteger)old.count);
+    CGFloat y;
+    if (self.dragInsertRow <= 0) {
+        y = CGRectGetMinY([self.tableView rectForRowAtIndexPath:
+            [NSIndexPath indexPathForRow:0 inSection:self.dragSection]]);
+    } else if (self.dragInsertRow >= (NSInteger)items.count) {
+        y = CGRectGetMaxY([self.tableView rectForRowAtIndexPath:
+            [NSIndexPath indexPathForRow:(NSInteger)items.count - 1 inSection:self.dragSection]]);
     } else {
-        CGRect first = [tableView rectForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:section]];
-        insertRow = (p.y < CGRectGetMinY(first)) ? 0 : (NSInteger)old.count;
+        y = CGRectGetMinY([self.tableView rectForRowAtIndexPath:
+            [NSIndexPath indexPathForRow:self.dragInsertRow inSection:self.dragSection]]);
     }
-    LBL(@"拖动释放 dest=%@ hover=%@ y=%.1f insertRow=%ld", dest, hover, p.y, (long)insertRow);
+    self.dropIndicator.frame = CGRectMake(16, y - 1, self.tableView.bounds.size.width - 32, 3);
+    self.dropIndicator.hidden = NO;
+    [self.tableView bringSubviewToFront:self.dropIndicator];
+}
 
+- (void)dragScrollTick {
+    if (self.dragGroup.count == 0) return;
+    CGFloat tableTop = CGRectGetMinY(self.tableView.frame);
+    CGFloat yInTable = self.dragViewPoint.y - tableTop;
+    CGFloat h = self.tableView.bounds.size.height;
+    CGFloat margin = 72;
+    CGFloat dy = 0;
+    if (yInTable < margin) dy = -9;
+    else if (yInTable > h - margin) dy = 9;
+    if (dy == 0) return;
+    CGFloat minY = -self.tableView.adjustedContentInset.top;
+    CGFloat maxY = MAX(minY, self.tableView.contentSize.height - h + self.tableView.adjustedContentInset.bottom);
+    CGFloat y = MAX(minY, MIN(self.tableView.contentOffset.y + dy, maxY));
+    if (fabs(y - self.tableView.contentOffset.y) < 0.5) return;
+    self.tableView.contentOffset = CGPointMake(0, y);
+    [self updateCustomDrag];
+}
+
+- (void)endCustomDrag:(BOOL)commit {
+    [self.dragScrollLink invalidate];
+    self.dragScrollLink = nil;
+    self.tableView.scrollEnabled = YES;
+    [self.dragPreview removeFromSuperview];
+    self.dragPreview = nil;
+    [self.dropIndicator removeFromSuperview];
+    self.dropIndicator = nil;
+    for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
+        setCellDimmed([self.tableView cellForRowAtIndexPath:ip], NO);
+    }
+    NSArray *group = self.dragGroup;
+    NSInteger section = self.dragSection;
+    NSInteger insertRow = self.dragInsertRow;
+    self.dragGroup = nil;
+    if (!commit || group.count == 0) return;
+    NSArray *old = [self itemsForSection:section];
+    if (!old.count) return;
     NSMutableArray *rest = [NSMutableArray array];
     NSInteger insertIndex = 0;
     for (NSInteger i = 0; i < (NSInteger)old.count; i++) {
         id x = old[(NSUInteger)i];
-        if (ptrContains(drag, x)) continue;
+        if (ptrContains(group, x)) continue;
         if (i < insertRow) insertIndex++;
         [rest addObject:x];
     }
     if (insertIndex > (NSInteger)rest.count) insertIndex = (NSInteger)rest.count;
-    [rest insertObjects:drag atIndexes:[NSIndexSet indexSetWithIndexesInRange:
-        NSMakeRange((NSUInteger)insertIndex, drag.count)]];
-
+    [rest insertObjects:group atIndexes:[NSIndexSet indexSetWithIndexesInRange:
+        NSMakeRange((NSUInteger)insertIndex, group.count)]];
     if (samePtrOrder(old, rest)) return;
     [self applyReorder:rest inSection:section];
-
-    for (id<UITableViewDropItem> di in coordinator.items) {
-        id obj = di.dragItem.localObject;
-        NSUInteger idx = NSNotFound;
-        for (NSUInteger i = 0; i < rest.count; i++) if (rest[i] == obj) { idx = i; break; }
-        if (idx != NSNotFound) {
-            [coordinator dropItem:di.dragItem
-                toRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)idx inSection:section]];
-        }
-    }
-    LBL(@"拖动完成 section=%ld items=%lu -> row=%ld", (long)section,
-        (unsigned long)drag.count, (long)insertIndex);
-}
-
-- (void)applyReorder:(NSArray *)items inSection:(NSInteger)section {
-    LNDCConfigModel *config = configForHost(self.host);
-    if (!config) return;
-    if (self.mode == LNBLModePlugins) {
-        config.plugins = items;
-    } else if (self.mode == LNBLModeLocalRules) {
-        config.localRule = items;
-    } else if (self.mode == LNBLModeRemoteRules) {
-        config.remoteRules = items;
-    } else if (section == 0 && [(config.localRule ?: @[]) count] > 0) {
-        config.localRule = items;
-    } else {
-        config.remoteRules = items;
-    }
-    [self commitChange];
+    LBL(@"自定义拖动完成 group=%lu insert=%ld", (unsigned long)group.count, (long)insertIndex);
 }
 
 #pragma mark 操作菜单
