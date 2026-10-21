@@ -62,6 +62,8 @@ static void LBL(NSString *fmt, ...) {
 @property (nonatomic, strong) NSArray *plugins;
 @property (nonatomic, strong) NSArray *localRule;
 @property (nonatomic, strong) NSArray *remoteRules;
+@property (nonatomic, strong) NSArray *proxys;
+@property (nonatomic, strong) NSArray *remoteProxys;
 @property (nonatomic, copy) NSString *fileName;
 - (void)saveConfigPlayload;
 @end
