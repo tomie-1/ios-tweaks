@@ -1376,12 +1376,11 @@ static __weak UIWindow *gHostWindow;
 static CGFloat tftoolButtonBottomY(UIWindow *w);
 static CGPoint tftoolClampFabCenter(CGPoint center, UIWindow *w, CGSize size);
 
-static void tftoolLoadFabPosition(void) {
+static void tftoolRemoveLegacyFabPosition(void) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    if ([d objectForKey:@"TFToolFabCenterX"] && [d objectForKey:@"TFToolFabCenterY"]) {
-        gFabCustomPosition = YES;
-        gFabCustomCenter = CGPointMake([d doubleForKey:@"TFToolFabCenterX"],
-                                       [d doubleForKey:@"TFToolFabCenterY"]);
+    if ([d objectForKey:@"TFToolFabCenterX"] || [d objectForKey:@"TFToolFabCenterY"]) {
+        [d removeObjectForKey:@"TFToolFabCenterX"];
+        [d removeObjectForKey:@"TFToolFabCenterY"];
     }
 }
 
@@ -1406,11 +1405,9 @@ static void tftoolLoadFabPosition(void) {
     } else if (g.state == UIGestureRecognizerStateEnded ||
                g.state == UIGestureRecognizerStateCancelled ||
                g.state == UIGestureRecognizerStateFailed) {
+        // 只在本次进程内保留拖动后的位置；重开 TestFlight 回到默认右下角。
         gFabCustomPosition = YES;
         gFabCustomCenter = v.center;
-        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-        [d setDouble:gFabCustomCenter.x forKey:@"TFToolFabCenterX"];
-        [d setDouble:gFabCustomCenter.y forKey:@"TFToolFabCenterY"];
         [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.62 initialSpringVelocity:0.5
                             options:UIViewAnimationOptionAllowUserInteraction
                          animations:^{
@@ -1602,7 +1599,7 @@ __attribute__((constructor)) static void tftool_init(void) {
             LOG(@"[init] 检测到 tftool.off，停止加载");
             return;
         }
-        tftoolLoadFabPosition();
+        tftoolRemoveLegacyFabPosition();
         tftoolInstallHooks();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             tftoolAttachButton();
