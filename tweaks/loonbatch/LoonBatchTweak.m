@@ -376,7 +376,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, strong) UIBarButtonItem *selectAllItem;
 @property (nonatomic, strong) UIBarButtonItem *countItem;
 @property (nonatomic, strong) UIBarButtonItem *actionItem;
-@property (nonatomic, strong) UIBarButtonItem *deleteItem;
 @property (nonatomic, strong) UILabel *toastLabel;
 @property (nonatomic, strong) NSArray *draggingItems;
 @property (nonatomic, assign) NSInteger draggingSection;
@@ -419,14 +418,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.countItem = [[UIBarButtonItem alloc] initWithCustomView:countLabel];
     self.actionItem = [[UIBarButtonItem alloc] initWithTitle:@"操作" style:UIBarButtonItemStylePlain
                                                       target:nil action:nil];
-    self.deleteItem = [[UIBarButtonItem alloc] initWithTitle:@"删除" style:UIBarButtonItemStyleDone
-                                                      target:self action:@selector(deleteTapped)];
-    self.deleteItem.tintColor = UIColor.systemRedColor;
     UIBarButtonItem *f1 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                                                                         target:nil action:nil];
     UIBarButtonItem *f2 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
                                                                         target:nil action:nil];
-    self.toolbarItems = @[self.selectAllItem, f1, self.countItem, f2, self.actionItem, self.deleteItem];
+    self.toolbarItems = @[self.selectAllItem, f1, self.countItem, f2, self.actionItem];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -545,6 +541,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.accessoryType = ptrContains(self.selected, item) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    c.alpha = (self.draggingItems.count && ptrContains(self.draggingItems, item)) ? 0.3 : 1.0;
     return c;
 }
 
@@ -580,7 +577,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.selectAllItem.enabled = all.count > 0;
     self.actionItem.enabled = all.count > 0;
     self.actionItem.menu = [self buildActionMenu];
-    self.deleteItem.enabled = n > 0;
 }
 
 #pragma mark 拖动排序
@@ -609,14 +605,45 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
     for (id x in drag) {
         UIDragItem *d = [[UIDragItem alloc] initWithItemProvider:[[NSItemProvider alloc] init]];
         d.localObject = x;
+        NSUInteger r = [items indexOfObjectIdenticalTo:x];
+        UITableViewCell *cell = (r != NSNotFound)
+            ? [tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)r inSection:indexPath.section]]
+            : nil;
+        if (cell) {
+            d.previewProvider = ^UIDragPreview * _Nullable{
+                CGFloat oldAlpha = cell.alpha;
+                cell.alpha = 1.0;
+                UIView *snap = [cell snapshotViewAfterScreenUpdates:NO];
+                cell.alpha = oldAlpha;
+                if (!snap) return nil;
+                UIDragPreviewParameters *pp = [[UIDragPreviewParameters alloc] init];
+                pp.backgroundColor = UIColor.clearColor;
+                pp.visiblePath = [UIBezierPath bezierPathWithRoundedRect:cell.bounds cornerRadius:12];
+                return [[UIDragPreview alloc] initWithView:snap parameters:pp];
+            };
+        }
         [out addObject:d];
     }
     LBL(@"开始拖动 section=%ld rows=%lu", (long)indexPath.section, (unsigned long)drag.count);
     return out;
 }
 
+- (void)tableView:(UITableView *)tableView dragSessionWillBegin:(id<UIDragSession>)session {
+    for (NSIndexPath *ip in tableView.indexPathsForVisibleRows) {
+        UITableViewCell *c = [tableView cellForRowAtIndexPath:ip];
+        NSArray *items = [self itemsForSection:ip.section];
+        if (ip.row < (NSInteger)items.count && ptrContains(self.draggingItems, items[(NSUInteger)ip.row])) {
+            c.alpha = 0.3;
+        }
+    }
+}
+
 - (void)tableView:(UITableView *)tableView dragSessionDidEnd:(id<UIDragSession>)session {
     self.draggingItems = nil;
+    for (NSIndexPath *ip in tableView.indexPathsForVisibleRows) {
+        UITableViewCell *c = [tableView cellForRowAtIndexPath:ip];
+        c.alpha = 1.0;
+    }
 }
 
 - (UITableViewDropProposal *)tableView:(UITableView *)tableView
@@ -730,11 +757,17 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
                                       identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
     UIAction *disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
                                        identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
+    UIAction *del = [UIAction actionWithTitle:@"删除" image:[UIImage systemImageNamed:@"trash"]
+                                   identifier:nil handler:^(UIAction *a) { [ws deleteTapped]; }];
+    del.attributes = UIMenuElementAttributesDestructive;
 
-    if (!has) copy.attributes = UIMenuElementAttributesDisabled;
+    if (!has) {
+        copy.attributes = UIMenuElementAttributesDisabled;
+        del.attributes |= UIMenuElementAttributesDisabled;
+    }
     if (!toggleable || !anyDisabled) enable.attributes = UIMenuElementAttributesDisabled;
     if (!toggleable || !anyEnabled) disable.attributes = UIMenuElementAttributesDisabled;
-    return [UIMenu menuWithTitle:@"" children:@[copy, enable, disable]];
+    return [UIMenu menuWithTitle:@"" children:@[copy, enable, disable, del]];
 }
 
 - (void)copySelected {
