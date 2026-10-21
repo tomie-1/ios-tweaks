@@ -612,7 +612,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSUInteger total = all.count;
     LBL(@"批量页 mode=%ld config=%@ sections=%lu items=%lu", (long)self.mode,
         NSStringFromClass([config class]), (unsigned long)self.sections.count, (unsigned long)total);
-    CGPoint offset = self.tableView.contentOffset;
+    __block CGPoint offset = self.tableView.contentOffset;
     [UIView performWithoutAnimation:^{
         [self.tableView reloadData];
         [self.tableView layoutIfNeeded];
