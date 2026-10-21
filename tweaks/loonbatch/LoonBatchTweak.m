@@ -637,6 +637,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
+    LBL(@"长按状态 %ld group=%lu", (long)g.state, (unsigned long)self.dragGroup.count);
     CGPoint vp = [g locationInView:self.view];
     CGPoint tp = [g locationInView:self.tableView];
     if (g.state == UIGestureRecognizerStateBegan) {
@@ -667,7 +668,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)beginCustomDrag {
-    self.tableView.scrollEnabled = NO;
+    self.tableView.panGestureRecognizer.enabled = NO;
     self.dragPreview = [self buildDragPreview];
     if (self.dragPreview) [self.view addSubview:self.dragPreview];
     for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
@@ -819,7 +820,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)endCustomDrag:(BOOL)commit {
     [self.dragScrollLink invalidate];
     self.dragScrollLink = nil;
-    self.tableView.scrollEnabled = YES;
+    self.tableView.panGestureRecognizer.enabled = YES;
     [self.dragPreview removeFromSuperview];
     self.dragPreview = nil;
     [self.dropIndicator removeFromSuperview];
@@ -831,6 +832,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSInteger section = self.dragSection;
     NSInteger insertRow = self.dragInsertRow;
     self.dragGroup = nil;
+    LBL(@"自定义拖动结束 commit=%d group=%lu insert=%ld", commit, (unsigned long)group.count, (long)insertRow);
     if (!commit || group.count == 0) return;
     NSArray *old = [self itemsForSection:section];
     if (!old.count) return;
