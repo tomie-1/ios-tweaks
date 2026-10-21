@@ -850,6 +850,23 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     LBL(@"自定义拖动完成 group=%lu insert=%ld", (unsigned long)group.count, (long)insertIndex);
 }
 
+- (void)applyReorder:(NSArray *)items inSection:(NSInteger)section {
+    LNDCConfigModel *config = configForHost(self.host);
+    if (!config) return;
+    if (self.mode == LNBLModePlugins) {
+        config.plugins = items;
+    } else if (self.mode == LNBLModeLocalRules) {
+        config.localRule = items;
+    } else if (self.mode == LNBLModeRemoteRules) {
+        config.remoteRules = items;
+    } else if (section == 0 && [(config.localRule ?: @[]) count] > 0) {
+        config.localRule = items;
+    } else {
+        config.remoteRules = items;
+    }
+    [self commitChange];
+}
+
 #pragma mark 操作菜单
 
 - (UIMenu *)buildActionMenu {
