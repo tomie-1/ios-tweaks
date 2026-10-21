@@ -609,33 +609,54 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
         UITableViewCell *cell = (r != NSNotFound)
             ? [tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)r inSection:indexPath.section]]
             : nil;
-        if (cell) {
+        if (cell && cell.bounds.size.width > 1 && cell.bounds.size.height > 1) {
+            CGSize size = cell.bounds.size;
+            UIGraphicsImageRenderer *ren = [[UIGraphicsImageRenderer alloc] initWithSize:size];
+            UIImage *image = [ren imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                [UIColor.secondarySystemGroupedBackgroundColor setFill];
+                [ctx fillRect:CGRectMake(0, 0, size.width, size.height)];
+                [cell.layer renderInContext:ctx.CGContext];
+            }];
             d.previewProvider = ^UIDragPreview * _Nullable{
-                CGFloat oldAlpha = cell.alpha;
-                cell.alpha = 1.0;
-                UIView *snap = [cell snapshotViewAfterScreenUpdates:NO];
-                cell.alpha = oldAlpha;
-                if (!snap) return nil;
+                if (!image) return nil;
+                UIImageView *iv = [[UIImageView alloc] initWithImage:image];
+                iv.frame = CGRectMake(0, 0, size.width, size.height);
                 UIDragPreviewParameters *pp = [[UIDragPreviewParameters alloc] init];
                 pp.backgroundColor = UIColor.clearColor;
-                pp.visiblePath = [UIBezierPath bezierPathWithRoundedRect:cell.bounds cornerRadius:12];
-                return [[UIDragPreview alloc] initWithView:snap parameters:pp];
+                pp.visiblePath = [UIBezierPath bezierPathWithRoundedRect:iv.bounds cornerRadius:12];
+                return [[UIDragPreview alloc] initWithView:iv parameters:pp];
             };
         }
         [out addObject:d];
     }
     LBL(@"开始拖动 section=%ld rows=%lu", (long)indexPath.section, (unsigned long)drag.count);
+    __weak LNBatchVC *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [ws applyDragDim];
+    });
     return out;
 }
 
-- (void)tableView:(UITableView *)tableView dragSessionWillBegin:(id<UIDragSession>)session {
-    for (NSIndexPath *ip in tableView.indexPathsForVisibleRows) {
-        UITableViewCell *c = [tableView cellForRowAtIndexPath:ip];
+- (void)applyDragDim {
+    if (self.draggingItems.count == 0) return;
+    NSInteger changed = 0;
+    for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
         NSArray *items = [self itemsForSection:ip.section];
-        if (ip.row < (NSInteger)items.count && ptrContains(self.draggingItems, items[(NSUInteger)ip.row])) {
+        if (ip.row < 0 || ip.row >= (NSInteger)items.count) continue;
+        UITableViewCell *c = [self.tableView cellForRowAtIndexPath:ip];
+        if (!c) continue;
+        if (ptrContains(self.draggingItems, items[(NSUInteger)ip.row])) {
             c.alpha = 0.3;
+            changed++;
+        } else {
+            c.alpha = 1.0;
         }
     }
+    LBL(@"拖动变淡 rows=%lu cells=%ld", (unsigned long)self.draggingItems.count, (long)changed);
+}
+
+- (void)tableView:(UITableView *)tableView dragSessionWillBegin:(id<UIDragSession>)session {
+    [self applyDragDim];
 }
 
 - (void)tableView:(UITableView *)tableView dragSessionDidEnd:(id<UIDragSession>)session {
