@@ -233,6 +233,27 @@ static id pluginObject(id p) {
     return o ?: p;
 }
 
+static BOOL pluginItemsEqual(id a, id b) {
+    if (a == b) return YES;
+    id pa = pluginObject(a), pb = pluginObject(b);
+    if (pa == pb) return YES;
+    NSString *ua = strv(pa, @"remoteUrl") ?: strv(a, @"remoteUrl");
+    NSString *ub = strv(pb, @"remoteUrl") ?: strv(b, @"remoteUrl");
+    return ua.length && ub.length && [ua isEqualToString:ub];
+}
+
+static NSArray *arrayByRemovingPlugins(NSArray *src, NSArray *remove) {
+    NSMutableArray *out = [NSMutableArray array];
+    for (id x in src ?: @[]) {
+        BOOL hit = NO;
+        for (id y in remove) {
+            if (pluginItemsEqual(x, y)) { hit = YES; break; }
+        }
+        if (!hit) [out addObject:x];
+    }
+    return out;
+}
+
 static BOOL itemEnabled(id item) {
     id t = pluginObject(item);
     if ([t respondsToSelector:NSSelectorFromString(@"enable")]) return boolv(t, @"enable");
@@ -1186,13 +1207,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     @try {
         LNRuleArchieveManager *mgr = (LNRuleArchieveManager *)ruleManager();
         if (self.mode == LNBLModePlugins) {
-            NSMutableArray *plugins = [NSMutableArray array];
+            config.plugins = arrayByRemovingPlugins(config.plugins, picked);
             for (id x in picked) {
                 id p = pluginObject(x);
-                if (p) [plugins addObject:p];
+                if (p) [mgr deletePluginRules:p];
             }
-            config.plugins = arrayByRemovingPtrs(config.plugins, plugins);
-            for (id p in plugins) [mgr deletePluginRules:p];
         } else if (self.mode == LNBLModeNodes) {
             NSMutableArray *local = [NSMutableArray array];
             NSMutableArray *remote = [NSMutableArray array];
