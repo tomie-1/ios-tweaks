@@ -72,11 +72,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tftool_iphoneos-arm.deb
-Size: 30864
-MD5sum: 57c4cdcb938aadab23417deeb4d39013
-SHA1: 5cb0e7337e8851fd855e074ef1485997296ccda5
-SHA256: 53d36e0a89f9a44558a56f209592188e8d0a2201fbd427c1ebb60dd2d2720603
-SHA512: 0236de949672dff8b03b95fb1e1adecab23a8f6440dfdcb6517ae7f1caa33321c224a16f4c1b56dfe9a1136c6ca63edcb3198c662bfbec25cfb57e673aea45a9
+Size: 31644
+MD5sum: abb08c24da0367e9a861893b7127cebd
+SHA1: 0de5582b412009ed51b1878dc4cef29091aa52a1
+SHA256: bd5c33f13390ed171cdb500348795c7f3875068a0a83b1ca1632fca3e916393d
+SHA512: 311c9356f4a43f1d60c5ce045c623d5a7455303ccf63692a1b19800289e7a9b05c398f003ced3ab45f18e1dea423e43fdabae4a3ef543be3b850e41209322249
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -168,11 +168,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tftool_iphoneos-arm64.deb
-Size: 30880
-MD5sum: 342805944b0b782408131775d498842f
-SHA1: 2b34b4cd1f6d422a94f8f623368440cd5364cadb
-SHA256: 1e3f0b687e3c07cd887fa8ddd43ffba329fe230791e32790b0b11d393797ff31
-SHA512: 0edd2c23176c2dfceda96b297945a07a9a7426a26f395b6c438e4bc0c4159f88a2ff0680e7ff2e483fad47b07c5b7e1d90551b891271d2401beb852df2b36fc1
+Size: 31720
+MD5sum: c7fbba3f4117e73050952cca6e76be27
+SHA1: 3caafe29a0b881409d33286e364bc9d697e4d360
+SHA256: 59b4e0da5eabb910a4bdd269c80f693b41101b3327689b0a14e210efa21a4975
+SHA512: fa32972842c066cfb796d75ef653775838b86dfef0961c50a75d8534239da9b545e4361171076f828735a09d7390927f1d20315c444fd39ee882454b80c932c3
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -264,11 +264,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tftool_iphoneos-arm64e.deb
-Size: 30868
-MD5sum: e4c50fc903a1d1053d6a68f8e2c47448
-SHA1: fb68a75a326100ec87315fbe9397335ffabfef17
-SHA256: a5b0ac547ed6e057c358c244df8c40459f69289bbcbfbdce078cfb1a96cfb625
-SHA512: ba7989b883094b11cbd2624fe5cb4672cb047378004adab1c7fa2616a9ba0f19454c4eba5ff4e5cd3f063ba4608521a44ce1b85027f4b194ed492a631757759c
+Size: 31648
+MD5sum: 4adb5a01f6d8242541c26d2cf10fd5fe
+SHA1: b215323dc7593e20d4619a68ae18b5d131ad6871
+SHA256: 8fa0dc34183be94561806769a906f818a587121db86225cbe6ae6c008a48cacd
+SHA512: 7c0088b1cf2acbe02a1f8b031365b88728e0eee039e3ce088c88d19ad6441abc59f13ca139889621d445d2611f21eb68f19af5a5a3cdd21a40473828a8346e1a
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
