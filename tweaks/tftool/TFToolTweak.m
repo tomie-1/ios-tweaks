@@ -507,6 +507,7 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UILabel *subLabel;
 @property (nonatomic, strong) UILabel *badgeLabel;
+@property (nonatomic, strong) UIImageView *checkmarkView;
 @end
 
 static const CGFloat kTFAppRowHeight = 66.0;
@@ -578,6 +579,21 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     _badgeLabel.hidden = YES;
     _badgeLabel.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [self.contentView addSubview:_badgeLabel];
+
+    // 固定宽度的 accessory 始终存在，勾选前后 contentView 宽度不变；
+    // 勾号本身也固定居中，避免系统 accessory 在复用时出现一两像素的偏移。
+    UIView *checkBox = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 28, 28)];
+    _checkmarkView = [[UIImageView alloc] initWithFrame:CGRectMake(4, 4, 20, 20)];
+    UIImageSymbolConfiguration *checkCfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightSemibold];
+    UIImage *checkImage = [UIImage systemImageNamed:@"checkmark" withConfiguration:checkCfg];
+    _checkmarkView.image = [checkImage imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    _checkmarkView.tintColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
+    _checkmarkView.contentMode = UIViewContentModeCenter;
+    _checkmarkView.hidden = YES;
+    [checkBox addSubview:_checkmarkView];
+    self.accessoryView = checkBox;
+    self.selectionStyle = UITableViewCellSelectionStyleNone;
     return self;
 }
 
@@ -607,6 +623,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     self.iconOverlay.hidden = YES;
     self.iconOverlay.image = nil;
     self.iconView.alpha = 1;
+    self.checkmarkView.hidden = YES;
     self.iconBox.frame = CGRectMake(16, (kTFAppRowHeight - kTFAppIconSide) / 2.0,
                                     kTFAppIconSide, kTFAppIconSide);
     self.iconBox.layer.cornerRadius = kTFAppIconRadius;
@@ -692,8 +709,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     if (!name.length) name = [NSString stringWithFormat:@"<%@>", NSStringFromClass([app class])];
     self.nameLabel.text = name;
     self.subLabel.text = strOf(app, @"bundleID");
-    self.accessoryType = picked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    self.tintColor = [UIColor colorWithRed:0.0 green:0.48 blue:1.0 alpha:1.0];
+    self.checkmarkView.hidden = !picked;
     NSString *bidForBadge = strOf(app, @"bundleID");
     if (bidForBadge.length && [gBetaInstalledBundleIDs containsObject:bidForBadge]) {
         self.badgeLabel.text = @"测试版";
@@ -764,7 +780,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 @property (nonatomic, strong) NSIndexPath *dragAnchor;
 @property (nonatomic, assign) BOOL dragAnchorWasPicked;
 @property (nonatomic, strong) NSMutableArray *dragBasePicked;
-@property (nonatomic, strong) UIPanGestureRecognizer *selectPan;
+@property (nonatomic, strong) UILongPressGestureRecognizer *selectPress;
 @property (nonatomic, strong) UIBarButtonItem *countItem;
 @end
 
@@ -811,12 +827,16 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.table];
 
-    self.selectPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectPan:)];
-    self.selectPan.minimumNumberOfTouches = 2;
-    self.selectPan.maximumNumberOfTouches = 2;
-    self.selectPan.cancelsTouchesInView = YES;
-    self.selectPan.delegate = self;
-    [self.table addGestureRecognizer:self.selectPan];
+    // 两指落下就进入选择。用 0 秒按压而不是 UIPan，避免第一根手指先让表格
+    // 的滚动手势进入 Began，第二根手指到达后偶尔变成滚动。
+    self.selectPress = [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                                    action:@selector(handleSelectPress:)];
+    self.selectPress.numberOfTouchesRequired = 2;
+    self.selectPress.minimumPressDuration = 0.0;
+    self.selectPress.allowableMovement = CGFLOAT_MAX;
+    self.selectPress.cancelsTouchesInView = YES;
+    self.selectPress.delegate = self;
+    [self.table addGestureRecognizer:self.selectPress];
     self.table.panGestureRecognizer.maximumNumberOfTouches = 1;
 
     [self reload];
@@ -945,23 +965,22 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     }
 }
 
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
-    if (g == self.selectPan) {
-        CGPoint p = g.numberOfTouches > 0 ? [g locationOfTouch:0 inView:self.table]
-                                          : [g locationInView:self.table];
-        if (![self.table indexPathForRowAtPoint:p]) return NO;
+- (NSIndexPath *)selectionIndexPathForGesture:(UIGestureRecognizer *)g {
+    for (NSUInteger i = 0; i < g.numberOfTouches; i++) {
+        NSIndexPath *ip = [self.table indexPathForRowAtPoint:[g locationOfTouch:i inView:self.table]];
+        if (ip) return ip;
     }
+    return nil;
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
+    if (g == self.selectPress) return [self selectionIndexPathForGesture:g] != nil;
     return YES;
 }
 
-- (void)handleSelectPan:(UIPanGestureRecognizer *)g {
+- (void)handleSelectPress:(UILongPressGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan) {
-        NSIndexPath *ip = nil;
-        if (g.numberOfTouches > 0) {
-            CGPoint p = [g locationOfTouch:0 inView:self.table];
-            ip = [self.table indexPathForRowAtPoint:p];
-        }
-        if (!ip) ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
+        NSIndexPath *ip = [self selectionIndexPathForGesture:g];
         if (!ip) return;
         [self setSheetPansEnabled:NO];
         self.dragSelecting = YES;
