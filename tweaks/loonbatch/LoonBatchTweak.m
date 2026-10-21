@@ -262,17 +262,11 @@ static NSString *pluginTitle(id p) {
     id o = pluginObject(p);
     NSString *tag = strv(o, @"tag");
     if (tag.length && !looksLikeHash(tag)) return tag;
+    NSString *pn = strv(o, @"pluginName");
+    if (pn.length && ![pn isEqualToString:@"local"] && !looksLikeHash(pn)) return pn;
     NSString *url = strv(o, @"remoteUrl");
     NSString *name = pluginNativeName(url);
-    if (!name.length) {
-        NSString *n = strv(o, @"name");
-        if (n.length && !looksLikeHash(n)) name = n;
-    }
-    if (!name.length) {
-        NSString *n = strv(o, @"pluginName");
-        if (n.length && !looksLikeHash(n)) name = n;
-    }
-    if (!name.length) {
+    if (!name.length || [name isEqualToString:@"local"]) {
         NSString *file = [url lastPathComponent].stringByDeletingPathExtension;
         if (file.length && !looksLikeHash(file)) name = file;
     }
@@ -595,9 +589,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         NSArray *items = config.plugins ?: @[];
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
         [self.sections addObject:@{@"title": @"插件", @"items": items, @"kind": @"plugins"}];
-        for (id p in items) {
-            LBL(@"插件 tag=[%@] name=[%@] pluginName=[%@]", strv(p, @"tag"), strv(p, @"name"), strv(p, @"pluginName"));
-        }
     } else if (self.mode == LNBLModeLocalRules) {
         NSArray *items = config.localRule ?: @[];
         self.title = [NSString stringWithFormat:@"批量本地规则 (%lu)", (unsigned long)items.count];
