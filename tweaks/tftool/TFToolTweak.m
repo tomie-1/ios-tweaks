@@ -1261,6 +1261,30 @@ static UITabBar *tftoolVisibleTabBar(UIView *root, int depth) {
     return nil;
 }
 
+static void tftoolPresentList(void) {
+    @try {
+        UIWindow *w = gHostWindow ?: tftoolKeyWindow();
+        UIViewController *host = w.rootViewController;
+        if (!host) { LOG(@"[ui] 没有可用的 rootViewController"); return; }
+        TFListVC *vc = [[TFListVC alloc] init];
+        vc.onClose = ^{ if (gButton) gButton.hidden = NO; };
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        nav.modalPresentationStyle = UIModalPresentationPageSheet;
+        UISheetPresentationController *sheet = nav.sheetPresentationController;
+        if (sheet) {
+            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent,
+                              UISheetPresentationControllerDetent.largeDetent];
+            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+            sheet.prefersGrabberVisible = YES;
+            sheet.preferredCornerRadius = 16;
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
+        }
+        gButton.hidden = YES;
+        [host presentViewController:nav animated:YES completion:nil];
+        LOG(@"[ui] 已弹出列表页");
+    } @catch (NSException *e) { LOG(@"[ui] ex %@ %@", e.name, e.reason); }
+}
+
 static void tftoolPlaceButton(UIWindow *w) {
     if (!gButton.superview) [w addSubview:gButton];
     [w bringSubviewToFront:gButton];
