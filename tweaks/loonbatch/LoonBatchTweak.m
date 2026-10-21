@@ -131,6 +131,8 @@ static BOOL boolIvar(id obj, const char *name) {
         while (cls) {
             Ivar iv = class_getInstanceVariable(cls, name);
             if (iv) {
+                const char *type = ivar_getTypeEncoding(iv);
+                if (type && type[0] && type[0] != 'c' && type[0] != 'B' && type[0] != 'b') return NO;
                 ptrdiff_t off = ivar_getOffset(iv);
                 return *(BOOL *)((char *)(__bridge void *)obj + off);
             }
@@ -421,27 +423,29 @@ static LNDCConfigModel *configForHost(id host) {
     return currentConfig();
 }
 
-static void backupConfig(LNDCConfigModel *config) {
+static BOOL backupConfig(LNDCConfigModel *config) {
     @try {
         NSString *fileName = strv(config, @"fileName");
         if (!fileName.length) fileName = msg0(dataManager(), @"currentConfigFileName");
-        if (!fileName.length) return;
+        if (!fileName.length) { LBL(@"备份失败：没有配置文件名"); return NO; }
         NSURL *group = loonGroupURL();
-        if (!group) return;
+        if (!group) { LBL(@"备份失败：没有 App Group"); return NO; }
         NSURL *src = [[group URLByAppendingPathComponent:@"config"] URLByAppendingPathComponent:fileName.lastPathComponent];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:src.path]) return;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:src.path]) { LBL(@"备份失败：配置文件不存在"); return NO; }
         NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/LoonBatch"];
         [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
         NSDateFormatter *df = [[NSDateFormatter alloc] init];
-        df.dateFormat = @"yyyyMMdd-HHmmss";
+        df.dateFormat = @"yyyyMMdd-HHmmss-SSS";
         NSString *dst = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@",
             [df stringFromDate:[NSDate date]], fileName.lastPathComponent]];
         NSError *err = nil;
-        if ([[NSFileManager defaultManager] copyItemAtURL:src toURL:[NSURL fileURLWithPath:dst] error:&err])
+        if ([[NSFileManager defaultManager] copyItemAtURL:src toURL:[NSURL fileURLWithPath:dst] error:&err]) {
             LBL(@"已备份配置 %@", dst);
-        else
-            LBL(@"备份失败 %@", err);
+            return YES;
+        }
+        LBL(@"备份失败 %@", err);
     } @catch (NSException *e) { LBL(@"备份异常 %@", e); }
+    return NO;
 }
 
 static NSString *configFilePath(LNDCConfigModel *config) {
@@ -456,11 +460,13 @@ static NSString *configFilePath(LNDCConfigModel *config) {
 }
 
 // saveConfigPlayload 在插件数组缩短时会把首项重复写回；保存后按链接清理 [Plugin] 段。
-static NSInteger repairPluginSection(NSString *path, NSSet *removedURLs) {
-    if (!path.length) return 0;
+static NSUInteger gPluginRepairGeneration;
+static BOOL repairPluginSection(NSString *path, NSSet *removedURLs, NSInteger *changedOut) {
+    if (changedOut) *changedOut = 0;
+    if (!path.length) return NO;
     NSError *err = nil;
     NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
-    if (!text) { LBL(@"读取配置失败 %@", err); return 0; }
+    if (!text) { LBL(@"读取配置失败 %@", err); return NO; }
     NSMutableArray *out = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
     BOOL inPlugin = NO;
@@ -482,34 +488,33 @@ static NSInteger repairPluginSection(NSString *path, NSSet *removedURLs) {
     }
     if (changed) {
         NSString *fixed = [out componentsJoinedByString:@"\n"];
-        if ([fixed writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err])
+        if ([fixed writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
             LBL(@"已修复插件配置 %ld 行", (long)changed);
-        else
-            LBL(@"修复插件配置失败 %@", err);
+            if (changedOut) *changedOut = changed;
+            return YES;
+        }
+        LBL(@"修复插件配置失败 %@", err);
+        return NO;
     }
-    return changed;
+    return YES;
+}
+
+static void dropStringKeys(id object, NSString *getter, NSString *setter, NSSet *urls) {
+    if (!object || !urls.count) return;
+    @try {
+        id dict = msg0(object, getter);
+        if (![dict isKindOfClass:[NSDictionary class]]) return;
+        NSMutableDictionary *m = [dict mutableCopy];
+        for (id key in [m allKeys])
+            if ([key isKindOfClass:[NSString class]] && [urls containsObject:key]) [m removeObjectForKey:key];
+        if (m.count != [dict count] && [object respondsToSelector:NSSelectorFromString(setter)])
+            [object setValue:m forKey:getter];
+    } @catch (NSException *e) {}
 }
 
 static void dropDeletedPluginCache(LNDCConfigModel *config, NSSet *urls) {
-    if (!urls.count) return;
-    @try {
-        id names = msg0(config, @"allPluginNames");
-        if ([names isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *m = [names mutableCopy];
-            for (id key in [m allKeys]) if ([key isKindOfClass:[NSString class]] && [urls containsObject:key]) [m removeObjectForKey:key];
-            if (m.count != [names count] && [config respondsToSelector:NSSelectorFromString(@"setAllPluginNames:")])
-                [config setValue:m forKey:@"allPluginNames"];
-        }
-    } @catch (NSException *e) {}
-    @try {
-        id policies = msg0(config, @"pluginPolicys");
-        if ([policies isKindOfClass:[NSDictionary class]]) {
-            NSMutableDictionary *m = [policies mutableCopy];
-            for (id key in [m allKeys]) if ([key isKindOfClass:[NSString class]] && [urls containsObject:key]) [m removeObjectForKey:key];
-            if (m.count != [policies count] && [config respondsToSelector:NSSelectorFromString(@"setPluginPolicys:")])
-                [config setValue:m forKey:@"pluginPolicys"];
-        }
-    } @catch (NSException *e) {}
+    dropStringKeys(config, @"allPluginNames", @"setAllPluginNames:", urls);
+    dropStringKeys(config, @"pluginPolicys", @"setPluginPolicys:", urls);
 }
 
 static const NSInteger kLBDimTag = 0x4C43;
@@ -675,6 +680,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (self.dragGroup.count) [self endCustomDrag:NO];
     if (self.selectDragging) [self endSelectDrag];
     if (self.isMovingFromParentViewController || self.isBeingDismissed) {
+        [self setSheetPansEnabled:YES];
         [self.navigationController setToolbarHidden:YES animated:NO];
     }
 }
@@ -729,11 +735,19 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (local.count) [self.sections addObject:@{@"title": @"本地规则", @"items": local, @"kind": @"localRules"}];
         if (remote.count) [self.sections addObject:@{@"title": @"远程规则", @"items": remote, @"kind": @"remoteRules"}];
     }
-    NSArray *all = [self allItems];
+    NSArray *oldSelected = [self.selected copy];
+    NSMutableSet *selectedKeys = [NSMutableSet set];
+    for (id x in oldSelected) {
+        NSString *k = [self stableKeyForItem:x];
+        if (k.length) [selectedKeys addObject:k];
+    }
     NSMutableArray *still = [NSMutableArray array];
-    for (id x in self.selected) if (ptrContains(all, x)) [still addObject:x];
+    for (id x in [self allItems]) {
+        NSString *k = [self stableKeyForItem:x];
+        if (ptrContains(oldSelected, x) || (k.length && [selectedKeys containsObject:k])) [still addObject:x];
+    }
     self.selected = still;
-    NSUInteger total = all.count;
+    NSUInteger total = [[self allItems] count];
     LBL(@"批量页 mode=%ld config=%@ sections=%lu items=%lu", (long)self.mode,
         NSStringFromClass([config class]), (unsigned long)self.sections.count, (unsigned long)total);
     __block CGPoint offset = self.tableView.contentOffset;
@@ -767,6 +781,28 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSArray *items = [self itemsForSection:ip.section];
     if (ip.row < 0 || ip.row >= (NSInteger)items.count) return nil;
     return items[(NSUInteger)ip.row];
+}
+
+- (NSString *)stableKeyForItem:(id)item {
+    if (!item) return nil;
+    if (self.mode == LNBLModePlugins) {
+        id p = pluginObject(item);
+        NSString *u = strv(p, @"remoteUrl") ?: strv(item, @"remoteUrl");
+        return u.length ? [@"p:" stringByAppendingString:u] : [@"p:" stringByAppendingString:pluginTitle(item)];
+    }
+    if (self.mode == LNBLModeNodes) {
+        NSString *u = strv(item, @"remoteUrl");
+        if (u.length) return [@"rn:" stringByAppendingString:u];
+        return [NSString stringWithFormat:@"ln:%@|%@:%ld", nodeTitle(item),
+                strv(item, @"serverAddress") ?: @"", (long)intv(item, @"serverPort")];
+    }
+    id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule") ?: item;
+    if ([inner isKindOfClass:NSClassFromString(@"RemoteRule")]) {
+        NSString *u = strv(inner, @"remoteUrl");
+        return u.length ? [@"rr:" stringByAppendingString:u] : [@"rr:" stringByAppendingString:remoteRuleTitle(inner)];
+    }
+    NSString *p = strv(inner, @"playload");
+    return p.length ? [@"lr:" stringByAppendingString:p] : [@"lr:" stringByAppendingString:ruleTitle(inner)];
 }
 
 - (NSInteger)linearIndexOf:(NSIndexPath *)ip {
@@ -900,7 +936,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [self.selectScrollTimer invalidate];
     self.selectScrollTimer = nil;
     self.selectScrollDelta = 0;
-    BOOL wasSelecting = self.selectDragging;
     self.selectDragging = NO;
     self.selectAnchor = nil;
     self.selectTarget = nil;
@@ -908,10 +943,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     self.selectMoved = NO;
     self.tableView.scrollEnabled = YES;
     self.tableView.panGestureRecognizer.enabled = YES;
-    if (wasSelecting) [self updateButtons];
-    __weak LNBatchVC *ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ [ws setSheetPansEnabled:YES]; });
+    [self restoreSheetPansSoon];
 }
 
 - (void)handleSelectPress:(UILongPressGestureRecognizer *)g {
@@ -964,15 +996,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (UIView *)statusAccessoryForItem:(id)item selected:(BOOL)selected {
-    BOOL hasStatus = NO, enabled = NO;
     id t = pluginObject(item);
-    if ([t respondsToSelector:NSSelectorFromString(@"enabled")]) {
-        hasStatus = YES;
-        enabled = boolv(t, @"enabled");
-    } else if ([t respondsToSelector:NSSelectorFromString(@"enable")]) {
-        hasStatus = YES;
-        enabled = boolv(t, @"enable");
-    }
+    BOOL hasStatus = itemCanToggle(item)
+        || [t respondsToSelector:NSSelectorFromString(@"enable")]
+        || [t respondsToSelector:NSSelectorFromString(@"enabled")];
+    BOOL enabled = hasStatus ? itemEnabled(item) : NO;
     CGFloat w = hasStatus ? 98 : 26;
     UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, w, 30)];
     if (hasStatus) {
@@ -1020,8 +1048,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         }
     }
     c.textLabel.font = [UIFont systemFontOfSize:16];
+    c.textLabel.numberOfLines = 1;
+    c.textLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     c.detailTextLabel.numberOfLines = 1;
-    c.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    c.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.accessoryType = UITableViewCellAccessoryNone;
     c.accessoryView = [self statusAccessoryForItem:item selected:ptrContains(self.selected, item)];
@@ -1100,6 +1130,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         self.disabledSheetPans = nil;
     }
 }
+
+- (void)restoreSheetPansSoon {
+    __weak LNBatchVC *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (!ws || ws.selectDragging || ws.dragGroup.count) return;
+        [ws setSheetPansEnabled:YES];
+    });
+}
+
 
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
     CGPoint vp = [g locationInView:[self dragOverlayHost]];
@@ -1301,10 +1341,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [self.dragScrollLink invalidate];
     self.dragScrollLink = nil;
     self.tableView.panGestureRecognizer.enabled = YES;
-    __weak LNBatchVC *ws = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [ws setSheetPansEnabled:YES];
-    });
+    [self restoreSheetPansSoon];
     [self.dragPreview removeFromSuperview];
     self.dragPreview = nil;
     [self.dropIndicator removeFromSuperview];
@@ -1516,13 +1553,22 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         [self showResult:@"未取到当前配置" ok:NO];
         return;
     }
-    backupConfig(config);
+    if (!backupConfig(config)) {
+        [self showResult:@"备份失败，已取消删除" ok:NO];
+        return;
+    }
     BOOL light = (self.mode == LNBLModePlugins);
     NSArray *picked = [self.selected copy];
-    NSArray *newLocal = config.localRule ?: @[];
-    NSArray *newRemote = config.remoteRules ?: @[];
+    NSArray *origPlugins = config.plugins ?: @[];
+    NSArray *origLocal = config.localRule ?: @[];
+    NSArray *origRemote = config.remoteRules ?: @[];
+    NSArray *origProxys = config.proxys ?: @[];
+    NSArray *origRemoteProxys = config.remoteProxys ?: @[];
+    NSArray *newLocal = origLocal;
+    NSArray *newRemote = origRemote;
     NSArray *pluginSurvivors = nil;
     NSMutableSet *removedPluginURLs = [NSMutableSet set];
+    NSUInteger repairGen = light ? ++gPluginRepairGeneration : 0;
     NSError *error = nil;
     @try {
         LNRuleArchieveManager *mgr = (LNRuleArchieveManager *)ruleManager();
@@ -1538,7 +1584,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                 if (url.length) [removedPluginURLs addObject:url];
                 if (p) [mgr deletePluginRules:p];
             }
-            pluginSurvivors = arrayByRemovingPlugins(config.plugins, picked);
+            pluginSurvivors = arrayByRemovingPlugins(origPlugins, picked);
             config.plugins = pluginSurvivors;
         } else if (self.mode == LNBLModeNodes) {
             NSMutableArray *local = [NSMutableArray array];
@@ -1547,8 +1593,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                 if (isRemoteProxy(x)) [remote addObject:x];
                 else [local addObject:x];
             }
-            config.proxys = arrayByRemovingPtrs(config.proxys, local);
-            config.remoteProxys = arrayByRemovingPtrs(config.remoteProxys, remote);
+            config.proxys = arrayByRemovingPtrs(origProxys, local);
+            config.remoteProxys = arrayByRemovingPtrs(origRemoteProxys, remote);
             for (id n in local) {
                 if ([config respondsToSelector:NSSelectorFromString(@"deleteNode:")]) msg1(config, @"deleteNode:", n);
                 else msgv(n, @"deleteProxy");
@@ -1567,8 +1613,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                     else if (r) [local addObject:r];
                 }
             }
-            newLocal = arrayByRemovingPtrs(newLocal, local);
-            newRemote = arrayByRemovingPtrs(newRemote, remote);
+            newLocal = arrayByRemovingPtrs(origLocal, local);
+            newRemote = arrayByRemovingPtrs(origRemote, remote);
             config.localRule = newLocal;
             config.remoteRules = newRemote;
             for (id r in local) [mgr deleteLocalRule:r];
@@ -1580,21 +1626,39 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
     }
-    if (light && pluginSurvivors) {
+
+    if (error) {
+        // 保存失败时把内存模型恢复到删除前，失败项继续留在列表。
+        @try {
+            config.plugins = origPlugins;
+            config.localRule = origLocal;
+            config.remoteRules = origRemote;
+            config.proxys = origProxys;
+            config.remoteProxys = origRemoteProxys;
+        } @catch (NSException *e) { LBL(@"回滚异常 %@", e); }
+    }
+
+    NSString *warning = nil;
+    if (!error && light && pluginSurvivors) {
         config.plugins = pluginSurvivors;
         dropDeletedPluginCache(config, removedPluginURLs);
         NSString *path = configFilePath(config);
-        repairPluginSection(path, removedPluginURLs);
-        // 防止原生异步落盘把旧内容写回来。
+        NSInteger repaired = 0;
+        if (!repairPluginSection(path, removedPluginURLs, &repaired))
+            warning = @"已删除，但配置修复失败，请检查插件列表";
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ repairPluginSection(path, removedPluginURLs); });
+                       dispatch_get_main_queue(), ^{
+            if (repairGen == gPluginRepairGeneration)
+                repairPluginSection(path, removedPluginURLs, NULL);
+        });
     }
     if (light) [self refreshPluginHostLight];
     else [self refreshHost];
     [self reloadData];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
-    [self showResult:(error ? [NSString stringWithFormat:@"部分操作失败：%@", error.localizedDescription] : @"已删除")
-                 ok:(error == nil)];
+    if (error) [self showResult:[NSString stringWithFormat:@"删除失败：%@", error.localizedDescription] ok:NO];
+    else if (warning) [self showResult:warning ok:NO];
+    else [self showResult:@"已删除" ok:YES];
 }
 
 - (void)refreshHost {
@@ -1696,8 +1760,8 @@ static CGFloat LNFabBottomY(UIView *root) {
 }
 
 static CGPoint LNFabClampCenter(CGPoint center, UIView *root, CGSize size) {
-    CGFloat minX = size.width / 2.0 + 8.0;
-    CGFloat maxX = root.bounds.size.width - size.width / 2.0 - 8.0;
+    CGFloat minX = root.safeAreaInsets.left + size.width / 2.0 + 8.0;
+    CGFloat maxX = root.bounds.size.width - root.safeAreaInsets.right - size.width / 2.0 - 8.0;
     CGFloat minY = root.safeAreaInsets.top + size.height / 2.0 + 8.0;
     CGFloat maxY = LNFabBottomY(root) - size.height / 2.0 - 8.0;
     if (maxX < minX) maxX = minX;
