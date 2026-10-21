@@ -950,7 +950,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } else if ([kind isEqualToString:@"remoteProxies"]) {
         config.remoteProxys = items;
     }
-    [self commitChange];
+    [self commitReorder];
 }
 
 #pragma mark 操作菜单
@@ -1057,6 +1057,41 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     msgv(dataManager(), @"postChangeNoti");
     [self refreshHost];
     [self reloadData];
+}
+
+- (void)commitReorder {
+    LNDCConfigModel *config = configForHost(self.host);
+    @try {
+        [config saveConfigPlayload];
+    } @catch (NSException *e) {
+        LBL(@"保存顺序异常 %@", e);
+    }
+    UIViewController *vc = self.host;
+    if (vc) {
+        @try {
+            if ([vc respondsToSelector:NSSelectorFromString(@"setPlugins:")]) {
+                [vc setValue:(config.plugins ?: @[]) forKey:@"plugins"];
+            }
+        } @catch (NSException *e) {}
+        [self reloadHostListsOnly];
+    }
+    [self reloadData];
+}
+
+- (void)reloadHostListsOnly {
+    UIViewController *vc = self.host;
+    if (!vc) return;
+    @try {
+        id list = msg0(vc, @"listView");
+        if ([list respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(list, @"reloadData");
+        id icon = msg0(vc, @"iconView");
+        if ([icon respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(icon, @"reloadData");
+        for (NSString *key in @[@"collectionView", @"tableView"]) {
+            id v = nil;
+            @try { v = [vc valueForKey:key]; } @catch (NSException *e) {}
+            if ([v respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(v, @"reloadData");
+        }
+    } @catch (NSException *e) { LBL(@"轻量刷新异常 %@", e); }
 }
 
 - (void)cancel { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -1301,7 +1336,16 @@ static char kLBModeKey;
     if (!host) return;
     LNBatchVC *vc = [[LNBatchVC alloc] initWithMode:mode host:host];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.modalPresentationStyle = UIModalPresentationFullScreen;
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    UISheetPresentationController *sheet = nav.sheetPresentationController;
+    if (sheet) {
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent,
+                          UISheetPresentationControllerDetent.largeDetent];
+        sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+        sheet.prefersGrabberVisible = YES;
+        sheet.preferredCornerRadius = 16;
+        sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
+    }
     [host presentViewController:nav animated:YES completion:nil];
     LBL(@"打开批量页 mode=%ld host=%@", (long)mode, NSStringFromClass([host class]));
 }
