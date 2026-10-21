@@ -428,6 +428,74 @@ static void backupConfig(LNDCConfigModel *config) {
     } @catch (NSException *e) { LBL(@"备份异常 %@", e); }
 }
 
+static NSString *configFilePath(LNDCConfigModel *config) {
+    @try {
+        NSString *fileName = strv(config, @"fileName");
+        if (!fileName.length) fileName = msg0(dataManager(), @"currentConfigFileName");
+        NSURL *group = loonGroupURL();
+        if (!fileName.length || !group) return nil;
+        return [[[group URLByAppendingPathComponent:@"config"]
+                 URLByAppendingPathComponent:fileName.lastPathComponent] path];
+    } @catch (NSException *e) { return nil; }
+}
+
+// saveConfigPlayload 在插件数组缩短时会把首项重复写回；保存后按链接清理 [Plugin] 段。
+static NSInteger repairPluginSection(NSString *path, NSSet *removedURLs) {
+    if (!path.length) return 0;
+    NSError *err = nil;
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
+    if (!text) { LBL(@"读取配置失败 %@", err); return 0; }
+    NSMutableArray *out = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    BOOL inPlugin = NO;
+    NSInteger changed = 0;
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        NSString *t = trimmed(line);
+        if (t.length >= 2 && [t hasPrefix:@"["] && [t hasSuffix:@"]"]) {
+            inPlugin = [t caseInsensitiveCompare:@"[Plugin]"] == NSOrderedSame;
+            [out addObject:line];
+            continue;
+        }
+        if (inPlugin && t.length) {
+            NSString *url = trimmed([[t componentsSeparatedByString:@","] firstObject]);
+            if (url.length && [removedURLs containsObject:url]) { changed++; continue; }
+            if (url.length && [seen containsObject:t]) { changed++; continue; }
+            if (url.length) [seen addObject:t];
+        }
+        [out addObject:line];
+    }
+    if (changed) {
+        NSString *fixed = [out componentsJoinedByString:@"\n"];
+        if ([fixed writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err])
+            LBL(@"已修复插件配置 %ld 行", (long)changed);
+        else
+            LBL(@"修复插件配置失败 %@", err);
+    }
+    return changed;
+}
+
+static void dropDeletedPluginCache(LNDCConfigModel *config, NSSet *urls) {
+    if (!urls.count) return;
+    @try {
+        id names = msg0(config, @"allPluginNames");
+        if ([names isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *m = [names mutableCopy];
+            for (id key in [m allKeys]) if ([key isKindOfClass:[NSString class]] && [urls containsObject:key]) [m removeObjectForKey:key];
+            if (m.count != [names count] && [config respondsToSelector:NSSelectorFromString(@"setAllPluginNames:")])
+                [config setValue:m forKey:@"allPluginNames"];
+        }
+    } @catch (NSException *e) {}
+    @try {
+        id policies = msg0(config, @"pluginPolicys");
+        if ([policies isKindOfClass:[NSDictionary class]]) {
+            NSMutableDictionary *m = [policies mutableCopy];
+            for (id key in [m allKeys]) if ([key isKindOfClass:[NSString class]] && [urls containsObject:key]) [m removeObjectForKey:key];
+            if (m.count != [policies count] && [config respondsToSelector:NSSelectorFromString(@"setPluginPolicys:")])
+                [config setValue:m forKey:@"pluginPolicys"];
+        }
+    } @catch (NSException *e) {}
+}
+
 static const NSInteger kLBDimTag = 0x4C43;
 
 static void setCellDimmed(UITableViewCell *cell, BOOL dimmed) {
@@ -1198,15 +1266,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSArray *picked = [self.selected copy];
     NSArray *newLocal = config.localRule ?: @[];
     NSArray *newRemote = config.remoteRules ?: @[];
+    NSArray *pluginSurvivors = nil;
+    NSMutableSet *removedPluginURLs = [NSMutableSet set];
     NSError *error = nil;
     @try {
         LNRuleArchieveManager *mgr = (LNRuleArchieveManager *)ruleManager();
         if (self.mode == LNBLModePlugins) {
-            config.plugins = arrayByRemovingPlugins(config.plugins, picked);
             for (id x in picked) {
                 id p = pluginObject(x);
+                NSString *url = strv(p, @"remoteUrl") ?: strv(x, @"remoteUrl");
+                if (url.length) [removedPluginURLs addObject:url];
                 if (p) [mgr deletePluginRules:p];
             }
+            pluginSurvivors = arrayByRemovingPlugins(config.plugins, picked);
+            config.plugins = pluginSurvivors;
         } else if (self.mode == LNBLModeNodes) {
             NSMutableArray *local = [NSMutableArray array];
             NSMutableArray *remote = [NSMutableArray array];
@@ -1242,6 +1315,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             for (id r in remote) [mgr deleteRemoteRule:r];
         }
         [config saveConfigPlayload];
+        if (light && pluginSurvivors) {
+            config.plugins = pluginSurvivors;
+            dropDeletedPluginCache(config, removedPluginURLs);
+            repairPluginSection(configFilePath(config), removedPluginURLs);
+        }
         if (!light) msgv(dataManager(), @"postChangeNoti");
     } @catch (NSException *e) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
