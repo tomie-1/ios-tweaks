@@ -935,7 +935,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)dragScrollTick {
-    if (self.dragGroup.count == 0) return;
+    if (self.dragGroup.count == 0 || !self.dragMoved) return;
     UIView *host = [self dragOverlayHost];
     CGRect visible = [self.tableView convertRect:self.tableView.bounds toView:host];
     CGFloat yInTable = self.dragViewPoint.y - CGRectGetMinY(visible);
@@ -1107,7 +1107,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     @try {
         [config saveConfigPlayload];
     } @catch (NSException *e) {
-        LBL(@"保存顺序异常 %@", e);
+        LBL(@"保存异常 %@", e);
     }
     UIViewController *vc = self.host;
     if (vc) {
