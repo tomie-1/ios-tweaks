@@ -99,25 +99,21 @@ static NSString *tftoolAppPickKey(id app) {
 
 #pragma mark - 运行时捕获与 hook
 
-static NSMutableArray *gLists;
+static id gNewestList;
 static OASInviteManager *gInviteMgr;
-static NSMutableString *gDumped;
 
 static IMP gOrigInitWithSessionContext, gOrigInitWithAppCatalogManager, gOrigSections, gOrigAppsInSection;
 static IMP gOrigInviteInit;
-static IMP gOrigUnsubWC, gOrigUnsubPlain, gOrigMgrUnsubWC, gOrigMgrUnsubPlain, gOrigCtxInitStub;
+static IMP gOrigUnsubWC, gOrigUnsubPlain, gOrigMgrUnsubWC, gOrigMgrUnsubPlain;
 
 static void tftoolRememberList(id list) {
     @try {
-        if (!list) return;
-        if (!gLists) gLists = [NSMutableArray array];
-        if (![gLists containsObject:list]) {
-            [gLists addObject:list];
-            LOG(@"[capture] OASAppList %@ %p", NSStringFromClass([list class]), list);
-        }
+        if (!list || list == gNewestList) return;
+        gNewestList = list;
+        LOG(@"[capture] OASAppList %@ %p", NSStringFromClass([list class]), list);
     } @catch (NSException *e) {}
 }
-static id tftoolNewestList(void) { return [gLists lastObject]; }
+static id tftoolNewestList(void) { return gNewestList; }
 
 static id tftool_initWithSessionContext(id self, SEL _cmd, id ctx) {
     id r = ((id (*)(id, SEL, id))gOrigInitWithSessionContext)(self, _cmd, ctx);
@@ -216,20 +212,6 @@ static void tftoolInstallHooks(void) {
 
 #pragma mark - 数据
 
-static NSArray *tftoolSnapshotItems(id list) {
-    NSMutableArray *out = [NSMutableArray array];
-    @try {
-        NSArray *secs = nil;
-        @try { secs = [list sections]; } @catch (NSException *e) {}
-        if (![secs isKindOfClass:[NSArray class]]) { @try { secs = [list _getFullSections]; } @catch (NSException *e) {} }
-        for (NSUInteger i = 0; i < [secs count]; i++) {
-            NSArray *items = nil;
-            @try { items = [list appsInSection:i]; } @catch (NSException *e) {}
-            for (id it in items) if (it) [out addObject:it];
-        }
-    } @catch (NSException *e) { LOG(@"[snapshot] ex %@", e.name); }
-    return out;
-}
 static id tftoolSessionContext(void);   // 前置声明
 
 // 用 App 自己的本地化表取标题（跟随系统语言）
@@ -295,10 +277,8 @@ static NSString *tftoolIncompatibleGroupKey(id app) {
 static NSString *tftoolSectionTitle(id sec, NSArray *apps, NSUInteger idx) {
     NSUInteger type = uintOf(sec, @"sectionType");
     BOOL allPrev = apps.count > 0;
-    BOOL anyEligible = NO;
     for (id a in apps) {
         if (!boolOf(a, @"previouslyTested")) allPrev = NO;
-        if (boolOf(a, @"isEligibleForInstallOrUpdate")) anyEligible = YES;
     }
     NSString *key = nil;
     if (allPrev && apps.count) {
@@ -310,8 +290,8 @@ static NSString *tftoolSectionTitle(id sec, NSArray *apps, NSUInteger idx) {
         if (!key) key = apps.count > 1 ? @"APP_LIST_GROUP_NAME_INCOMPATIBLE_MANY"
                                        : @"APP_LIST_GROUP_NAME_INCOMPATIBLE_ONE";
     }
-    LOG(@"[section] idx=%lu type=%lu count=%lu prev=%d eligible=%d key=%@",
-        (unsigned long)idx, (unsigned long)type, (unsigned long)apps.count, allPrev, anyEligible, key ?: @"(主分组)");
+    LOG(@"[section] idx=%lu type=%lu count=%lu prev=%d key=%@",
+        (unsigned long)idx, (unsigned long)type, (unsigned long)apps.count, allPrev, key ?: @"(主分组)");
     return key ? tftoolLocalized(key) : nil;
 }
 
@@ -344,27 +324,6 @@ static NSArray *tftoolFlatten(NSArray *sections) {
     NSMutableArray *all = [NSMutableArray array];
     for (NSDictionary *sec in sections) [all addObjectsFromArray:sec[@"apps"]];
     return all;
-}
-
-static NSArray *tftoolCollectApps(void) {
-    id list = tftoolNewestList();
-    if (!list) { LOG(@"[collect] 尚未捕获到 OASAppList"); return @[]; }
-    NSArray *items = tftoolSnapshotItems(list);
-    LOG(@"[collect] 条目数=%lu 首个类型=%@", (unsigned long)[items count],
-        [items count] ? NSStringFromClass([[items firstObject] class]) : @"-");
-    if (!gDumped && [items count]) {
-        gDumped = [NSMutableString string];
-        int n = 0;
-        for (id it in items) {
-            if (n++ >= 40) break;
-            [gDumped appendFormat:@"[%d] %@ name=%@ bundle=%@ appID=%@ ctx=%d mgr=%d\n", n,
-                NSStringFromClass([it class]), strOf(it, @"name"), strOf(it, @"bundleID"), strOf(it, @"appID"),
-                [it respondsToSelector:NSSelectorFromString(@"unsubscribeWithCompletion:")],
-                [it respondsToSelector:NSSelectorFromString(@"unsubscribeFromApp:withCompletion:")]];
-        }
-        [gDumped writeToFile:docPath(@"tftool-dump.txt") atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-    }
-    return items;
 }
 
 static id tftoolSessionContext(void) {
@@ -456,30 +415,6 @@ static UIImage *tftoolCachedIcon(id app) {
     return nil;
 }
 
-static void tftoolLoadIconForApp(id app, UITableViewCell *cell, void (^reloadRow)(void)) {
-    NSString *appID = strOf(app, @"appID");
-    NSString *urlStr = appID.length ? gIconURLs[appID] : nil;
-    NSURL *url = urlStr.length ? [NSURL URLWithString:urlStr] : tftoolIconURLPrivate(app);
-    if (!url) return;
-    NSString *u = url.absoluteString;
-    if (!gIcons) gIcons = [NSMutableDictionary dictionary];
-    if (gIcons[u]) { cell.imageView.image = gIcons[u]; return; }
-    __weak UITableViewCell *weakCell = cell;
-    [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        UIImage *img = (d && !e) ? [UIImage imageWithData:d] : nil;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (img) {
-                gIcons[u] = img;
-                if (weakCell) weakCell.imageView.image = img;
-            } else {
-                static NSInteger failCount = 0;
-                if (failCount++ < 3) LOG(@"[icon] 下载失败 %@ err=%@", u, e);
-            }
-            if (reloadRow) reloadRow();
-        });
-    }];
-}
-
 // 主路径：用 App Store ID 批量查官方图标（一次请求搞定所有）
 static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(void)) {
     if (!appIDs.count) { if (done) done(); return; }
@@ -512,8 +447,7 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
 @property (nonatomic, strong) UIView *iconBox;
 @property (nonatomic, strong) UIView *iconView;
 @property (nonatomic, strong) UIImageView *iconOverlay;
-@property (nonatomic, copy) NSString *iconAppID;
-@property (nonatomic, assign) BOOL iconFetching;
+@property (nonatomic, assign) NSUInteger iconPollGeneration;
 @property (nonatomic, strong) UILabel *nameLabel;
 @property (nonatomic, strong) UILabel *subLabel;
 @property (nonatomic, strong) UILabel *badgeLabel;
@@ -640,6 +574,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     self.iconOverlay.image = nil;
     self.iconView.alpha = 1;
     self.checkmarkView.hidden = YES;
+    self.iconPollGeneration++;
     self.iconBox.frame = CGRectMake(16, (kTFAppRowHeight - kTFAppIconSide) / 2.0,
                                     kTFAppIconSide, kTFAppIconSide);
     self.iconBox.layer.cornerRadius = kTFAppIconRadius;
@@ -656,8 +591,8 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
                                        kTFAppBadgeW, kTFAppBadgeH);
 }
 
-- (void)pollNativeIcon:(int)n {
-    if (n > 12) return;
+- (void)pollNativeIcon:(int)n generation:(NSUInteger)generation {
+    if (n > 12 || generation != self.iconPollGeneration) return;
     @try {
         static NSInteger dbg = 0;
         if (n == 0 && dbg++ < 4) {
@@ -711,7 +646,9 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     } @catch (NSException *e) {}
     __weak TFAppCell *ws = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ [ws pollNativeIcon:n + 1]; });
+                   dispatch_get_main_queue(), ^{
+        if (ws.iconPollGeneration == generation) [ws pollNativeIcon:n + 1 generation:generation];
+    });
 }
 
 - (void)setPicked:(BOOL)picked {
@@ -744,9 +681,6 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     id v = self.iconView;
     self.iconOverlay.hidden = YES;
     self.iconView.alpha = 1;
-    self.iconAppID = strOf(app, @"appID");
-    self.iconFetching = NO;
-
     if (!self.iconView.superview) { [self.iconBox addSubview:self.iconView]; [self.iconBox sendSubviewToBack:self.iconView]; }
     BOOL isNative = [NSStringFromClass([v class]) rangeOfString:@"IconURLImageView"].location != NSNotFound;
     if (isNative) {
@@ -757,7 +691,8 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
             NSURL *u = tftoolIconURLPrivate(app);
             if (u) [(OASIconURLImageView *)v setURL:u];
         }
-        [self pollNativeIcon:0];
+        self.iconPollGeneration++;
+        [self pollNativeIcon:0 generation:self.iconPollGeneration];
     } else if ([v isKindOfClass:[UIImageView class]]) {
         // 没有原生图标视图时按 appID 兜底拉图
         UIImage *cached = tftoolCachedIcon(app);
@@ -770,7 +705,11 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
                 __weak UIView *wv = v;
                 [[NSURLSession sharedSession] dataTaskWithURL:u completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
                     UIImage *img = (d && !e) ? [UIImage imageWithData:d] : nil;
-                    if (img) dispatch_async(dispatch_get_main_queue(), ^{ ((UIImageView *)wv).image = img; });
+                    if (img) dispatch_async(dispatch_get_main_queue(), ^{
+                        if (!gIcons) gIcons = [NSMutableDictionary dictionary];
+                        gIcons[u.absoluteString] = img;
+                        ((UIImageView *)wv).image = img;
+                    });
                 }];
             }
         }
@@ -786,9 +725,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 @property (nonatomic, strong) UIBarButtonItem *goButton;
 @property (nonatomic, strong) UIBarButtonItem *selAllItem;
 @property (nonatomic, copy) void (^onClose)(void);
-@property (nonatomic, strong) NSSet *installedBundleIDs;
 @property (nonatomic, assign) BOOL dragSelecting;
-@property (nonatomic, assign) BOOL dragTargetPicked;
 @property (nonatomic, strong) NSTimer *dragScrollTimer;
 @property (nonatomic, assign) CGFloat dragScrollDelta;
 @property (nonatomic, assign) CGPoint lastDragWindowPoint;
@@ -800,6 +737,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 @property (nonatomic, strong) NSMutableArray *dragBasePicked;
 @property (nonatomic, strong) UILongPressGestureRecognizer *selectPress;
 @property (nonatomic, strong) UIBarButtonItem *countItem;
+@property (nonatomic, strong) NSMutableArray<UIGestureRecognizer *> *disabledSheetPans;
 @end
 
 @implementation TFListVC
@@ -873,16 +811,6 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 }
 
 #pragma mark 拖动多选
-
-- (void)applyDragStateToRow:(NSInteger)row section:(NSInteger)section {
-    if (section >= (NSInteger)self.sections.count || section < 0) return;
-    NSArray *apps = self.sections[section][@"apps"];
-    if (row >= (NSInteger)apps.count || row < 0) return;
-    id app = apps[row];
-    BOOL has = [self.picked containsObject:app];
-    if (self.dragTargetPicked && !has) [self.picked addObject:app];
-    else if (!self.dragTargetPicked && has) [self.picked removeObject:app];
-}
 
 // 把上一次经过的行到当前行之间的所有行都处理掉（保证连续，方向随意）
 - (NSInteger)linearIndexOf:(NSIndexPath *)ip {
@@ -1014,12 +942,21 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 }
 
 - (void)setSheetPansEnabled:(BOOL)enabled {
-    UIView *v = self.navigationController.view;
-    while (v) {
-        for (UIGestureRecognizer *g in v.gestureRecognizers) {
-            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) g.enabled = enabled;
+    if (!enabled) {
+        self.disabledSheetPans = [NSMutableArray array];
+        UIView *v = self.navigationController.view;
+        while (v) {
+            for (UIGestureRecognizer *g in v.gestureRecognizers) {
+                if ([g isKindOfClass:[UIPanGestureRecognizer class]] && g.enabled) {
+                    g.enabled = NO;
+                    [self.disabledSheetPans addObject:g];
+                }
+            }
+            v = v.superview;
         }
-        v = v.superview;
+    } else {
+        for (UIGestureRecognizer *g in self.disabledSheetPans) g.enabled = YES;
+        self.disabledSheetPans = nil;
     }
 }
 
@@ -1119,7 +1056,6 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     gInstalledBundleIDs = set;
     __weak TFListVC *ws = self;
     dispatch_async(dispatch_get_main_queue(), ^{
-        ws.installedBundleIDs = set;
         [ws.table reloadData];
     });
 }
@@ -1150,7 +1086,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     id sc = tftoolSessionContext();
     Class ctxCls = objc_getClass("OASAppContext");
     if (!sc || !ctxCls) { LOG(@"[beta] 没有 sessionContext/OASAppContext"); return; }
-    if (!gBetaInstalledBundleIDs) gBetaInstalledBundleIDs = [NSMutableSet set];
+    gBetaInstalledBundleIDs = [NSMutableSet set];
     NSUInteger n = 0;
     for (NSDictionary *sec in self.sections) {
         for (id app in sec[@"apps"]) {
@@ -1196,7 +1132,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 
 - (NSArray *)allApps { return tftoolFlatten(self.sections ?: @[]); }
 
-- (void)reload {
+- (void)reloadSectionsPreservingSelection {
     NSMutableSet *wanted = [NSMutableSet set];
     for (id app in self.picked) [wanted addObject:tftoolAppPickKey(app)];
     self.sections = tftoolCollectSections();
@@ -1207,10 +1143,6 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
         }
     }
     self.picked = kept;
-    if ([[self allApps] count] > 0) {
-        if (!gInstalledBundleIDs) [self loadInstalledApps];
-        if (!gBetaInstalledBundleIDs) [self loadBetaInstalledApps];
-    }   // 有 App 了再去查安装状态
     [self.table reloadData];
     [self updateGo];
     if (!objc_getClass("OASIconURLImageView")) {   // 没有原生图标视图时才退回公共接口
@@ -1221,14 +1153,24 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     }
 }
 
-- (void)clearSelection {
-    [self.picked removeAllObjects];
-    [self.table reloadData];
-    [self updateGo];
+- (void)reload {
+    // 用户点刷新时同时让 TestFlight 重新拉列表和安装状态。
+    gInstalledBundleIDs = nil;
+    gBetaInstalledBundleIDs = [NSMutableSet set];
+    [self reloadSectionsPreservingSelection];
+    if ([[self allApps] count] > 0) {
+        [self loadInstalledApps];
+        [self loadBetaInstalledApps];
+    }
+    @try { [tftoolNewestList() refresh]; } @catch (NSException *e) { LOG(@"[refresh] ex %@", e.name); }
+    __weak TFListVC *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ [ws reloadSectionsPreservingSelection]; });
 }
 
 - (void)updateGo {
     NSArray *all = [self allApps];
+    self.goButton.title = @"停止测试";
     BOOL allSelected = all.count && self.picked.count == all.count;
     self.selAllItem.title = allSelected ? @"全不选" : @"全选";
     self.selAllItem.enabled = all.count > 0;
@@ -1240,13 +1182,17 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     }
     self.title = all.count ? [NSString stringWithFormat:@"批量测试 (%lu)", (unsigned long)all.count] : @"批量测试";
 }
+- (void)notifyClosedOnce {
+    void (^block)(void) = self.onClose;
+    self.onClose = nil;
+    if (block) block();
+}
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
-    if (self.onClose) self.onClose();
+    if (self.isBeingDismissed || self.isMovingFromParentViewController) [self notifyClosedOnce];
 }
 - (void)close {
-    if (self.onClose) self.onClose();
-    [self dismissViewControllerAnimated:YES completion:nil];
+    [self dismissViewControllerAnimated:YES completion:^{ [self notifyClosedOnce]; }];
 }
 - (void)toggleAll {
     NSArray *all = [self allApps];
@@ -1317,52 +1263,96 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 }
 
 - (void)runFor:(NSArray *)targets {
-    __block NSArray *processed = [targets copy];
-    __block NSInteger pending = (NSInteger)targets.count;
-    __block NSInteger failed = 0;
+    NSArray *targetList = [targets copy];
+    NSMutableSet *completedKeys = [NSMutableSet set];
+    NSMutableSet *leftKeys = [NSMutableSet set];
+    __block BOOL finished = NO;
+    dispatch_group_t group = dispatch_group_create();
+
     self.goButton.enabled = NO;
     self.goButton.title = @"处理中…";
-    LOG(@"[run] 开始处理 %lu 个 | list=%p sc=%p mgr=%p", (unsigned long)targets.count,
+    LOG(@"[run] 开始处理 %lu 个 | list=%p sc=%p mgr=%p", (unsigned long)targetList.count,
         tftoolNewestList(), tftoolSessionContext(), tftoolInviteManager());
-    void (^finish)(void) = ^{
-        LOG(@"[run] 结束 failed=%ld", (long)failed);
-        @try { [tftoolNewestList() refresh]; } @catch (NSException *e) {}
-        NSMutableArray *left = [NSMutableArray array];
-        for (NSDictionary *sec in self.sections) {
-            NSMutableArray *apps = [sec[@"apps"] mutableCopy];
-            if (processed) [apps removeObjectsInArray:processed];
-            [left addObject:@{@"title": sec[@"title"] ?: @"", @"apps": apps}];
+
+    void (^leaveOnce)(id, BOOL) = ^(id app, BOOL success) {
+        NSString *key = tftoolAppPickKey(app);
+        BOOL first = NO;
+        @synchronized (leftKeys) {
+            if (![leftKeys containsObject:key]) {
+                [leftKeys addObject:key];
+                if (success) [completedKeys addObject:key];
+                first = YES;
+            }
         }
-        self.sections = left;
-        [self.picked removeAllObjects];
-        [self.table reloadData];
-        [self updateGo];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self reload];
-            NSString *msg = failed
-                ? [NSString stringWithFormat:@"成功 %lu 个，失败 %ld 个。", (unsigned long)targets.count - (unsigned long)failed, (long)failed]
-                : [NSString stringWithFormat:@"已停止 %lu 个 App 的测试。", (unsigned long)targets.count];
-            UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"批量停止测试"
-                message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [self presentViewController:ac animated:YES completion:nil];
-        });
+        if (first) dispatch_group_leave(group);
     };
-    for (id app in targets) {
+
+    void (^finish)(void) = ^{
+        void (^work)(void) = ^{
+            if (finished) return;
+            finished = YES;
+
+            NSSet *doneKeys = nil;
+            @synchronized (leftKeys) { doneKeys = [completedKeys copy]; }
+            NSMutableArray *removed = [NSMutableArray array];
+            for (id app in targetList) {
+                if ([doneKeys containsObject:tftoolAppPickKey(app)]) [removed addObject:app];
+            }
+            NSUInteger failed = targetList.count - removed.count;
+            LOG(@"[run] 结束成功=%lu 未完成/失败=%lu", (unsigned long)removed.count, (unsigned long)failed);
+
+            NSMutableArray *left = [NSMutableArray array];
+            for (NSDictionary *sec in self.sections) {
+                NSMutableArray *apps = [sec[@"apps"] mutableCopy];
+                [apps removeObjectsInArray:removed];
+                [left addObject:@{@"title": sec[@"title"] ?: @"", @"apps": apps}];
+            }
+            self.sections = left;
+            [self.picked removeAllObjects];
+            [self.table reloadData];
+            [self updateGo];
+
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self reload];
+                NSString *msg = failed
+                    ? [NSString stringWithFormat:@"成功 %lu 个，失败或未完成 %lu 个。",
+                                                 (unsigned long)removed.count, (unsigned long)failed]
+                    : [NSString stringWithFormat:@"已停止 %lu 个 App 的测试。", (unsigned long)removed.count];
+                UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"批量停止测试"
+                    message:msg preferredStyle:UIAlertControllerStyleAlert];
+                [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:ac animated:YES completion:nil];
+            });
+        };
+        if ([NSThread isMainThread]) work();
+        else dispatch_async(dispatch_get_main_queue(), work);
+    };
+
+    for (id app in targetList) {
         NSString *name = strOf(app, @"name"), *how = nil;
         LOG(@"[run] → %@ | %@", name, strOf(app, @"bundleID"));
+        dispatch_group_enter(group);
         BOOL started = tftoolStopOne(app, ^{
-            pending--; LOG(@"[run] cb %@(%@) 剩 %ld", name, how ?: @"?", (long)pending);
-            if (pending <= 0) finish();
+            LOG(@"[run] cb %@(%@)", name, how ?: @"?");
+            leaveOnce(app, YES);
         }, &how);
-        if (!started) { failed++; pending--; }
-        else if ([how hasSuffix:@"plain"]) { pending--; }
+        if (!started) {
+            LOG(@"[run] 启动失败 %@", name);
+            leaveOnce(app, NO);
+        } else if ([how hasSuffix:@"plain"]) {
+            leaveOnce(app, YES);
+        }
     }
-    if (pending <= 0) finish();
-    else dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (pending > 0) { LOG(@"[run] 超时 剩 %ld", (long)pending); finish(); }
+
+    dispatch_group_notify(group, dispatch_get_main_queue(), finish);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!finished) {
+            LOG(@"[run] 超时，保留未完成项");
+            finish();
+        }
     });
 }
+
 @end
 
 #pragma mark - 入口按钮
