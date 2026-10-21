@@ -276,14 +276,7 @@ static NSString *pluginTitle(id p) {
 
 static NSString *pluginSubtitle(id p) {
     id o = pluginObject(p);
-    NSString *url = strv(o, @"remoteUrl");
-    NSString *tag = strv(o, @"tag");
-    if (tag.length && !looksLikeHash(tag)) {
-        NSString *name = pluginNativeName(url);
-        if (name.length && ![name isEqualToString:@"local"] && ![name isEqualToString:tag]) return name;
-        return @"";
-    }
-    return url ?: @"";
+    return strv(o, @"remoteUrl") ?: @"";
 }
 
 static NSString *ruleTitle(id r) {
