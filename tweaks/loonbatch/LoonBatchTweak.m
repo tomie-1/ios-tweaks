@@ -592,8 +592,8 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
 }
 
 - (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView
-           itemsForBeginningSession:(id<UIDragSession>)session
-                        atIndexPath:(NSIndexPath *)indexPath {
+    itemsForBeginningDragSession:(id<UIDragSession>)session
+                     atIndexPath:(NSIndexPath *)indexPath {
     NSArray *items = [self itemsForSection:indexPath.section];
     if (indexPath.row < 0 || indexPath.row >= (NSInteger)items.count) return @[];
     id item = items[(NSUInteger)indexPath.row];
@@ -623,15 +623,15 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
                   dropSessionDidUpdate:(id<UIDropSession>)session
               withDestinationIndexPath:(NSIndexPath *)destinationIndexPath {
     if (!session.localDragSession || self.draggingItems.count == 0) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationCancel
+        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel
                                                               intent:UITableViewDropIntentUnspecified];
     }
     NSInteger section = destinationIndexPath ? destinationIndexPath.section : self.draggingSection;
     if (section != self.draggingSection) {
-        return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationCancel
+        return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationCancel
                                                               intent:UITableViewDropIntentUnspecified];
     }
-    return [[UITableViewDropProposal alloc] initWithDropOperation:UITableViewDropOperationMove
+    return [[UITableViewDropProposal alloc] initWithDropOperation:UIDropOperationMove
                                                           intent:UITableViewDropIntentInsertAtDestinationIndexPath];
 }
 
@@ -676,7 +676,7 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
     if (samePtrOrder(old, rest)) return;
     [self applyReorder:rest inSection:section];
 
-    for (UITableViewDropItem *di in coordinator.items) {
+    for (id<UITableViewDropItem> di in coordinator.items) {
         id obj = di.dragItem.localObject;
         NSUInteger idx = NSNotFound;
         for (NSUInteger i = 0; i < rest.count; i++) if (rest[i] == obj) { idx = i; break; }
