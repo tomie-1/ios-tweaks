@@ -748,7 +748,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 
 @end
 
-@interface TFListVC : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@interface TFListVC : UIViewController <UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, strong) UITableView *table;
 @property (nonatomic, strong) NSArray *sections;      // @[@{title,apps}]
 @property (nonatomic, strong) NSMutableArray *picked;
@@ -764,6 +764,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 @property (nonatomic, strong) NSIndexPath *dragAnchor;
 @property (nonatomic, assign) BOOL dragAnchorWasPicked;
 @property (nonatomic, strong) NSMutableArray *dragBasePicked;
+@property (nonatomic, strong) UIPanGestureRecognizer *selectPan;
 @property (nonatomic, strong) UIBarButtonItem *countItem;
 @end
 
@@ -810,11 +811,13 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.table];
 
-    UILongPressGestureRecognizer *lp =
-        [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleLongPress:)];
-    lp.minimumPressDuration = 0.35;
-    lp.numberOfTouchesRequired = 2;
-    [self.table addGestureRecognizer:lp];
+    self.selectPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSelectPan:)];
+    self.selectPan.minimumNumberOfTouches = 2;
+    self.selectPan.maximumNumberOfTouches = 2;
+    self.selectPan.cancelsTouchesInView = YES;
+    self.selectPan.delegate = self;
+    [self.table addGestureRecognizer:self.selectPan];
+    self.table.panGestureRecognizer.maximumNumberOfTouches = 1;
 
     [self reload];
 }
@@ -942,17 +945,32 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     }
 }
 
-- (void)handleLongPress:(UILongPressGestureRecognizer *)g {
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
+    if (g == self.selectPan) {
+        CGPoint p = g.numberOfTouches > 0 ? [g locationOfTouch:0 inView:self.table]
+                                          : [g locationInView:self.table];
+        if (![self.table indexPathForRowAtPoint:p]) return NO;
+    }
+    return YES;
+}
+
+- (void)handleSelectPan:(UIPanGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan) {
-        NSIndexPath *ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
+        NSIndexPath *ip = nil;
+        if (g.numberOfTouches > 0) {
+            CGPoint p = [g locationOfTouch:0 inView:self.table];
+            ip = [self.table indexPathForRowAtPoint:p];
+        }
+        if (!ip) ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
         if (!ip) return;
         [self setSheetPansEnabled:NO];
         self.dragSelecting = YES;
         self.table.scrollEnabled = NO;
+        self.table.panGestureRecognizer.enabled = NO;
         NSArray *apps = self.sections[ip.section][@"apps"];
         self.dragAnchor = ip;
-        self.dragAnchorWasPicked = ![self.picked containsObject:apps[ip.row]];   // 锚点行本身翻转
-        self.dragBasePicked = [NSMutableArray arrayWithArray:self.picked];   // 按下前的选择，用于区间外还原
+        self.dragAnchorWasPicked = ![self.picked containsObject:apps[ip.row]];
+        self.dragBasePicked = [NSMutableArray arrayWithArray:self.picked];
         [self applyDragAt:ip];
     } else if (g.state == UIGestureRecognizerStateChanged) {
         if (self.dragSelecting) {
@@ -970,9 +988,10 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
             self.dragSelecting = NO;
             self.dragAnchor = nil;
             self.dragBasePicked = nil;
-            self.table.scrollEnabled = YES;
             [self updateGo];
         }
+        self.table.scrollEnabled = YES;
+        self.table.panGestureRecognizer.enabled = YES;
         __weak TFListVC *ws = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ [ws setSheetPansEnabled:YES]; });
@@ -1148,7 +1167,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 }
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s {
     if (s == (NSInteger)self.sections.count - 1 && [self allApps].count > 1)
-        return @"双指长按并拖动可连续选择";
+        return @"双指拖动可连续选择";
     return nil;
 }
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip {
