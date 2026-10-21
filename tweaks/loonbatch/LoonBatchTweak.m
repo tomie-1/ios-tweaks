@@ -967,20 +967,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     __weak LNBatchVC *ws = self;
     UIAction *copy = [UIAction actionWithTitle:copyTitle image:[UIImage systemImageNamed:@"doc.on.doc"]
                                      identifier:nil handler:^(UIAction *a) { [ws copySelected]; }];
-    BOOL singleToggle = (self.mode == LNBLModeRules || self.mode == LNBLModeLocalRules
-        || self.mode == LNBLModeRemoteRules || self.mode == LNBLModeNodes);
-    UIAction *enable = nil;
-    UIAction *disable = nil;
-    UIAction *toggle = nil;
-    if (singleToggle) {
-        toggle = [UIAction actionWithTitle:@"开关" image:[UIImage systemImageNamed:@"power"]
-                                identifier:nil handler:^(UIAction *a) { [ws toggleSelectedEnabled]; }];
-    } else {
-        enable = [UIAction actionWithTitle:@"启用" image:[UIImage systemImageNamed:@"checkmark.circle"]
-                                identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
-        disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
-                                 identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
-    }
+    UIAction *enable = [UIAction actionWithTitle:@"启用" image:[UIImage systemImageNamed:@"checkmark.circle"]
+                                      identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:YES]; }];
+    UIAction *disable = [UIAction actionWithTitle:@"禁用" image:[UIImage systemImageNamed:@"xmark.circle"]
+                                       identifier:nil handler:^(UIAction *a) { [ws setSelectedEnabled:NO]; }];
     UIAction *del = [UIAction actionWithTitle:@"删除" image:[UIImage systemImageNamed:@"trash"]
                                    identifier:nil handler:^(UIAction *a) { [ws deleteTapped]; }];
     del.attributes = UIMenuElementAttributesDestructive;
@@ -988,10 +978,6 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (!has) {
         copy.attributes = UIMenuElementAttributesDisabled;
         del.attributes |= UIMenuElementAttributesDisabled;
-    }
-    if (toggle) {
-        if (!toggleable) toggle.attributes = UIMenuElementAttributesDisabled;
-        return [UIMenu menuWithTitle:@"" children:@[copy, toggle, del]];
     }
     if (!toggleable || !anyDisabled) enable.attributes = UIMenuElementAttributesDisabled;
     if (!toggleable || !anyEnabled) disable.attributes = UIMenuElementAttributesDisabled;
@@ -1245,8 +1231,6 @@ static char kLBModeKey;
     if ([cn isEqualToString:@"SubscriptionNodeVC"] || [cn hasSuffix:@".SubscriptionNodeVC"]) return LNBLModeNodes;
     if ([cn containsString:@"PluginList"]) return LNBLModePlugins;
     if ([cn containsString:@"AllRulesVC"]) return LNBLModeRules;
-    if ([cn containsString:@"LNLocalRuleListVC"]) return LNBLModeLocalRules;
-    if ([cn containsString:@"RemoteRuleListVC"]) return LNBLModeRemoteRules;
     return 0;
 }
 
@@ -1328,9 +1312,9 @@ __attribute__((constructor)) static void init(void) {
                 static dispatch_once_t once;
                 dispatch_once(&once, ^{ seen = [NSMutableSet set]; });
                 NSString *cn = NSStringFromClass([recv class]);
-                if (([cn containsString:@"Node"] || [cn containsString:@"Proxy"] || [cn containsString:@"Server"]) && ![seen containsObject:cn]) {
+                if (![seen containsObject:cn]) {
                     [seen addObject:cn];
-                    LBL(@"页面出现 %@", cn);
+                    LBL(@"页面出现 %@ title=%@", cn, recv.navigationItem.title ?: @"");
                 }
                 [[LNBLShared shared] installOn:recv];
             });
@@ -1339,8 +1323,6 @@ __attribute__((constructor)) static void init(void) {
         hookViewDidAppear(NSClassFromString(@"PluginListVC"));
         hookViewDidAppear(NSClassFromString(@"_TtC4Loon17PluginListSwiftVC"));
         hookViewDidAppear(NSClassFromString(@"AllRulesVC"));
-        hookViewDidAppear(NSClassFromString(@"LNLocalRuleListVC"));
-        hookViewDidAppear(NSClassFromString(@"RemoteRuleListVC"));
         hookViewDidAppear(NSClassFromString(@"SubscriptionNodeVC"));
     } @catch (NSException *e) { LBL(@"init 异常 %@", e); }
 }
