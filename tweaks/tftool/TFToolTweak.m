@@ -51,6 +51,16 @@ static NSString *strOf(id obj, NSString *selName) {
     @try { id v = call0(obj, selName); return v ? [v description] : @""; } @catch (NSException *e) { return @""; }
 }
 
+static NSString *tftoolAppPickKey(id app) {
+    NSString *bundleID = strOf(app, @"bundleID");
+    if (bundleID.length) return bundleID;
+    NSString *appID = strOf(app, @"appID");
+    if (appID.length) return [@"app:" stringByAppendingString:appID];
+    NSString *name = strOf(app, @"name");
+    if (name.length) return [@"name:" stringByAppendingString:name];
+    return [NSString stringWithFormat:@"ptr:%p", app];
+}
+
 #pragma mark - 目标类声明
 
 @interface OASAppContext : NSObject
@@ -556,6 +566,9 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     _nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(kTFAppTextX, 14,
                                                            self.contentView.bounds.size.width - kTFAppTextLimit - kTFAppTextX, 20)];
     _nameLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    _nameLabel.numberOfLines = 1;
+    _nameLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _nameLabel.clipsToBounds = YES;
     _nameLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.contentView addSubview:_nameLabel];
 
@@ -563,6 +576,9 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
                                                           self.contentView.bounds.size.width - kTFAppTextLimit - kTFAppTextX, 15)];
     _subLabel.font = [UIFont systemFontOfSize:12];
     _subLabel.textColor = UIColor.secondaryLabelColor;
+    _subLabel.numberOfLines = 1;
+    _subLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _subLabel.clipsToBounds = YES;
     _subLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.contentView addSubview:_subLabel];
 
@@ -680,12 +696,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
             if (self.iconView.superview == self.iconBox) {
                 [self.iconView removeFromSuperview];   // 只留自绘，排除原生视图观感干扰
             }
-            CGFloat labelX = CGRectGetMaxX(box) + 12;
-            CGRect nf = self.nameLabel.frame, sf = self.subLabel.frame;
-            CGFloat limit2 = self.bounds.size.width - kTFAppTextLimit;
-            nf.origin.x = labelX; nf.size.width = MAX(60, limit2 - labelX);
-            sf.origin.x = labelX; sf.size.width = nf.size.width;
-            self.nameLabel.frame = nf; self.subLabel.frame = sf;
+            [self setNeedsLayout];
             static NSInteger okCount = 0;
             if (okCount++ < 3) LOG(@"[icon] 正方形显示 %@ 图=%.0fx%.0f 框=%.0fx%.0f", self.nameLabel.text,
                                    img.size.width, img.size.height, side, side);
@@ -703,13 +714,17 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
                    dispatch_get_main_queue(), ^{ [ws pollNativeIcon:n + 1]; });
 }
 
+- (void)setPicked:(BOOL)picked {
+    self.checkmarkView.hidden = !picked;
+}
+
 - (void)configureWithApp:(id)app picked:(BOOL)picked {
     NSString *name = strOf(app, @"name");
     if (!name.length) name = strOf(app, @"bundleID");
     if (!name.length) name = [NSString stringWithFormat:@"<%@>", NSStringFromClass([app class])];
     self.nameLabel.text = name;
     self.subLabel.text = strOf(app, @"bundleID");
-    self.checkmarkView.hidden = !picked;
+    [self setPicked:picked];
     NSString *bidForBadge = strOf(app, @"bundleID");
     if (bidForBadge.length && [gBetaInstalledBundleIDs containsObject:bidForBadge]) {
         self.badgeLabel.text = @"测试版";
@@ -777,7 +792,10 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 @property (nonatomic, strong) NSTimer *dragScrollTimer;
 @property (nonatomic, assign) CGFloat dragScrollDelta;
 @property (nonatomic, assign) CGPoint lastDragWindowPoint;
+@property (nonatomic, assign) CGPoint dragStartWindowPoint;
+@property (nonatomic, assign) BOOL dragHasMoved;
 @property (nonatomic, strong) NSIndexPath *dragAnchor;
+@property (nonatomic, strong) NSIndexPath *dragTarget;
 @property (nonatomic, assign) BOOL dragAnchorWasPicked;
 @property (nonatomic, strong) NSMutableArray *dragBasePicked;
 @property (nonatomic, strong) UILongPressGestureRecognizer *selectPress;
@@ -883,6 +901,17 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     return nil;
 }
 
+- (void)refreshPickedRows:(NSArray *)paths {
+    for (NSIndexPath *p in paths) {
+        TFAppCell *cell = (TFAppCell *)[self.table cellForRowAtIndexPath:p];
+        if (![cell isKindOfClass:[TFAppCell class]]) continue;
+        if (p.section >= (NSInteger)self.sections.count) continue;
+        NSArray *apps = self.sections[p.section][@"apps"];
+        if (p.row >= (NSInteger)apps.count) continue;
+        [cell setPicked:[self.picked containsObject:apps[p.row]]];
+    }
+}
+
 // 锚点区间模型：锚点那一行按下时的状态决定整段的“涂法”，
 // 区间 = 锚点 ↔ 手指当前行（跨分组也连续）；区间内一律设成锚点状态，区间外保持按下前快照。
 - (void)applyDragAt:(NSIndexPath *)ip {
@@ -907,7 +936,9 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
         [touched addObject:p];
     }
     if (touched.count) {
-        [self.table reloadRowsAtIndexPaths:touched withRowAnimation:UITableViewRowAnimationNone];
+        // 只改可见 cell 的勾号，不重载行；自动滚动时重载行会干扰 contentOffset，
+        // 让指下的行在边界来回跳，表现成已选数量 +1/-1。
+        [self refreshPickedRows:touched];
         UISelectionFeedbackGenerator *fg = [[UISelectionFeedbackGenerator alloc] init];
         [fg selectionChanged];
         [self updateGo];
@@ -926,14 +957,29 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 }
 
 // 拖动到列表上下边缘时自动滚动
+- (NSIndexPath *)dragTargetForWindowPoint:(CGPoint)windowPoint {
+    CGPoint p = [self.table convertPoint:windowPoint fromView:nil];
+    NSIndexPath *candidate = [self.table indexPathForRowAtPoint:p];
+    if (!candidate) return self.dragTarget;
+    if (!self.dragTarget || [candidate isEqual:self.dragTarget]) return candidate;
+    // 指头在相邻行分界线附近轻微晃动时不要立刻切换目标行。
+    CGRect row = [self.table rectForRowAtIndexPath:candidate];
+    CGFloat inset = 8.0;
+    if (p.y < CGRectGetMinY(row) + inset || p.y > CGRectGetMaxY(row) - inset) return self.dragTarget;
+    return candidate;
+}
+
 - (void)dragScrollTick:(NSTimer *)t {
     if (!self.dragSelecting || self.dragScrollDelta == 0) return;
     CGFloat y = self.table.contentOffset.y + self.dragScrollDelta;
     CGFloat maxY = MAX(0, self.table.contentSize.height - self.table.bounds.size.height);
     y = MAX(0, MIN(maxY, y));
     self.table.contentOffset = CGPointMake(self.table.contentOffset.x, y);
-    CGPoint p = [self.table convertPoint:self.lastDragWindowPoint fromView:nil];
-    [self applyDragAt:[self.table indexPathForRowAtPoint:p]];
+    NSIndexPath *target = [self dragTargetForWindowPoint:self.lastDragWindowPoint];
+    if (target && ![target isEqual:self.dragTarget]) {
+        self.dragTarget = target;
+        [self applyDragAt:target];
+    }
 }
 
 - (void)updateDragAutoScroll:(CGPoint)windowPoint {
@@ -988,13 +1034,25 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
         self.table.panGestureRecognizer.enabled = NO;
         NSArray *apps = self.sections[ip.section][@"apps"];
         self.dragAnchor = ip;
+        self.dragTarget = ip;
+        self.dragStartWindowPoint = [g locationInView:nil];
+        self.dragHasMoved = NO;
         self.dragAnchorWasPicked = ![self.picked containsObject:apps[ip.row]];
         self.dragBasePicked = [NSMutableArray arrayWithArray:self.picked];
-        [self applyDragAt:ip];
     } else if (g.state == UIGestureRecognizerStateChanged) {
         if (self.dragSelecting) {
             CGPoint wp = [g locationInView:nil];
-            [self applyDragAt:[self.table indexPathForRowAtPoint:[self.table convertPoint:wp fromView:nil]]];
+            if (!self.dragHasMoved) {
+                CGFloat dx = wp.x - self.dragStartWindowPoint.x;
+                CGFloat dy = wp.y - self.dragStartWindowPoint.y;
+                if (dx * dx + dy * dy < 36.0) return;   // 两指轻触不误选，滑动超过 6 pt 才生效
+                self.dragHasMoved = YES;
+            }
+            NSIndexPath *target = [self dragTargetForWindowPoint:wp];
+            if (target) {
+                self.dragTarget = target;
+                [self applyDragAt:target];
+            }
             [self updateDragAutoScroll:wp];
         }
     } else if (g.state == UIGestureRecognizerStateEnded ||
@@ -1006,7 +1064,9 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
         if (self.dragSelecting) {
             self.dragSelecting = NO;
             self.dragAnchor = nil;
+            self.dragTarget = nil;
             self.dragBasePicked = nil;
+            self.dragHasMoved = NO;
             [self updateGo];
         }
         self.table.scrollEnabled = YES;
@@ -1125,12 +1185,20 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 - (NSArray *)allApps { return tftoolFlatten(self.sections ?: @[]); }
 
 - (void)reload {
+    NSMutableSet *wanted = [NSMutableSet set];
+    for (id app in self.picked) [wanted addObject:tftoolAppPickKey(app)];
     self.sections = tftoolCollectSections();
+    NSMutableArray *kept = [NSMutableArray array];
+    if (wanted.count) {
+        for (id app in [self allApps]) {
+            if ([wanted containsObject:tftoolAppPickKey(app)]) [kept addObject:app];
+        }
+    }
+    self.picked = kept;
     if ([[self allApps] count] > 0) {
         if (!gInstalledBundleIDs) [self loadInstalledApps];
         if (!gBetaInstalledBundleIDs) [self loadBetaInstalledApps];
     }   // 有 App 了再去查安装状态
-    [self.picked removeAllObjects];
     [self.table reloadData];
     [self updateGo];
     if (!objc_getClass("OASIconURLImageView")) {   // 没有原生图标视图时才退回公共接口
@@ -1193,7 +1261,8 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     [tv deselectRowAtIndexPath:ip animated:YES];
     id app = self.sections[ip.section][@"apps"][ip.row];
     if ([self.picked containsObject:app]) [self.picked removeObject:app]; else [self.picked addObject:app];
-    [tv reloadRowsAtIndexPaths:@[ip] withRowAnimation:UITableViewRowAnimationNone];
+    TFAppCell *cell = (TFAppCell *)[tv cellForRowAtIndexPath:ip];
+    if ([cell isKindOfClass:[TFAppCell class]]) [cell setPicked:[self.picked containsObject:app]];
     [self updateGo];
 }
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip {
