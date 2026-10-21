@@ -746,30 +746,43 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
 @property (nonatomic, strong) NSIndexPath *dragAnchor;
 @property (nonatomic, assign) BOOL dragAnchorWasPicked;
 @property (nonatomic, strong) NSMutableArray *dragBasePicked;
-@property (nonatomic, strong) UIBarButtonItem *clearItem;
+@property (nonatomic, strong) UIBarButtonItem *countItem;
 @end
 
 @implementation TFListVC
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"";   // 按用户要求：不要标题
+    self.title = @"批量测试";
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    self.selAllItem = [[UIBarButtonItem alloc] initWithTitle:@"全选" style:UIBarButtonItemStylePlain
-                                                     target:self action:@selector(toggleAll)];
+
+    self.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
+                                        target:self action:@selector(close)];
+
     UIImageSymbolConfiguration *symCfg =
         [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightRegular];
     UIBarButtonItem *refreshItem =
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise" withConfiguration:symCfg]
                                          style:UIBarButtonItemStylePlain
                                         target:self action:@selector(reload)];
-    self.clearItem = [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
-                                                     target:self action:@selector(clearSelection)];
-    self.clearItem.enabled = NO;
-    self.navigationItem.leftBarButtonItems = @[self.selAllItem, refreshItem];
+    self.navigationItem.rightBarButtonItem = refreshItem;
+
+    self.selAllItem = [[UIBarButtonItem alloc] initWithTitle:@"全选" style:UIBarButtonItemStylePlain
+                                                     target:self action:@selector(toggleAll)];
+    UILabel *countLabel = [[UILabel alloc] init];
+    countLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    countLabel.textColor = UIColor.secondaryLabelColor;
+    countLabel.text = @"已选 0 个";
+    [countLabel sizeToFit];
+    self.countItem = [[UIBarButtonItem alloc] initWithCustomView:countLabel];
     self.goButton = [[UIBarButtonItem alloc] initWithTitle:@"停止测试" style:UIBarButtonItemStylePlain
                                                     target:self action:@selector(go)];
-    self.navigationItem.rightBarButtonItems = @[self.goButton, self.clearItem];
+    UIBarButtonItem *f1 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                        target:nil action:nil];
+    UIBarButtonItem *f2 = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace
+                                                                        target:nil action:nil];
+    self.toolbarItems = @[self.selAllItem, f1, self.countItem, f2, self.goButton];
     self.picked = [NSMutableArray array];
 
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
@@ -785,6 +798,17 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     [self.table addGestureRecognizer:lp];
 
     [self reload];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.navigationController setToolbarHidden:NO animated:NO];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (self.isMovingFromParentViewController || self.isBeingDismissed)
+        [self.navigationController setToolbarHidden:YES animated:NO];
 }
 
 #pragma mark 拖动多选
@@ -889,10 +913,21 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     }
 }
 
+- (void)setSheetPansEnabled:(BOOL)enabled {
+    UIView *v = self.navigationController.view;
+    while (v) {
+        for (UIGestureRecognizer *g in v.gestureRecognizers) {
+            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) g.enabled = enabled;
+        }
+        v = v.superview;
+    }
+}
+
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan) {
         NSIndexPath *ip = [self.table indexPathForRowAtPoint:[g locationInView:self.table]];
         if (!ip) return;
+        [self setSheetPansEnabled:NO];
         self.dragSelecting = YES;
         self.table.scrollEnabled = NO;
         NSArray *apps = self.sections[ip.section][@"apps"];
@@ -906,7 +941,9 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
             [self applyDragAt:[self.table indexPathForRowAtPoint:[self.table convertPoint:wp fromView:nil]]];
             [self updateDragAutoScroll:wp];
         }
-    } else if (g.state == UIGestureRecognizerStateEnded || g.state == UIGestureRecognizerStateCancelled) {
+    } else if (g.state == UIGestureRecognizerStateEnded ||
+               g.state == UIGestureRecognizerStateCancelled ||
+               g.state == UIGestureRecognizerStateFailed) {
         [self.dragScrollTimer invalidate];
         self.dragScrollTimer = nil;
         self.dragScrollDelta = 0;
@@ -917,6 +954,9 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
             self.table.scrollEnabled = YES;
             [self updateGo];
         }
+        __weak TFListVC *ws = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ [ws setSheetPansEnabled:YES]; });
     }
 }
 
@@ -1052,13 +1092,16 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
 
 - (void)updateGo {
     NSArray *all = [self allApps];
-    self.clearItem.enabled = self.picked.count > 0;
-    self.selAllItem.title = (all.count && self.picked.count == all.count) ? @"全不选" : @"全选";
+    BOOL allSelected = all.count && self.picked.count == all.count;
+    self.selAllItem.title = allSelected ? @"全不选" : @"全选";
     self.selAllItem.enabled = all.count > 0;
-    // 按钮标题固定，避免宽度变化把整组按钮挤来挤去；数量显示在中间标题上
     self.goButton.enabled = self.picked.count > 0;
-    self.title = self.picked.count
-        ? [NSString stringWithFormat:@"已选 %lu 个", (unsigned long)self.picked.count] : @"";
+    UILabel *l = (UILabel *)self.countItem.customView;
+    if ([l isKindOfClass:[UILabel class]]) {
+        l.text = [NSString stringWithFormat:@"已选 %lu 个", (unsigned long)self.picked.count];
+        [l sizeToFit];
+    }
+    self.title = all.count ? [NSString stringWithFormat:@"批量测试 (%lu)", (unsigned long)all.count] : @"批量测试";
 }
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
@@ -1280,6 +1323,16 @@ static void tftoolPresentList(void) {
         TFListVC *vc = [[TFListVC alloc] init];
         vc.onClose = ^{ if (gButton) gButton.hidden = NO; };
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        nav.modalPresentationStyle = UIModalPresentationPageSheet;
+        UISheetPresentationController *sheet = nav.sheetPresentationController;
+        if (sheet) {
+            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent,
+                              UISheetPresentationControllerDetent.largeDetent];
+            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+            sheet.prefersGrabberVisible = YES;
+            sheet.preferredCornerRadius = 16;
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
+        }
         gButton.hidden = YES;
         [host presentViewController:nav animated:YES completion:nil];
         LOG(@"[ui] 已弹出列表页");
