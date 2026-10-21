@@ -24,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.loonbatch_iphoneos-arm.deb
-Size: 30824
-MD5sum: 2b57796309cfc017152f8a32b372640f
-SHA1: cf63cdffced8e68bb4c45722abf8edf951338aba
-SHA256: 5a9c2db5ef791f0ef4c8a412e5d5484f5d7cca84ec81b5e3e4b9c690f7a04e82
-SHA512: bb669e36d3f07e13770c25647d3f6529d3bc02e5f0ae982ae8be59edcfb8bed8690a2805bf7b2982aa06a46fdf93f594fc8b43415d85affbf7b4e25bb2b34366
+Size: 30876
+MD5sum: 8af09971d2f78f58e427443f80ab5887
+SHA1: 7c1e4fa6386cd3eae28929b56e756b1354f90481
+SHA256: 90a1edcab0e543fcc13b95b886642de58b50213d7efaa2fe8be9c590ffa98399
+SHA512: e71095e2ca70bc5ec0e598262b4304ef8626e5f40ec0ece85ed259c0159503a925adcb50c01b0061be73449ce78ead7e7b9dba32a6d02e3f2b291c5f0d9cc672
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -120,11 +120,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.loonbatch_iphoneos-arm64.deb
-Size: 30856
-MD5sum: 34341c881053160433205f4fc2ac0278
-SHA1: 4b76641a6f8b081fbe04d3f0bb8f3856e7bdedfe
-SHA256: 95e053553d13b8bcbce5b298aa9a6b41ead84c21d36e5d883e6ee6b40062bb38
-SHA512: 1921fd2ae637fca70c5db50d5c730d02aeeee1bf9bac72c473552b4b58279abbbac2e40463f9c980d63a910ffbf8852ba92a784806aa5b056d74f1d406d00cda
+Size: 30908
+MD5sum: 1139796a91610280e95cd4568d3ac843
+SHA1: 0d901d4479660d04a87e08130f45cbbc5a9efeb4
+SHA256: 48e5d3c6d0ae7e84559060c41518201325d30e5cd1946c76ce54fdfac57209ea
+SHA512: cf1e87794ecc084ab16b3bc37856c0c42047f31968225f7680c9141b15835a6da85f54646c97bdd1c6548851729c9a265d5cf9aa607493a45fc917d40b2f1e44
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -216,11 +216,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.loonbatch_iphoneos-arm64e.deb
-Size: 30828
-MD5sum: 114cc73f4da970a20e29c8e955e4a9d0
-SHA1: eb5b13675b8bca350b95903afb0707c28a5be6a2
-SHA256: 5fd95b044dd7dbca1a09efcaaadb7f1529b0b4c8257c6700c56b8c2f3f44dfa4
-SHA512: a9d6f7586cd76ea8d94f420d250cd0c594296b6fa1a29071c18bcae9bc671c9edd135819b96835bc0fb1bf7d5760dcf2edb72bcc580c6de93268e45a059a587a
+Size: 30868
+MD5sum: 4b341bb079f50d04935d25d6d07bf438
+SHA1: d5ae5bfc74435a5fd5438efba9b6fe552ad406b4
+SHA256: 94469071582c54112e7dfb31466304e9d2cc0d18e97ed5617829bcd5a4081b32
+SHA512: 84ebd7b199896d37edea7b19fc0296fee63306ba36e7e3c64c7ef626cba756479fd3441fbc3aafa6ce7551eb74d830478c3df18d71a1ace6f88f09df92052c23
 
 Package: com.tomie.tfdevices
 Name: TFDevices
