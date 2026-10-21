@@ -590,6 +590,19 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, strong) UIView *dragPreview;
 @property (nonatomic, strong) UIView *dropIndicator;
 @property (nonatomic, strong) CADisplayLink *dragScrollLink;
+@property (nonatomic, strong) UILongPressGestureRecognizer *selectPress;
+@property (nonatomic, strong) NSIndexPath *selectAnchor;
+@property (nonatomic, strong) NSIndexPath *selectTarget;
+@property (nonatomic, assign) BOOL selectDragging;
+@property (nonatomic, assign) BOOL selectMoved;
+@property (nonatomic, assign) BOOL selectWant;
+@property (nonatomic, strong) NSMutableArray *selectBase;
+@property (nonatomic, assign) CGPoint selectStartWindowPoint;
+@property (nonatomic, assign) CGPoint selectLastWindowPoint;
+@property (nonatomic, assign) CGFloat selectScrollDelta;
+@property (nonatomic, strong) NSTimer *selectScrollTimer;
+@property (nonatomic, strong) NSMutableArray *disabledSheetPans;
+@property (nonatomic, copy) void (^onClose)(void);
 @end
 
 @implementation LNBatchVC
@@ -612,9 +625,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         initWithTarget:self action:@selector(handleLongPress:)];
     lp.minimumPressDuration = 0.35;
     lp.allowableMovement = 12;
+    lp.numberOfTouchesRequired = 1;
     lp.cancelsTouchesInView = YES;
     lp.delegate = self;
     [self.tableView addGestureRecognizer:lp];
+
+    self.selectPress = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:self action:@selector(handleSelectPress:)];
+    self.selectPress.numberOfTouchesRequired = 2;
+    self.selectPress.minimumPressDuration = 0.0;
+    self.selectPress.allowableMovement = CGFLOAT_MAX;
+    self.selectPress.cancelsTouchesInView = YES;
+    self.selectPress.delegate = self;
+    [self.tableView addGestureRecognizer:self.selectPress];
+    self.tableView.panGestureRecognizer.maximumNumberOfTouches = 1;
     self.navigationItem.leftBarButtonItem =
         [[UIBarButtonItem alloc] initWithTitle:@"取消" style:UIBarButtonItemStylePlain
                                         target:self action:@selector(cancel)];
@@ -649,9 +673,15 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     if (self.dragGroup.count) [self endCustomDrag:NO];
+    if (self.selectDragging) [self endSelectDrag];
     if (self.isMovingFromParentViewController || self.isBeingDismissed) {
         [self.navigationController setToolbarHidden:YES animated:NO];
     }
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    if ((self.isBeingDismissed || self.navigationController.isBeingDismissed) && self.onClose) self.onClose();
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -672,6 +702,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)reloadData {
+    if (self.selectDragging) [self endSelectDrag];
     LNDCConfigModel *config = configForHost(self.host);
     self.sections = [NSMutableArray array];
     if (!config) {
@@ -731,6 +762,198 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return self.sections.count; }
 - (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return [self itemsForSection:s].count; }
+- (id)itemAtPath:(NSIndexPath *)ip {
+    if (!ip || ip.section < 0 || ip.section >= (NSInteger)self.sections.count) return nil;
+    NSArray *items = [self itemsForSection:ip.section];
+    if (ip.row < 0 || ip.row >= (NSInteger)items.count) return nil;
+    return items[(NSUInteger)ip.row];
+}
+
+- (NSInteger)linearIndexOf:(NSIndexPath *)ip {
+    if (!ip) return -1;
+    NSInteger n = 0;
+    for (NSInteger s = 0; s < ip.section && s < (NSInteger)self.sections.count; s++)
+        n += (NSInteger)[self itemsForSection:s].count + 1000;
+    return n + ip.row;
+}
+
+- (NSIndexPath *)indexPathForLinear:(NSInteger)lin {
+    NSInteger n = 0;
+    for (NSInteger s = 0; s < (NSInteger)self.sections.count; s++) {
+        NSInteger cnt = (NSInteger)[self itemsForSection:s].count;
+        if (lin >= n && lin < n + cnt) return [NSIndexPath indexPathForRow:(lin - n) inSection:s];
+        n += cnt + 1000;
+    }
+    return nil;
+}
+
+- (NSInteger)nextLinearFrom:(NSInteger)lin {
+    NSIndexPath *p = [self indexPathForLinear:lin];
+    if (!p) return -1;
+    NSInteger cnt = (NSInteger)[self itemsForSection:p.section].count;
+    if (p.row + 1 < cnt) return lin + 1;
+    NSInteger next = lin + (cnt - p.row) + 1000;
+    return [self indexPathForLinear:next] ? next : -1;
+}
+
+- (void)refreshSelectedRows:(NSArray *)paths {
+    for (NSIndexPath *p in paths) {
+        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:p];
+        id item = [self itemAtPath:p];
+        if (!cell || !item) continue;
+        cell.accessoryView = [self statusAccessoryForItem:item selected:ptrContains(self.selected, item)];
+    }
+}
+
+- (void)applySelectAt:(NSIndexPath *)ip {
+    if (!ip || !self.selectAnchor) return;
+    NSInteger a = [self linearIndexOf:self.selectAnchor];
+    NSInteger b = [self linearIndexOf:ip];
+    if (a < 0 || b < 0) return;
+    NSInteger lo = MIN(a, b), hi = MAX(a, b);
+    BOOL want = self.selectWant;
+    NSMutableArray *touched = [NSMutableArray array];
+    for (NSInteger lin = 0; lin >= 0; lin = [self nextLinearFrom:lin]) {
+        NSIndexPath *p = [self indexPathForLinear:lin];
+        if (!p) break;
+        id item = [self itemAtPath:p];
+        if (!item) continue;
+        BOOL inRange = (lin >= lo && lin <= hi);
+        BOOL base = ptrContains(self.selectBase, item);
+        BOOL desired = inRange ? want : base;
+        BOOL has = ptrContains(self.selected, item);
+        if (desired && !has) [self.selected addObject:item];
+        else if (!desired && has) [self.selected removeObject:item];
+        else continue;
+        [touched addObject:p];
+    }
+    if (touched.count) {
+        [self refreshSelectedRows:touched];
+        UISelectionFeedbackGenerator *fg = [[UISelectionFeedbackGenerator alloc] init];
+        [fg selectionChanged];
+        [self updateButtons];
+    }
+}
+
+- (NSIndexPath *)selectTargetForWindowPoint:(CGPoint)wp {
+    CGPoint p = [self.tableView convertPoint:wp fromView:nil];
+    NSIndexPath *candidate = [self.tableView indexPathForRowAtPoint:p];
+    if (!candidate) return self.selectTarget;
+    if (!self.selectTarget || [candidate isEqual:self.selectTarget]) return candidate;
+    CGRect row = [self.tableView rectForRowAtIndexPath:candidate];
+    CGFloat inset = 8.0;
+    if (p.y < CGRectGetMinY(row) + inset || p.y > CGRectGetMaxY(row) - inset) return self.selectTarget;
+    return candidate;
+}
+
+- (void)selectScrollTick:(NSTimer *)t {
+    if (!self.selectDragging || self.selectScrollDelta == 0) return;
+    UIEdgeInsets insets = self.tableView.adjustedContentInset;
+    CGFloat minY = -insets.top;
+    CGFloat maxY = MAX(minY, self.tableView.contentSize.height - self.tableView.bounds.size.height + insets.bottom);
+    CGFloat y = self.tableView.contentOffset.y + self.selectScrollDelta;
+    y = MAX(minY, MIN(maxY, y));
+    if (fabs(y - self.tableView.contentOffset.y) < 0.5) {
+        [self.selectScrollTimer invalidate];
+        self.selectScrollTimer = nil;
+        self.selectScrollDelta = 0;
+        return;
+    }
+    self.tableView.contentOffset = CGPointMake(self.tableView.contentOffset.x, y);
+    NSIndexPath *target = [self selectTargetForWindowPoint:self.selectLastWindowPoint];
+    if (target && ![target isEqual:self.selectTarget]) {
+        self.selectTarget = target;
+        [self applySelectAt:target];
+    }
+}
+
+- (void)updateSelectAutoScroll:(CGPoint)wp {
+    self.selectLastWindowPoint = wp;
+    CGPoint p = [self.tableView convertPoint:wp fromView:nil];
+    UIEdgeInsets insets = self.tableView.adjustedContentInset;
+    CGFloat top = self.tableView.contentOffset.y + insets.top;
+    CGFloat bottom = self.tableView.contentOffset.y + self.tableView.bounds.size.height - insets.bottom;
+    CGFloat edge = 100, step = 22;
+    if (p.y < top + edge) self.selectScrollDelta = -step;
+    else if (p.y > bottom - edge) self.selectScrollDelta = step;
+    else self.selectScrollDelta = 0;
+    if (self.selectScrollDelta != 0) {
+        if (!self.selectScrollTimer)
+            self.selectScrollTimer = [NSTimer scheduledTimerWithTimeInterval:0.02 target:self
+                                                                      selector:@selector(selectScrollTick:)
+                                                                      userInfo:nil repeats:YES];
+    } else {
+        [self.selectScrollTimer invalidate];
+        self.selectScrollTimer = nil;
+    }
+}
+
+- (NSIndexPath *)selectIndexPathForGesture:(UIGestureRecognizer *)g {
+    for (NSUInteger i = 0; i < g.numberOfTouches; i++) {
+        NSIndexPath *ip = [self.tableView indexPathForRowAtPoint:[g locationOfTouch:i inView:self.tableView]];
+        if (ip) return ip;
+    }
+    return nil;
+}
+
+- (void)endSelectDrag {
+    [self.selectScrollTimer invalidate];
+    self.selectScrollTimer = nil;
+    self.selectScrollDelta = 0;
+    BOOL wasSelecting = self.selectDragging;
+    self.selectDragging = NO;
+    self.selectAnchor = nil;
+    self.selectTarget = nil;
+    self.selectBase = nil;
+    self.selectMoved = NO;
+    self.tableView.scrollEnabled = YES;
+    self.tableView.panGestureRecognizer.enabled = YES;
+    if (wasSelecting) [self updateButtons];
+    __weak LNBatchVC *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ [ws setSheetPansEnabled:YES]; });
+}
+
+- (void)handleSelectPress:(UILongPressGestureRecognizer *)g {
+    if (g.state == UIGestureRecognizerStateBegan) {
+        NSIndexPath *ip = [self selectIndexPathForGesture:g];
+        if (!ip) return;
+        id item = [self itemAtPath:ip];
+        if (!item) return;
+        [self setSheetPansEnabled:NO];
+        self.selectDragging = YES;
+        self.tableView.scrollEnabled = NO;
+        self.tableView.panGestureRecognizer.enabled = NO;
+        self.selectAnchor = ip;
+        self.selectTarget = ip;
+        CGPoint wp = [g locationInView:nil];
+        self.selectStartWindowPoint = wp;
+        self.selectLastWindowPoint = wp;
+        self.selectMoved = NO;
+        self.selectWant = !ptrContains(self.selected, item);
+        self.selectBase = [NSMutableArray arrayWithArray:self.selected];
+    } else if (g.state == UIGestureRecognizerStateChanged) {
+        if (!self.selectDragging) return;
+        CGPoint wp = [g locationInView:nil];
+        if (!self.selectMoved) {
+            CGFloat dx = wp.x - self.selectStartWindowPoint.x;
+            CGFloat dy = wp.y - self.selectStartWindowPoint.y;
+            if (dx * dx + dy * dy < 36.0) return;
+            self.selectMoved = YES;
+        }
+        NSIndexPath *target = [self selectTargetForWindowPoint:wp];
+        if (target) {
+            self.selectTarget = target;
+            [self applySelectAt:target];
+        }
+        [self updateSelectAutoScroll:wp];
+    } else if (g.state == UIGestureRecognizerStateEnded ||
+               g.state == UIGestureRecognizerStateCancelled ||
+               g.state == UIGestureRecognizerStateFailed) {
+        [self endSelectDrag];
+    }
+}
+
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s {
     return self.sections[s][@"title"];
 }
@@ -843,6 +1066,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 #pragma mark 自定义拖动排序
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
     shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    if (gestureRecognizer == self.selectPress || otherGestureRecognizer == self.selectPress) return NO;
+    return YES;
+}
+
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)g {
+    if (g == self.selectPress) return [self selectIndexPathForGesture:g] != nil;
     return YES;
 }
 
@@ -853,12 +1082,22 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)setSheetPansEnabled:(BOOL)enabled {
-    UIView *v = self.navigationController.view;
-    while (v) {
-        for (UIGestureRecognizer *g in v.gestureRecognizers) {
-            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) g.enabled = enabled;
+    if (!enabled) {
+        if (self.disabledSheetPans) return;
+        self.disabledSheetPans = [NSMutableArray array];
+        UIView *v = self.navigationController.view;
+        while (v) {
+            for (UIGestureRecognizer *g in v.gestureRecognizers) {
+                if ([g isKindOfClass:[UIPanGestureRecognizer class]] && g.enabled) {
+                    g.enabled = NO;
+                    [self.disabledSheetPans addObject:g];
+                }
+            }
+            v = v.superview;
         }
-        v = v.superview;
+    } else {
+        for (UIGestureRecognizer *g in self.disabledSheetPans) g.enabled = YES;
+        self.disabledSheetPans = nil;
     }
 }
 
@@ -1414,6 +1653,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)showResult:(NSString *)msg ok:(BOOL)ok {
+    if (!self.view.window) return;
     if (ok) {
         [self showToast:msg];
         return;
@@ -1431,10 +1671,107 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 static const NSInteger kLoonBatchButtonTag = 0x4C42;
 static char kLBModeKey;
 
+static BOOL gLNFabCustomPosition;
+static CGPoint gLNFabCustomCenter;
+static BOOL gLNFabDidDrag;
+
+static UITabBar *LNFabVisibleTabBar(UIView *root, int depth) {
+    if (!root || root.hidden || root.alpha < 0.05 || depth > 12) return nil;
+    if ([root isKindOfClass:[UITabBar class]]) return (UITabBar *)root;
+    for (UIView *sub in root.subviews) {
+        UITabBar *bar = LNFabVisibleTabBar(sub, depth + 1);
+        if (bar) return bar;
+    }
+    return nil;
+}
+
+static CGFloat LNFabBottomY(UIView *root) {
+    CGFloat bottomY = root.bounds.size.height - root.safeAreaInsets.bottom;
+    UITabBar *tab = root.window ? LNFabVisibleTabBar(root.window, 0) : nil;
+    if (tab) {
+        CGRect r = [tab convertRect:tab.bounds toView:root];
+        if (r.size.height > 1 && CGRectGetMinY(r) < bottomY) bottomY = CGRectGetMinY(r);
+    }
+    return bottomY;
+}
+
+static CGPoint LNFabClampCenter(CGPoint center, UIView *root, CGSize size) {
+    CGFloat minX = size.width / 2.0 + 8.0;
+    CGFloat maxX = root.bounds.size.width - size.width / 2.0 - 8.0;
+    CGFloat minY = root.safeAreaInsets.top + size.height / 2.0 + 8.0;
+    CGFloat maxY = LNFabBottomY(root) - size.height / 2.0 - 8.0;
+    if (maxX < minX) maxX = minX;
+    if (maxY < minY) maxY = minY;
+    return CGPointMake(MIN(MAX(center.x, minX), maxX), MIN(MAX(center.y, minY), maxY));
+}
+
+static UIImage *LNFabBackground(CGSize size) {
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextRef c = ctx.CGContext;
+        CGFloat radius = size.height / 2.0;
+        UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, size.width, size.height)
+                                                            cornerRadius:radius];
+        [clip addClip];
+        CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+        CGFloat components[] = {0.04, 0.52, 1.00, 1.0, 0.37, 0.36, 0.90, 1.0};
+        CGFloat locations[] = {0.0, 1.0};
+        CGGradientRef gradient = CGGradientCreateWithColorComponents(space, components, locations, 2);
+        CGContextDrawLinearGradient(c, gradient, CGPointMake(0, 0), CGPointMake(size.width, size.height), 0);
+        CGGradientRelease(gradient);
+        CGColorSpaceRelease(space);
+        [[UIColor colorWithWhite:1.0 alpha:0.20] setStroke];
+        UIBezierPath *border = [UIBezierPath bezierPathWithRoundedRect:
+            CGRectInset(CGRectMake(0, 0, size.width, size.height), 0.5, 0.5)
+                                                              cornerRadius:radius - 0.5];
+        border.lineWidth = 1.0;
+        [border stroke];
+    }];
+}
+
+@interface LNFabDrag : NSObject
+@property (nonatomic, assign) CGPoint startCenter;
+@end
+
+@implementation LNFabDrag
+- (void)pan:(UIPanGestureRecognizer *)g {
+    UIView *v = g.view;
+    UIView *root = v.superview;
+    if (!v || !root) return;
+    CGPoint t = [g translationInView:root];
+    if (g.state == UIGestureRecognizerStateBegan) {
+        gLNFabDidDrag = YES;
+        self.startCenter = v.center;
+        [v.layer removeAllAnimations];
+        v.transform = CGAffineTransformMakeScale(1.04, 1.04);
+        v.layer.shadowOpacity = 0.42;
+    } else if (g.state == UIGestureRecognizerStateChanged) {
+        v.center = LNFabClampCenter(CGPointMake(self.startCenter.x + t.x, self.startCenter.y + t.y), root, v.bounds.size);
+    } else if (g.state == UIGestureRecognizerStateEnded ||
+               g.state == UIGestureRecognizerStateCancelled ||
+               g.state == UIGestureRecognizerStateFailed) {
+        gLNFabCustomPosition = YES;
+        gLNFabCustomCenter = v.center;
+        [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.62 initialSpringVelocity:0.5
+                            options:UIViewAnimationOptionAllowUserInteraction
+                         animations:^{
+                             v.transform = CGAffineTransformIdentity;
+                             v.layer.shadowOpacity = 0.30;
+                         } completion:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ gLNFabDidDrag = NO; });
+    }
+}
+@end
+
+static LNFabDrag *gLNFabDrag;
+
 @interface LNBLShared : NSObject
 + (instancetype)shared;
 - (void)installOn:(UIViewController *)vc;
 - (void)openBatch:(UIButton *)sender;
+- (void)fabTouchDown:(UIButton *)sender;
+- (void)fabTouchUp:(UIButton *)sender;
 @end
 
 @implementation LNBLShared
@@ -1452,34 +1789,83 @@ static char kLBModeKey;
     return 0;
 }
 
+- (void)fabTouchDown:(UIButton *)sender {
+    [UIView animateWithDuration:0.10 animations:^{
+        sender.transform = CGAffineTransformMakeScale(0.94, 0.94);
+    }];
+}
+
+- (void)fabTouchUp:(UIButton *)sender {
+    [UIView animateWithDuration:0.35 delay:0 usingSpringWithDamping:0.55 initialSpringVelocity:0.6
+                        options:UIViewAnimationOptionAllowUserInteraction
+                     animations:^{ sender.transform = CGAffineTransformIdentity; }
+                     completion:nil];
+}
+
+- (UIButton *)buttonIn:(UIViewController *)vc {
+    for (UIView *v in vc.view.subviews)
+        if (v.tag == kLoonBatchButtonTag && [v isKindOfClass:[UIButton class]]) return (UIButton *)v;
+    return nil;
+}
+
+- (void)placeButton:(UIButton *)b on:(UIViewController *)vc {
+    UIView *root = vc.view;
+    CGSize size = b.bounds.size;
+    CGPoint fallback = CGPointMake(root.bounds.size.width - size.width / 2.0 - 16.0,
+                                   LNFabBottomY(root) - size.height / 2.0 - 16.0);
+    CGPoint center = gLNFabCustomPosition ? gLNFabCustomCenter : fallback;
+    b.center = LNFabClampCenter(center, root, size);
+    b.hidden = vc.presentedViewController != nil;
+}
+
 - (void)installOn:(UIViewController *)vc {
     if (!vc || [vc isKindOfClass:NSClassFromString(@"LNBatchVC")]) return;
     NSString *cn = NSStringFromClass([vc class]);
     LNBLMode mode = [self modeForClass:cn];
     if (!mode) return;
     if ([cn isEqualToString:@"PolicyGroupSelectVC"] && boolIvar(vc, "_embeddedInPolicyPager")) return;
-    for (UIView *v in vc.view.subviews) if (v.tag == kLoonBatchButtonTag) return;
-    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-    b.tag = kLoonBatchButtonTag;
-    b.frame = CGRectMake(0, 0, 64, 36);
-    [b setTitle:@"批量" forState:UIControlStateNormal];
-    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-    b.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
-    b.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.92];
-    b.layer.cornerRadius = 18;
-    b.clipsToBounds = YES;
-    b.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleTopMargin;
+    UIButton *b = [self buttonIn:vc];
+    if (!b) {
+        b = [UIButton buttonWithType:UIButtonTypeCustom];
+        b.tag = kLoonBatchButtonTag;
+        b.frame = CGRectMake(0, 0, 54, 54);
+        b.adjustsImageWhenHighlighted = NO;
+        b.showsTouchWhenHighlighted = NO;
+        b.tintColor = UIColor.whiteColor;
+        UIImageSymbolConfiguration *cfg =
+            [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightSemibold];
+        UIImage *icon = [UIImage systemImageNamed:@"checklist" withConfiguration:cfg];
+        if (!icon) icon = [UIImage systemImageNamed:@"checkmark.circle" withConfiguration:cfg];
+        [b setImage:icon forState:UIControlStateNormal];
+        b.imageView.contentMode = UIViewContentModeScaleAspectFit;
+        UIImage *bg = LNFabBackground(b.bounds.size);
+        [b setBackgroundImage:bg forState:UIControlStateNormal];
+        [b setBackgroundImage:bg forState:UIControlStateHighlighted];
+        b.layer.shadowColor = [UIColor colorWithRed:0.05 green:0.35 blue:0.85 alpha:1.0].CGColor;
+        b.layer.shadowOpacity = 0.30;
+        b.layer.shadowRadius = 12;
+        b.layer.shadowOffset = CGSizeMake(0, 6);
+        b.layer.shadowPath = [UIBezierPath bezierPathWithOvalInRect:b.bounds].CGPath;
+        b.accessibilityLabel = @"批量管理";
+        b.accessibilityHint = @"打开插件、规则或节点批量管理";
+        [b addTarget:self action:@selector(fabTouchDown:) forControlEvents:UIControlEventTouchDown];
+        [b addTarget:self action:@selector(fabTouchUp:) forControlEvents:
+            UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
+        if (!gLNFabDrag) gLNFabDrag = [LNFabDrag new];
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:gLNFabDrag action:@selector(pan:)];
+        pan.maximumNumberOfTouches = 1;
+        [b addGestureRecognizer:pan];
+        [b addTarget:self action:@selector(openBatch:) forControlEvents:UIControlEventTouchUpInside];
+        [vc.view addSubview:b];
+        LBL(@"入口已加 %@ mode=%ld", cn, (long)mode);
+    }
     objc_setAssociatedObject(b, &kLBModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [b addTarget:self action:@selector(openBatch:) forControlEvents:UIControlEventTouchUpInside];
-    UIEdgeInsets ins = vc.view.safeAreaInsets;
-    b.frame = CGRectMake(vc.view.bounds.size.width - 64 - 16,
-                         vc.view.bounds.size.height - ins.bottom - 36 - 16, 64, 36);
-    [vc.view addSubview:b];
     [vc.view bringSubviewToFront:b];
-    LBL(@"入口已加 %@ mode=%ld", cn, (long)mode);
+    [self placeButton:b on:vc];
 }
 
 - (void)openBatch:(UIButton *)sender {
+    if (gLNFabDidDrag) return;
     LNBLMode mode = [objc_getAssociatedObject(sender, &kLBModeKey) integerValue];
     UIViewController *host = nil;
     UIResponder *r = sender;
@@ -1489,6 +1875,7 @@ static char kLBModeKey;
     }
     if (!host) return;
     LNBatchVC *vc = [[LNBatchVC alloc] initWithMode:mode host:host];
+    vc.onClose = ^{ sender.hidden = NO; };
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationPageSheet;
     UISheetPresentationController *sheet = nav.sheetPresentationController;
@@ -1500,6 +1887,7 @@ static char kLBModeKey;
         sheet.preferredCornerRadius = 16;
         sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
     }
+    sender.hidden = YES;
     [host presentViewController:nav animated:YES completion:nil];
     LBL(@"打开批量页 mode=%ld host=%@", (long)mode, NSStringFromClass([host class]));
 }
@@ -1518,6 +1906,22 @@ static void hookViewDidAppear(Class c) {
     IMP old = method_getImplementation(m);
     IMP repl = imp_implementationWithBlock(^(id recv, BOOL animated) {
         ((void (*)(id, SEL, BOOL))old)(recv, sel, animated);
+        [[LNBLShared shared] installOn:recv];
+    });
+    method_setImplementation(m, repl);
+}
+
+static void hookViewDidLayoutSubviews(Class c) {
+    if (!c) return;
+    SEL sel = sel_registerName("viewDidLayoutSubviews");
+    Method m = class_getInstanceMethod(c, sel);
+    if (!m) return;
+    Class super = class_getSuperclass(c);
+    Method sm = super ? class_getInstanceMethod(super, sel) : NULL;
+    if (m == sm) return;
+    IMP old = method_getImplementation(m);
+    IMP repl = imp_implementationWithBlock(^(id recv) {
+        ((void (*)(id, SEL))old)(recv, sel);
         [[LNBLShared shared] installOn:recv];
     });
     method_setImplementation(m, repl);
@@ -1544,5 +1948,9 @@ __attribute__((constructor)) static void init(void) {
         hookViewDidAppear(NSClassFromString(@"_TtC4Loon17PluginListSwiftVC"));
         hookViewDidAppear(NSClassFromString(@"AllRulesVC"));
         hookViewDidAppear(NSClassFromString(@"PolicyGroupSelectVC"));
+        hookViewDidLayoutSubviews(NSClassFromString(@"PluginListVC"));
+        hookViewDidLayoutSubviews(NSClassFromString(@"_TtC4Loon17PluginListSwiftVC"));
+        hookViewDidLayoutSubviews(NSClassFromString(@"AllRulesVC"));
+        hookViewDidLayoutSubviews(NSClassFromString(@"PolicyGroupSelectVC"));
     } @catch (NSException *e) { LBL(@"init 异常 %@", e); }
 }
