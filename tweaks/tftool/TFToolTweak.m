@@ -1250,131 +1250,34 @@ static UIWindow *tftoolKeyWindow(void) {
     return nil;
 }
 
-// 在视图树里找原生“兑换”按钮（用于把我们的按钮排在它左边）
-static UIView *tftoolFindViewWithText(UIView *root, NSString *text, int depth) {
-    if (!root || depth > 14) return nil;
-    NSString *label = nil;
-    if ([root isKindOfClass:[UILabel class]]) label = ((UILabel *)root).text;
-    else if ([root isKindOfClass:[UIButton class]]) label = [(UIButton *)root currentTitle] ?: root.accessibilityLabel;
-    if (!label.length) label = root.accessibilityLabel;
-    if (label.length && [label rangeOfString:text].location != NSNotFound) return root;
+// 找一个可见的底部 tab bar；有 tab bar 时把悬浮按钮放在它上方
+static UITabBar *tftoolVisibleTabBar(UIView *root, int depth) {
+    if (!root || root.hidden || root.alpha < 0.05 || depth > 12) return nil;
+    if ([root isKindOfClass:[UITabBar class]]) return (UITabBar *)root;
     for (UIView *sub in root.subviews) {
-        UIView *r = tftoolFindViewWithText(sub, text, depth + 1);
-        if (r) return r;
+        UITabBar *bar = tftoolVisibleTabBar(sub, depth + 1);
+        if (bar) return bar;
     }
     return nil;
-}
-
-static NSInteger gA11yDumped;
-static BOOL gA11yVerbose = NO;
-
-// 取某个视图上的无障碍元素（两种暴露方式都覆盖）
-static NSArray *tftoolA11yElements(UIView *v) {
-    NSMutableArray *out = [NSMutableArray array];
-    @try {
-        if ([v respondsToSelector:@selector(accessibilityElements)]) {
-            id els = [v accessibilityElements];
-            if ([els isKindOfClass:[NSArray class]]) [out addObjectsFromArray:els];
-        }
-        if (!out.count) {
-            NSInteger n = [v accessibilityElementCount];
-            if (n > 0 && n != NSNotFound) {
-                for (NSInteger i = 0; i < n; i++) {
-                    id el = [v accessibilityElementAtIndex:i];
-                    if (el) [out addObject:el];
-                }
-            }
-        }
-    } @catch (NSException *e) {}
-    return out;
-}
-
-// SwiftUI 的按钮在无障碍树里有 label/frame，用它来对齐原生“兑换”
-static CGRect tftoolA11yFrame(UIView *root, NSString *text, int depth) {
-    if (!root || depth > 20) return CGRectNull;
-    for (id el in tftoolA11yElements(root)) {
-        @try {
-            NSString *lbl = nil;
-            if ([el respondsToSelector:@selector(accessibilityLabel)]) lbl = [el accessibilityLabel];
-            if (!lbl.length && [el respondsToSelector:@selector(accessibilityValue)]) lbl = [el accessibilityValue];
-            CGRect f = CGRectNull;
-            if ([el respondsToSelector:@selector(accessibilityFrame)]) f = [el accessibilityFrame];
-            if (gA11yVerbose && lbl.length && gA11yDumped < 40) {
-                gA11yDumped++;
-                LOG(@"[a11y] %@ %@", lbl, NSStringFromCGRect(f));
-            }
-            if (lbl.length && [lbl rangeOfString:text].location != NSNotFound) {
-                if (!CGRectIsNull(f) && !CGRectIsEmpty(f)) return f;
-            }
-        } @catch (NSException *e) {}
-    }
-    for (UIView *sub in root.subviews) {
-        CGRect f = tftoolA11yFrame(sub, text, depth + 1);
-        if (!CGRectIsNull(f)) return f;
-    }
-    return CGRectNull;
-}
-
-static void tftoolPresentList(void) {
-    @try {
-        UIWindow *w = gHostWindow ?: tftoolKeyWindow();
-        UIViewController *host = w.rootViewController;
-        if (!host) { LOG(@"[ui] 没有可用的 rootViewController"); return; }
-        TFListVC *vc = [[TFListVC alloc] init];
-        vc.onClose = ^{ if (gButton) gButton.hidden = NO; };
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        nav.modalPresentationStyle = UIModalPresentationPageSheet;
-        UISheetPresentationController *sheet = nav.sheetPresentationController;
-        if (sheet) {
-            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent,
-                              UISheetPresentationControllerDetent.largeDetent];
-            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
-            sheet.prefersGrabberVisible = YES;
-            sheet.preferredCornerRadius = 16;
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = NO;
-        }
-        gButton.hidden = YES;
-        [host presentViewController:nav animated:YES completion:nil];
-        LOG(@"[ui] 已弹出列表页");
-    } @catch (NSException *e) { LOG(@"[ui] ex %@ %@", e.name, e.reason); }
 }
 
 static void tftoolPlaceButton(UIWindow *w) {
     if (!gButton.superview) [w addSubview:gButton];
     [w bringSubviewToFront:gButton];
     CGSize sz = w.bounds.size;
-    CGFloat topInset = w.safeAreaInsets.top;
     CGRect bb = gButton.bounds;
-
-    CGRect rf = CGRectNull;
-    NSInteger src = 0;
-    rf = tftoolA11yFrame(w, @"兑换", 0);                      // ① 无障碍树
-    if (!CGRectIsNull(rf)) src = 1;
-    if (CGRectIsNull(rf)) {
-        UIView *redeem = tftoolFindViewWithText(w, @"兑换", 0); // ② 视图树
-        if (redeem && redeem.window == w) { rf = [redeem convertRect:redeem.bounds toView:w]; src = 2; }
+    CGFloat bottomY = sz.height - w.safeAreaInsets.bottom;
+    UITabBar *tab = tftoolVisibleTabBar(w, 0);
+    if (tab) {
+        CGRect tf = [tab convertRect:tab.bounds toView:w];
+        if (tf.size.height > 1 && CGRectGetMinY(tf) < bottomY) bottomY = CGRectGetMinY(tf);
     }
-    if (!CGRectIsNull(rf) && rf.origin.y < topInset + 140) {
-        // 无障碍 frame 是屏幕坐标，窗口不在原点时换算一下
-        if (w.frame.origin.x != 0 || w.frame.origin.y != 0)
-            rf = [w convertRect:rf fromWindow:nil];
-        // “兑换”无障碍框比文字本身略高，整体下移一点才能和原生文字视觉居中
-        CGFloat dy = 6.0;
-        CGRect f = CGRectMake(MAX(8, rf.origin.x - 10 - bb.size.width),
-                              rf.origin.y + (rf.size.height - bb.size.height) / 2.0 + dy,
-                              bb.size.width, bb.size.height);
-        if (!CGRectEqualToRect(gButton.frame, f)) {
-            gButton.frame = f;
-            LOG(@"[ui] 按钮对齐“兑换”(来源=%ld) redeem=%@ -> batch=%@", (long)src,
-                NSStringFromCGRect(rf), NSStringFromCGRect(f));
-        }
-        return;
-    }
-    // 兜底：顶栏右侧、放在“兑换”左边一档的位置
-    CGRect f = CGRectMake(sz.width - bb.size.width - 8 - 46, topInset + 6, bb.size.width, bb.size.height);
+    CGRect f = CGRectMake(sz.width - bb.size.width - 16,
+                          bottomY - bb.size.height - 16,
+                          bb.size.width, bb.size.height);
     if (!CGRectEqualToRect(gButton.frame, f)) {
         gButton.frame = f;
-        LOG(@"[ui] 未找到“兑换”，用兜底位置 %@", NSStringFromCGRect(f));
+        LOG(@"[ui] 悬浮按钮 %@", NSStringFromCGRect(f));
     }
 }
 
@@ -1384,10 +1287,13 @@ static void tftoolAttachButton(void) {
         if (!w) return;
         if (!gButton) {
             gButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            gButton.frame = CGRectMake(0, 0, 64, 34);
+            gButton.frame = CGRectMake(0, 0, 64, 36);
             [gButton setTitle:@"批量" forState:UIControlStateNormal];
-            gButton.titleLabel.font = [UIFont systemFontOfSize:17];
-            [gButton setTitleColor:UIColor.systemBlueColor forState:UIControlStateNormal];
+            gButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+            [gButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+            gButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.92];
+            gButton.layer.cornerRadius = 18;
+            gButton.clipsToBounds = YES;
             [gButton addAction:[UIAction actionWithHandler:^(UIAction *a) { tftoolPresentList(); }]
                     forControlEvents:UIControlEventTouchUpInside];
         }
