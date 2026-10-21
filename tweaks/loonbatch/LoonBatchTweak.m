@@ -541,7 +541,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     c.detailTextLabel.numberOfLines = 2;
     c.detailTextLabel.textColor = UIColor.secondaryLabelColor;
     c.accessoryType = ptrContains(self.selected, item) ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
-    c.alpha = (self.draggingItems.count && ptrContains(self.draggingItems, item)) ? 0.3 : 1.0;
+    setCellDimmed(c, self.draggingItems.count && ptrContains(self.draggingItems, item));
     return c;
 }
 
@@ -585,6 +585,26 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
     if (a.count != b.count) return NO;
     for (NSUInteger i = 0; i < a.count; i++) if (a[i] != b[i]) return NO;
     return YES;
+}
+
+static const NSInteger kLBDimTag = 0x4C43;
+
+static void setCellDimmed(UITableViewCell *cell, BOOL dimmed) {
+    UIView *overlay = [cell viewWithTag:kLBDimTag];
+    if (dimmed) {
+        cell.alpha = 1.0;
+        if (!overlay) {
+            overlay = [[UIView alloc] initWithFrame:cell.bounds];
+            overlay.tag = kLBDimTag;
+            overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            overlay.backgroundColor = [UIColor.secondarySystemGroupedBackgroundColor colorWithAlphaComponent:0.55];
+            overlay.userInteractionEnabled = NO;
+            [cell addSubview:overlay];
+        }
+    } else {
+        if (overlay) [overlay removeFromSuperview];
+        cell.alpha = 1.0;
+    }
 }
 
 - (NSArray<UIDragItem *> *)tableView:(UITableView *)tableView
@@ -645,12 +665,9 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
         if (ip.row < 0 || ip.row >= (NSInteger)items.count) continue;
         UITableViewCell *c = [self.tableView cellForRowAtIndexPath:ip];
         if (!c) continue;
-        if (ptrContains(self.draggingItems, items[(NSUInteger)ip.row])) {
-            c.alpha = 0.3;
-            changed++;
-        } else {
-            c.alpha = 1.0;
-        }
+        BOOL dimmed = ptrContains(self.draggingItems, items[(NSUInteger)ip.row]);
+        setCellDimmed(c, dimmed);
+        if (dimmed) changed++;
     }
     LBL(@"拖动变淡 rows=%lu cells=%ld", (unsigned long)self.draggingItems.count, (long)changed);
 }
@@ -663,7 +680,7 @@ static BOOL samePtrOrder(NSArray *a, NSArray *b) {
     self.draggingItems = nil;
     for (NSIndexPath *ip in tableView.indexPathsForVisibleRows) {
         UITableViewCell *c = [tableView cellForRowAtIndexPath:ip];
-        c.alpha = 1.0;
+        setCellDimmed(c, NO);
     }
 }
 
