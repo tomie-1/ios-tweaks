@@ -124,6 +124,22 @@ static BOOL setBoolv(id o, NSString *s, BOOL v) {
     @try { ((void (*)(id, SEL, BOOL))objc_msgSend)(o, sel, v); return YES; } @catch (NSException *e) { return NO; }
 }
 
+static BOOL boolIvar(id obj, const char *name) {
+    if (!obj) return NO;
+    @try {
+        Class cls = object_getClass(obj);
+        while (cls) {
+            Ivar iv = class_getInstanceVariable(cls, name);
+            if (iv) {
+                ptrdiff_t off = ivar_getOffset(iv);
+                return *(BOOL *)((char *)(__bridge void *)obj + off);
+            }
+            cls = class_getSuperclass(cls);
+        }
+    } @catch (NSException *e) {}
+    return NO;
+}
+
 static BOOL ptrContains(NSArray *arr, id item) {
     for (id x in arr) if (x == item) return YES;
     return NO;
@@ -1336,6 +1352,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
     if (light) [self refreshPluginHostLight];
     else [self refreshHost];
+    [self reloadData];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
     [self showResult:(error ? [NSString stringWithFormat:@"部分操作失败：%@", error.localizedDescription] : @"已删除")
                  ok:(error == nil)];
@@ -1397,12 +1414,14 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 - (void)showResult:(NSString *)msg ok:(BOOL)ok {
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:(ok ? @"完成" : @"失败")
+    if (ok) {
+        [self showToast:msg];
+        return;
+    }
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"失败"
                                                                  message:msg
                                                           preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        if (ok) [self dismissViewControllerAnimated:YES completion:nil];
-    }]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
     [self presentViewController:ac animated:YES completion:nil];
 }
 @end
@@ -1438,6 +1457,12 @@ static char kLBModeKey;
     NSString *cn = NSStringFromClass([vc class]);
     LNBLMode mode = [self modeForClass:cn];
     if (!mode) return;
+    if ([cn isEqualToString:@"PolicyGroupSelectVC"]) {
+        BOOL embedded = boolIvar(vc, "_embeddedInPolicyPager");
+        LBL(@"节点页检查 embedded=%d allNodes=%d isAll=%d title=%@", embedded,
+            boolIvar(vc, "_allNodesModel"), boolIvar(vc, "_isAll"), vc.title ?: @"");
+        if (embedded) return;
+    }
     for (UIView *v in vc.view.subviews) if (v.tag == kLoonBatchButtonTag) return;
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     b.tag = kLoonBatchButtonTag;
