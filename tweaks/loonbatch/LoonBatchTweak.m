@@ -612,7 +612,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSUInteger total = all.count;
     LBL(@"批量页 mode=%ld config=%@ sections=%lu items=%lu", (long)self.mode,
         NSStringFromClass([config class]), (unsigned long)self.sections.count, (unsigned long)total);
-    [self.tableView reloadData];
+    CGPoint offset = self.tableView.contentOffset;
+    [UIView performWithoutAnimation:^{
+        [self.tableView reloadData];
+        [self.tableView layoutIfNeeded];
+        CGFloat minY = -self.tableView.adjustedContentInset.top;
+        CGFloat maxY = MAX(minY, self.tableView.contentSize.height - self.tableView.bounds.size.height
+                                   + self.tableView.adjustedContentInset.bottom);
+        offset.y = MIN(MAX(offset.y, minY), maxY);
+        self.tableView.contentOffset = offset;
+    }];
     [self updateButtons];
 }
 
@@ -715,6 +724,21 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     return host ?: self.view;
 }
 
+- (void)setSheetPansEnabled:(BOOL)enabled {
+    NSMutableArray *names = [NSMutableArray array];
+    UIView *v = self.navigationController.view;
+    while (v) {
+        for (UIGestureRecognizer *g in v.gestureRecognizers) {
+            if ([g isKindOfClass:[UIPanGestureRecognizer class]]) {
+                g.enabled = enabled;
+                [names addObject:NSStringFromClass([g class])];
+            }
+        }
+        v = v.superview;
+    }
+    LBL(@"sheet 拖动手势 %@ %@", enabled ? @"恢复" : @"暂停", [names componentsJoinedByString:@","]);
+}
+
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
     LBL(@"长按状态 %ld group=%lu", (long)g.state, (unsigned long)self.dragGroup.count);
     CGPoint vp = [g locationInView:[self dragOverlayHost]];
@@ -748,6 +772,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)beginCustomDrag {
     self.tableView.panGestureRecognizer.enabled = NO;
+    [self setSheetPansEnabled:NO];
     self.dragPreview = [self buildDragPreview];
     if (self.dragPreview) [[self dragOverlayHost] addSubview:self.dragPreview];
     for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
@@ -903,6 +928,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [self.dragScrollLink invalidate];
     self.dragScrollLink = nil;
     self.tableView.panGestureRecognizer.enabled = YES;
+    __weak LNBatchVC *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [ws setSheetPansEnabled:YES];
+    });
     [self.dragPreview removeFromSuperview];
     self.dragPreview = nil;
     [self.dropIndicator removeFromSuperview];
