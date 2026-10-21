@@ -839,6 +839,7 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
     self.picked = [NSMutableArray array];
 
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
+    self.table.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentAlways;
     self.table.dataSource = self;
     self.table.delegate = self;
     self.table.rowHeight = kTFAppRowHeight;
@@ -971,9 +972,17 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 
 - (void)dragScrollTick:(NSTimer *)t {
     if (!self.dragSelecting || self.dragScrollDelta == 0) return;
+    UIEdgeInsets insets = self.table.adjustedContentInset;
+    CGFloat minY = -insets.top;
+    CGFloat maxY = MAX(minY, self.table.contentSize.height - self.table.bounds.size.height + insets.bottom);
     CGFloat y = self.table.contentOffset.y + self.dragScrollDelta;
-    CGFloat maxY = MAX(0, self.table.contentSize.height - self.table.bounds.size.height);
-    y = MAX(0, MIN(maxY, y));
+    y = MAX(minY, MIN(maxY, y));
+    if (fabs(y - self.table.contentOffset.y) < 0.5) {
+        [self.dragScrollTimer invalidate];
+        self.dragScrollTimer = nil;
+        self.dragScrollDelta = 0;
+        return;
+    }
     self.table.contentOffset = CGPointMake(self.table.contentOffset.x, y);
     NSIndexPath *target = [self dragTargetForWindowPoint:self.lastDragWindowPoint];
     if (target && ![target isEqual:self.dragTarget]) {
@@ -985,9 +994,12 @@ static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
 - (void)updateDragAutoScroll:(CGPoint)windowPoint {
     self.lastDragWindowPoint = windowPoint;
     CGPoint inTable = [self.table convertPoint:windowPoint fromView:nil];
-    CGFloat h = self.table.bounds.size.height, edge = 100, step = 22;
-    if (inTable.y < self.table.contentOffset.y + edge) self.dragScrollDelta = -step;
-    else if (inTable.y > self.table.contentOffset.y + h - edge) self.dragScrollDelta = step;
+    UIEdgeInsets insets = self.table.adjustedContentInset;
+    CGFloat top = self.table.contentOffset.y + insets.top;
+    CGFloat bottom = self.table.contentOffset.y + self.table.bounds.size.height - insets.bottom;
+    CGFloat edge = 100, step = 22;
+    if (inTable.y < top + edge) self.dragScrollDelta = -step;
+    else if (inTable.y > bottom - edge) self.dragScrollDelta = step;
     else self.dragScrollDelta = 0;
     if (self.dragScrollDelta != 0) {
         if (!self.dragScrollTimer) {
