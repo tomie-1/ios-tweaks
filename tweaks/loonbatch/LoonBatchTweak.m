@@ -1809,6 +1809,7 @@ static LNFabDrag *gLNFabDrag;
 }
 
 - (void)placeButton:(UIButton *)b on:(UIViewController *)vc {
+    if (gLNFabDidDrag) return;
     UIView *root = vc.view;
     CGSize size = b.bounds.size;
     CGPoint fallback = CGPointMake(root.bounds.size.width - size.width / 2.0 - 16.0,
