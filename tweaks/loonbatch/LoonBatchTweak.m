@@ -1314,7 +1314,7 @@ __attribute__((constructor)) static void init(void) {
                 NSString *cn = NSStringFromClass([recv class]);
                 if (![seen containsObject:cn]) {
                     [seen addObject:cn];
-                    LBL(@"页面出现 %@ title=%@", cn, recv.navigationItem.title ?: @"");
+                    LBL(@"页面出现 %@ title=%@", cn, ((UIViewController *)recv).navigationItem.title ?: @"");
                 }
                 [[LNBLShared shared] installOn:recv];
             });
