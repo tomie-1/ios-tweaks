@@ -1457,12 +1457,7 @@ static char kLBModeKey;
     NSString *cn = NSStringFromClass([vc class]);
     LNBLMode mode = [self modeForClass:cn];
     if (!mode) return;
-    if ([cn isEqualToString:@"PolicyGroupSelectVC"]) {
-        BOOL embedded = boolIvar(vc, "_embeddedInPolicyPager");
-        LBL(@"节点页检查 embedded=%d allNodes=%d isAll=%d title=%@", embedded,
-            boolIvar(vc, "_allNodesModel"), boolIvar(vc, "_isAll"), vc.title ?: @"");
-        if (embedded) return;
-    }
+    if ([cn isEqualToString:@"PolicyGroupSelectVC"] && boolIvar(vc, "_embeddedInPolicyPager")) return;
     for (UIView *v in vc.view.subviews) if (v.tag == kLoonBatchButtonTag) return;
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
     b.tag = kLoonBatchButtonTag;
