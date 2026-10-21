@@ -281,7 +281,15 @@ static NSString *pluginTitle(id p) {
 }
 
 static NSString *pluginSubtitle(id p) {
-    return @"";
+    id o = pluginObject(p);
+    NSString *url = strv(o, @"remoteUrl");
+    NSString *tag = strv(o, @"tag");
+    if (tag.length && !looksLikeHash(tag)) {
+        NSString *name = pluginNativeName(url);
+        if (name.length && ![name isEqualToString:@"local"] && ![name isEqualToString:tag]) return name;
+        return @"";
+    }
+    return url ?: @"";
 }
 
 static NSString *ruleTitle(id r) {
@@ -487,6 +495,8 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, assign) NSInteger dragSection;
 @property (nonatomic, assign) NSInteger dragInsertRow;
 @property (nonatomic, assign) CGPoint dragViewPoint;
+@property (nonatomic, assign) CGPoint dragStartViewPoint;
+@property (nonatomic, assign) BOOL dragMoved;
 @property (nonatomic, strong) UIView *dragPreview;
 @property (nonatomic, strong) UIView *dropIndicator;
 @property (nonatomic, strong) CADisplayLink *dragScrollLink;
@@ -798,9 +808,14 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         self.dragSection = ip.section;
         self.dragInsertRow = ip.row;
         self.dragViewPoint = vp;
+        self.dragStartViewPoint = vp;
+        self.dragMoved = NO;
         [self beginCustomDrag];
     } else if (g.state == UIGestureRecognizerStateChanged) {
         self.dragViewPoint = vp;
+        CGFloat dx = vp.x - self.dragStartViewPoint.x;
+        CGFloat dy = vp.y - self.dragStartViewPoint.y;
+        if (!self.dragMoved && hypot(dx, dy) > 8) self.dragMoved = YES;
         [self updateCustomDrag];
     } else if (g.state == UIGestureRecognizerStateEnded) {
         [self endCustomDrag:YES];
@@ -901,12 +916,14 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         CGFloat y = MAX(vp.y - 24, top);
         self.dragPreview.center = CGPointMake(x, y);
     }
-    CGPoint tp = [host convertPoint:vp toView:self.tableView];
-    NSInteger row = [self insertionRowForTablePoint:tp];
-    if (row != self.dragInsertRow) {
-        self.dragInsertRow = row;
-        UISelectionFeedbackGenerator *sf = [[UISelectionFeedbackGenerator alloc] init];
-        [sf selectionChanged];
+    if (self.dragMoved) {
+        CGPoint tp = [host convertPoint:vp toView:self.tableView];
+        NSInteger row = [self insertionRowForTablePoint:tp];
+        if (row != self.dragInsertRow) {
+            self.dragInsertRow = row;
+            UISelectionFeedbackGenerator *sf = [[UISelectionFeedbackGenerator alloc] init];
+            [sf selectionChanged];
+        }
     }
     [self updateDropIndicator];
 }
@@ -930,7 +947,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 
 - (void)updateDropIndicator {
     NSArray *items = [self itemsForSection:self.dragSection];
-    if (!items.count || !self.dropIndicator) {
+    if (!self.dragMoved || !items.count || !self.dropIndicator) {
         self.dropIndicator.hidden = YES;
         return;
     }
@@ -984,6 +1001,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     for (NSIndexPath *ip in self.tableView.indexPathsForVisibleRows) {
         setCellDimmed([self.tableView cellForRowAtIndexPath:ip], NO);
     }
+    self.dragMoved = NO;
     NSArray *group = self.dragGroup;
     NSInteger section = self.dragSection;
     NSInteger insertRow = self.dragInsertRow;
