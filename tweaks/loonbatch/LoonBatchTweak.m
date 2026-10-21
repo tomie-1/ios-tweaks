@@ -1137,6 +1137,18 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } @catch (NSException *e) { LBL(@"轻量刷新异常 %@", e); }
 }
 
+- (void)refreshPluginHostLight {
+    UIViewController *vc = self.host;
+    if (!vc) return;
+    LNDCConfigModel *config = configForHost(vc);
+    @try {
+        if ([vc respondsToSelector:NSSelectorFromString(@"setPlugins:")]) {
+            [vc setValue:(config.plugins ?: @[]) forKey:@"plugins"];
+        }
+    } @catch (NSException *e) { LBL(@"插件轻量刷新异常 %@", e); }
+    [self reloadHostListsOnly];
+}
+
 - (void)cancel { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 - (void)deleteTapped {
@@ -1221,7 +1233,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         error = [NSError errorWithDomain:@"LoonBatch" code:1 userInfo:@{NSLocalizedDescriptionKey: e.reason ?: e.name}];
         LBL(@"删除异常 %@", e);
     }
-    if (light) [self reloadHostListsOnly];
+    if (light) [self refreshPluginHostLight];
     else [self refreshHost];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
     [self showResult:(error ? [NSString stringWithFormat:@"部分操作失败：%@", error.localizedDescription] : @"已删除")
