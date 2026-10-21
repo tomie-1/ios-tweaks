@@ -509,14 +509,23 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
 @property (nonatomic, strong) UILabel *badgeLabel;
 @end
 
+static const CGFloat kTFAppRowHeight = 66.0;
+static const CGFloat kTFAppIconSide = 48.0;
+static const CGFloat kTFAppIconRadius = 11.0;
+static const CGFloat kTFAppTextX = 76.0;
+static const CGFloat kTFAppBadgeW = 48.0;
+static const CGFloat kTFAppBadgeH = 18.0;
+static const CGFloat kTFAppBadgeRight = 54.0;
+static const CGFloat kTFAppTextLimit = kTFAppBadgeRight + kTFAppBadgeW + 8.0;
+
 @implementation TFAppCell
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid {
     self = [super initWithStyle:UITableViewCellStyleDefault reuseIdentifier:rid];
     if (!self) return nil;
-    CGFloat h = 76;
-    _iconBox = [[UIView alloc] initWithFrame:CGRectMake(16, (h - 60) / 2, 60, 60)];
-    _iconBox.layer.cornerRadius = 11;
+    _iconBox = [[UIView alloc] initWithFrame:CGRectMake(16, (kTFAppRowHeight - kTFAppIconSide) / 2,
+                                                        kTFAppIconSide, kTFAppIconSide)];
+    _iconBox.layer.cornerRadius = kTFAppIconRadius;
     _iconBox.layer.borderWidth = 0.5;
     _iconBox.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.10].CGColor;
     _iconBox.backgroundColor = [UIColor colorWithWhite:0 alpha:0.04];
@@ -543,23 +552,27 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     _iconOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [_iconBox addSubview:_iconOverlay];
 
-    _nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(88, 17, self.contentView.bounds.size.width - 152, 21)];
-    _nameLabel.font = [UIFont systemFontOfSize:17];
+    _nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(kTFAppTextX, 14,
+                                                           self.contentView.bounds.size.width - kTFAppTextLimit - kTFAppTextX, 20)];
+    _nameLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     _nameLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.contentView addSubview:_nameLabel];
 
-    _subLabel = [[UILabel alloc] initWithFrame:CGRectMake(88, 38, self.contentView.bounds.size.width - 152, 17)];
-    _subLabel.font = [UIFont systemFontOfSize:13];
+    _subLabel = [[UILabel alloc] initWithFrame:CGRectMake(kTFAppTextX, 35,
+                                                          self.contentView.bounds.size.width - kTFAppTextLimit - kTFAppTextX, 15)];
+    _subLabel.font = [UIFont systemFontOfSize:12];
     _subLabel.textColor = UIColor.secondaryLabelColor;
     _subLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.contentView addSubview:_subLabel];
 
-    _badgeLabel = [[UILabel alloc] initWithFrame:CGRectMake(self.contentView.bounds.size.width - 116, 25, 56, 20)];
-    _badgeLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    _badgeLabel = [[UILabel alloc] initWithFrame:CGRectMake(self.contentView.bounds.size.width - kTFAppBadgeRight - kTFAppBadgeW,
+                                                           (kTFAppRowHeight - kTFAppBadgeH) / 2,
+                                                           kTFAppBadgeW, kTFAppBadgeH)];
+    _badgeLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold];
     _badgeLabel.textColor = [UIColor colorWithRed:0.13 green:0.52 blue:0.24 alpha:1.0];
     _badgeLabel.backgroundColor = [UIColor colorWithRed:0.13 green:0.52 blue:0.24 alpha:0.12];
     _badgeLabel.textAlignment = NSTextAlignmentCenter;
-    _badgeLabel.layer.cornerRadius = 10;
+    _badgeLabel.layer.cornerRadius = kTFAppBadgeH / 2;
     _badgeLabel.clipsToBounds = YES;
     _badgeLabel.text = @"已安装";
     _badgeLabel.hidden = YES;
@@ -579,11 +592,13 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     self.iconBox.frame = box;
     self.iconView.frame = self.iconBox.bounds;
     self.iconOverlay.frame = self.iconBox.bounds;
-    CGFloat labelX = (box.size.width > 0) ? CGRectGetMaxX(box) + 12 : 88;
-    CGFloat limit = self.bounds.size.width - 116 - 8;         // 给“已安装”气泡留位
-    self.nameLabel.frame = CGRectMake(labelX, 17, MAX(60, limit - labelX), 21);
-    self.subLabel.frame = CGRectMake(labelX, 38, MAX(60, limit - labelX), 17);
-    self.badgeLabel.frame = CGRectMake(self.bounds.size.width - 116, 25, 56, 20);
+    CGFloat labelX = (box.size.width > 0) ? CGRectGetMaxX(box) + 12 : kTFAppTextX;
+    CGFloat limit = w - kTFAppTextLimit;                      // 给“已安装”胶囊和勾选留位
+    self.nameLabel.frame = CGRectMake(labelX, 14, MAX(60, limit - labelX), 20);
+    self.subLabel.frame = CGRectMake(labelX, 35, MAX(60, limit - labelX), 15);
+    self.badgeLabel.frame = CGRectMake(w - kTFAppBadgeRight - kTFAppBadgeW,
+                                       floor((h - kTFAppBadgeH) / 2.0),
+                                       kTFAppBadgeW, kTFAppBadgeH);
 }
 
 - (void)prepareForReuse {
@@ -592,17 +607,20 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     self.iconOverlay.hidden = YES;
     self.iconOverlay.image = nil;
     self.iconView.alpha = 1;
-    self.iconBox.frame = CGRectMake(16, (76 - 60) / 2.0, 60, 60);
-    self.iconBox.layer.cornerRadius = 11;
+    self.iconBox.frame = CGRectMake(16, (kTFAppRowHeight - kTFAppIconSide) / 2.0,
+                                    kTFAppIconSide, kTFAppIconSide);
+    self.iconBox.layer.cornerRadius = kTFAppIconRadius;
     self.iconBox.layer.borderWidth = 0.5;
     self.iconBox.layer.borderColor = [UIColor colorWithWhite:0 alpha:0.10].CGColor;
     self.iconBox.backgroundColor = [UIColor colorWithWhite:0 alpha:0.04];
     self.iconView.frame = self.iconBox.bounds;
     self.iconOverlay.frame = self.iconBox.bounds;
     CGFloat w = self.contentView.bounds.size.width;
-    self.nameLabel.frame = CGRectMake(88, 17, w - 198, 21);
-    self.subLabel.frame = CGRectMake(88, 38, w - 198, 17);
-    self.badgeLabel.frame = CGRectMake(self.bounds.size.width - 116, 25, 56, 20);
+    self.nameLabel.frame = CGRectMake(kTFAppTextX, 14, w - kTFAppTextLimit - kTFAppTextX, 20);
+    self.subLabel.frame = CGRectMake(kTFAppTextX, 35, w - kTFAppTextLimit - kTFAppTextX, 15);
+    self.badgeLabel.frame = CGRectMake(w - kTFAppBadgeRight - kTFAppBadgeW,
+                                       (kTFAppRowHeight - kTFAppBadgeH) / 2.0,
+                                       kTFAppBadgeW, kTFAppBadgeH);
 }
 
 - (void)pollNativeIcon:(int)n {
@@ -624,8 +642,8 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
             if (key.length) img = gNativeIcons[key];
         }
         if (img) {
-            // 统一正方形：60×60、iOS 图标圆角比例，图片填满方块居中裁切
-            CGFloat side = 60.0, radius = 13.5;
+            // 统一正方形：48×48、iOS 图标圆角比例，图片填满方块居中裁切
+            CGFloat side = kTFAppIconSide, radius = kTFAppIconRadius;
             CGRect box = self.iconBox.frame;
             box.size = CGSizeMake(side, side);
             box.origin.x = 16;
@@ -647,7 +665,7 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
             }
             CGFloat labelX = CGRectGetMaxX(box) + 12;
             CGRect nf = self.nameLabel.frame, sf = self.subLabel.frame;
-            CGFloat limit2 = self.bounds.size.width - 116 - 8;
+            CGFloat limit2 = self.bounds.size.width - kTFAppTextLimit;
             nf.origin.x = labelX; nf.size.width = MAX(60, limit2 - labelX);
             sf.origin.x = labelX; sf.size.width = nf.size.width;
             self.nameLabel.frame = nf; self.subLabel.frame = sf;
@@ -788,7 +806,7 @@ static void tftoolPrefetchIcons(NSArray *apps, NSArray *appIDs, void (^done)(voi
     self.table = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
-    self.table.rowHeight = 76;
+    self.table.rowHeight = kTFAppRowHeight;
     self.table.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.table];
 

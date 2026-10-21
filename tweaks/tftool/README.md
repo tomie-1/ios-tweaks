@@ -13,5 +13,6 @@ TestFlight 批量「停止测试」。包名 `com.tomie.tftool`，注入 `com.ap
 ## 说明
 
 - 使用 TestFlight 内部对象 `OASAppList`、`OASAppContext`、`OASInviteManager`，不直接拼服务器请求。
+- 列表使用 66pt 紧凑行、48pt 方形图标，名称与状态胶囊分层显示。
 - 已在 TestFlight 3.5.2 上验证。
 - 调试日志：App 沙盒 `Documents/tftool.log`。
