@@ -636,6 +636,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 }
 
 
+- (UIView *)dragOverlayHost {
+    UIView *host = self.navigationController.view ?: self.view.window;
+    return host ?: self.view;
+}
+
 - (void)handleLongPress:(UILongPressGestureRecognizer *)g {
     LBL(@"长按状态 %ld group=%lu", (long)g.state, (unsigned long)self.dragGroup.count);
     CGPoint vp = [g locationInView:[self dragOverlayHost]];
