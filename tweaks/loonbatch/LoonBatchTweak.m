@@ -1275,6 +1275,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             for (id x in picked) {
                 id p = pluginObject(x);
                 NSString *url = strv(p, @"remoteUrl") ?: strv(x, @"remoteUrl");
+                if (!url.length) {
+                    NSString *line = msg0(p, @"generatePlayload");
+                    NSString *first = [[line componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] firstObject];
+                    url = trimmed([[first ?: @"" componentsSeparatedByString:@","] firstObject]);
+                }
                 if (url.length) [removedPluginURLs addObject:url];
                 if (p) [mgr deletePluginRules:p];
             }
@@ -1318,7 +1323,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (light && pluginSurvivors) {
             config.plugins = pluginSurvivors;
             dropDeletedPluginCache(config, removedPluginURLs);
-            repairPluginSection(configFilePath(config), removedPluginURLs);
+            NSString *path = configFilePath(config);
+            repairPluginSection(path, removedPluginURLs);
+            // 防止原生异步落盘把旧内容写回来。
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ repairPluginSection(path, removedPluginURLs); });
         }
         if (!light) msgv(dataManager(), @"postChangeNoti");
     } @catch (NSException *e) {
