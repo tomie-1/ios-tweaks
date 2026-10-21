@@ -1161,12 +1161,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)refreshPluginHostLight {
     UIViewController *vc = self.host;
     if (!vc) return;
-    LNDCConfigModel *config = configForHost(vc);
-    @try {
-        if ([vc respondsToSelector:NSSelectorFromString(@"setPlugins:")]) {
-            [vc setValue:(config.plugins ?: @[]) forKey:@"plugins"];
-        }
-    } @catch (NSException *e) { LBL(@"插件轻量刷新异常 %@", e); }
+    if ([vc respondsToSelector:NSSelectorFromString(@"configHasChanged")]) msgv(vc, @"configHasChanged");
     [self reloadHostListsOnly];
 }
 
