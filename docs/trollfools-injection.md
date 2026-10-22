@@ -43,6 +43,26 @@ MtProtoKitFramework
 
 TrollFools 默认优先找 App 主程序实际链接、且未加密的 framework 作为注入点。主程序被 FairPlay 加密不一定无法注入；只要有一个可用的明文 framework，就能做弱引用注入。没有可用 framework、只能改加密主程序时，才需要先安装砸壳 IPA。
 
+## 架构、依赖和“列表里能看到”
+
+TrollFools 能把插件写进加载项，但不会让不兼容的 dylib 自动变得可加载。需要注意：
+
+- 目标 App 实际运行的 Mach-O 架构必须与 dylib 中至少一个切片兼容。
+- FAT/Universal dylib 可以包含 `arm64`、`arm64e` 等切片；thin dylib 只有单一架构。
+- 在 arm64e 设备上，App 可能是 arm64 进程，也可能是 arm64e 进程；`arm64e` 插件不能加载进 arm64 宿主。`armv7`/`armv7s` 切片在 iOS 15 上也不可用。
+- `ct_bypass` 可能把 FAT 文件收敛成单一“最佳切片”。本机在 Notion 上出现过宿主被收敛为 arm64、插件却被收敛为 arm64e 的情况；后来从原插件中提取 arm64 切片重新签名，主程序和插件才一致。
+- 插件还需要满足依赖，例如 `CydiaSubstrate`、Swift 运行库、插件自己的 framework；依赖缺失时加载可能失败。
+- 弱加载项适合避免插件失败导致 App 启动崩溃，但失败也可能是静默的：dylib 文件存在于 `Frameworks/` 时，TrollFools 列表仍会显示它，不代表运行期真的加载成功。
+
+检查架构：
+
+```sh
+file "$HOST"
+file "$PLUGIN"
+```
+
+若两边不一致，先从 FAT dylib/宿主中提取设备实际使用的切片，再签名和注入。不要只凭 TrollFools 列表中有文件名判断功能已生效。
+
 ## 注入步骤
 
 1. 先终止目标 App，不能一边运行一边改 Mach-O。
@@ -65,7 +85,7 @@ TrollFools 默认优先找 App 主程序实际链接、且未加密的 framework
    ```
 
 10. 再次签名宿主并执行 CoreTrust bypass，随后把注入文件设为 `33:33`、目录 `0755`、可执行文件 `0755`。
-11. 核对宿主里的 `LC_LOAD_WEAK_DYLIB`、插件里的 Substrate 路径、`cryptid=0`，再冷启动 App 验证功能。
+11. 核对宿主和插件的架构一致、宿主里的 `LC_LOAD_WEAK_DYLIB`、插件里的 Substrate 路径、`cryptid=0`，再冷启动 App 验证功能。
 
 `insert_dylib` 参考参数：
 
