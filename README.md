@@ -15,6 +15,8 @@
 
 功能、入口和已知问题见各插件目录下的 `README.md`。
 
+工具与本地操作记录见 [TrollFools 注入与退出](docs/trollfools-injection.md)。
+
 ## 构建
 
 推送到 `main` 或手动触发 `workflow_dispatch`，Actions 会自动构建；打 tag 会额外发布 Release。
