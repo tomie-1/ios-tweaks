@@ -251,6 +251,17 @@ static id pluginObject(id p) {
     return o ?: p;
 }
 
+static NSString *pluginURLForObject(id p) {
+    id o = pluginObject(p);
+    NSString *u = strv(o, @"remoteUrl") ?: strv(p, @"remoteUrl");
+    if (!u.length) {
+        NSString *line = msg0(o, @"generatePlayload");
+        NSString *first = [[line componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] firstObject];
+        u = trimmed([[first ?: @"" componentsSeparatedByString:@","] firstObject]);
+    }
+    return u;
+}
+
 static BOOL pluginItemsEqual(id a, id b) {
     if (a == b) return YES;
     id pa = pluginObject(a), pb = pluginObject(b);
@@ -496,6 +507,72 @@ static BOOL repairPluginSection(NSString *path, NSSet *removedURLs, NSInteger *c
         LBL(@"修复插件配置失败 %@", err);
         return NO;
     }
+    return YES;
+}
+
+static NSUInteger gPluginOrderGeneration;
+
+// saveConfigPlayload 不保证按内存数组写回插件顺序；按 config.plugins 重排 [Plugin] 段。
+static BOOL reorderPluginSection(NSString *path, NSArray *plugins) {
+    if (!path.length) return NO;
+    NSError *err = nil;
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
+    if (!text) { LBL(@"读取配置失败 %@", err); return NO; }
+    NSMutableArray *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
+    NSInteger start = NSNotFound, end = NSNotFound;
+    for (NSInteger i = 0; i < (NSInteger)lines.count; i++) {
+        NSString *t = trimmed(lines[(NSUInteger)i]);
+        if (!(t.length >= 2 && [t hasPrefix:@"["] && [t hasSuffix:@"]"])) continue;
+        if ([t caseInsensitiveCompare:@"[Plugin]"] == NSOrderedSame) start = i + 1;
+        else if (start != NSNotFound) { end = i; break; }
+    }
+    if (start == NSNotFound) return NO;
+    if (end == NSNotFound) end = (NSInteger)lines.count;
+    NSMutableDictionary *byURL = [NSMutableDictionary dictionary];
+    NSMutableArray *other = [NSMutableArray array];
+    for (NSInteger i = start; i < end; i++) {
+        NSString *line = lines[(NSUInteger)i];
+        NSString *t = trimmed(line);
+        if (!t.length || [t hasPrefix:@"#"]) { [other addObject:line]; continue; }
+        NSString *url = trimmed([[t componentsSeparatedByString:@","] firstObject]);
+        if (!url.length) { [other addObject:line]; continue; }
+        NSMutableArray *bucket = byURL[url];
+        if (!bucket) { bucket = [NSMutableArray array]; byURL[url] = bucket; }
+        [bucket addObject:line];
+    }
+    NSMutableArray *body = [NSMutableArray array];
+    NSMutableSet *orderedURLs = [NSMutableSet set];
+    for (id p in plugins ?: @[]) {
+        NSString *url = pluginURLForObject(p);
+        NSMutableArray *bucket = url.length ? byURL[url] : nil;
+        NSString *line = bucket.count ? bucket[0] : nil;
+        if (line) [bucket removeObjectAtIndex:0];
+        if (!line.length) {
+            NSString *generated = msg0(pluginObject(p), @"generatePlayload");
+            NSString *first = [[generated componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] firstObject];
+            line = trimmed(first);
+        }
+        if (!line.length && url.length)
+            line = [NSString stringWithFormat:@"%@, enabled=%@", url, itemEnabled(p) ? @"true" : @"false"];
+        if (line.length) [body addObject:line];
+        if (url.length) [orderedURLs addObject:url];
+    }
+    for (NSString *url in byURL) {
+        if ([orderedURLs containsObject:url]) continue;
+        [body addObjectsFromArray:byURL[url]];
+    }
+    [body addObjectsFromArray:other];
+    NSArray *rebuilt = [lines subarrayWithRange:NSMakeRange(0, (NSUInteger)start)];
+    NSMutableArray *out = [rebuilt mutableCopy];
+    [out addObjectsFromArray:body];
+    [out addObjectsFromArray:[lines subarrayWithRange:NSMakeRange((NSUInteger)end, lines.count - (NSUInteger)end)]];
+    NSString *fixed = [out componentsJoinedByString:@"\n"];
+    if ([fixed isEqualToString:text]) return YES;
+    if (![fixed writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
+        LBL(@"写入插件顺序失败 %@", err);
+        return NO;
+    }
+    LBL(@"已保存插件顺序 %lu 项", (unsigned long)[plugins count]);
     return YES;
 }
 
@@ -1490,6 +1567,16 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } @catch (NSException *e) {
         LBL(@"保存异常 %@", e);
     }
+    if (self.mode == LNBLModePlugins) {
+        NSString *path = configFilePath(config);
+        NSArray *ordered = [config.plugins copy];
+        NSUInteger gen = ++gPluginOrderGeneration;
+        reorderPluginSection(path, ordered);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            if (gen == gPluginOrderGeneration) reorderPluginSection(path, ordered);
+        });
+    }
     UIViewController *vc = self.host;
     if (vc) {
         @try {
@@ -1575,12 +1662,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if (self.mode == LNBLModePlugins) {
             for (id x in picked) {
                 id p = pluginObject(x);
-                NSString *url = strv(p, @"remoteUrl") ?: strv(x, @"remoteUrl");
-                if (!url.length) {
-                    NSString *line = msg0(p, @"generatePlayload");
-                    NSString *first = [[line componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] firstObject];
-                    url = trimmed([[first ?: @"" componentsSeparatedByString:@","] firstObject]);
-                }
+                NSString *url = pluginURLForObject(x);
                 if (url.length) [removedPluginURLs addObject:url];
                 if (p) [mgr deletePluginRules:p];
             }
