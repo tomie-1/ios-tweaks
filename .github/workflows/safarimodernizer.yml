@@ -1,0 +1,44 @@
+name: safarimodernizer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [sm-ci]
+    paths:
+      - "tweaks/safarimodernizer/**"
+      - ".github/workflows/safarimodernizer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install tools
+        run: brew install dpkg ldid
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
+          echo "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
+
+      - name: Build packages
+        run: |
+          set -euo pipefail
+          cd tweaks/safarimodernizer
+          ./build.sh
+          ls -l tweak/packages
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safarimodernizer-${{ github.sha }}
+          path: tweaks/safarimodernizer/tweak/packages/*.deb
+          if-no-files-found: error
