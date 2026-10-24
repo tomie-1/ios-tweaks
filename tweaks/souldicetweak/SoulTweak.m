@@ -3008,21 +3008,32 @@ static void SoulMsgTimePlace(id cell, double height, double width) {
 static void SoulApplyMsgTime(id cell, id layout) {
     UILabel *label = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
     if (!SoulDef(kFxMsgTime)) { label.hidden = YES; return; }
+
+    id candidates[3] = {layout, nil, nil};
+    if (layout && [layout respondsToSelector:NSSelectorFromString(@"message")]) {
+        candidates[1] = ((id (*)(id, SEL))objc_msgSend)(layout, NSSelectorFromString(@"message"));
+    }
+    if (layout && [layout respondsToSelector:NSSelectorFromString(@"item")]) {
+        candidates[2] = ((id (*)(id, SEL))objc_msgSend)(layout, NSSelectorFromString(@"item"));
+    }
     id msg = nil;
-    SEL msgSel = NSSelectorFromString(@"message");
-    if (layout && [layout respondsToSelector:msgSel]) {
-        msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
+    long long ms = 0;
+    for (int i = 0; i < 3; i++) {
+        if (!candidates[i]) continue;
+        long long t = SoulMsgTimestamp(candidates[i]);
+        if (t > 0) { msg = candidates[i]; ms = t; break; }
     }
-    if (!msg && layout && [layout respondsToSelector:NSSelectorFromString(@"item")]) {
-        msg = ((id (*)(id, SEL))objc_msgSend)(layout, NSSelectorFromString(@"item"));
+    if (!msg) {
+        static int nilLogged = 0;
+        if (nilLogged < 3) {
+            nilLogged++;
+            SoulLog(@"msg-time: no timestamp layout=%@ message=%@",
+                    NSStringFromClass([layout class]),
+                    candidates[1] ? NSStringFromClass([candidates[1] class]) : @"nil");
+        }
+        label.hidden = YES;
+        return;
     }
-    static int nilLogged = 0;
-    if (!msg && nilLogged < 4) {
-        nilLogged++;
-        SoulLog(@"msg-time: no message layout=%@", NSStringFromClass([layout class]));
-    }
-    long long ms = msg ? SoulMsgTimestamp(msg) : 0;
-    if (ms <= 0) { label.hidden = YES; return; }
     if (!label) {
         label = [[UILabel alloc] initWithFrame:CGRectZero];
         label.font = [UIFont systemFontOfSize:9.5];
@@ -3044,12 +3055,14 @@ static void SoulApplyMsgTime(id cell, id layout) {
     if (layout && [layout respondsToSelector:hSel]) {
         h = ((double (*)(id, SEL))objc_msgSend)(layout, hSel);
     }
+    if (h < 20) h = ((UIView *)cell).bounds.size.height;
+    if (h < 20) h = 60;
     SoulMsgTimePlace(cell, h, ((UIView *)cell).bounds.size.width);
-    static int logged = 0;
-    if (logged < 3) {
-        logged++;
-        SoulLog(@"msg-time: label %@ row=%.0f frame=%@", label.text, h,
-                NSStringFromCGRect(label.frame));
+    static int shownLogged = 0;
+    if (shownLogged < 3) {
+        shownLogged++;
+        SoulLog(@"msg-time: label %@ cls=%@ frame=%@", label.text,
+                NSStringFromClass([msg class]), NSStringFromCGRect(label.frame));
     }
 }
 
@@ -3353,7 +3366,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v24. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v25. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
