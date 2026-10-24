@@ -3381,7 +3381,10 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
 static double (*gOrigMsgCellHeight)(id, SEL);
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     double h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
-    return h + ((SoulDef(kFxMsgTime) || SoulDef(kFxAntiRecall)) ? kSoulMsgTimeReserve : 0.0);
+    if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return h;
+    /* 大卡片的内容视图常比布局高度多伸出几 pt，底部 18pt 放不下两行信息。 */
+    CGFloat reserve = h >= 110.0 ? 32.0 : kSoulMsgTimeReserve;
+    return h + reserve;
 }
 
 static BOOL SoulInstallMsgTimeHooks(void) {
@@ -3621,7 +3624,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v30. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v31. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
