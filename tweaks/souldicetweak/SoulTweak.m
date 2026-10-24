@@ -2074,6 +2074,29 @@ static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
 static IMP gOrigShareCardSetter = NULL;
+
+/* 分享卡片的容器会跟随 cell 行高自动拉伸。每次真正排时间前都把它扣回
+   原始卡片高度，多出来的 18pt 只留给时间行。 */
+static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
+    if (!cellView || !content) return;
+    NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
+    if ([cn rangeOfString:@"shareusercard"].location == NSNotFound) return;
+    if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
+    double originalH = SoulOriginalLayoutHeight(SoulCellLayout(cellView));
+    if (originalH < 20.0) originalH = cellView.bounds.size.height - kSoulMsgTimeReserve;
+    CGFloat targetH = MAX(20.0, (CGFloat)originalH - 14.0);
+    if (targetH <= 20.0 || content.bounds.size.height <= targetH + 1.0) return;
+    content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    CGRect cf = content.frame;
+    cf.size.height = targetH;
+    content.frame = cf;
+    static int shrinkLog = 0;
+    if (shrinkLog < 6) {
+        shrinkLog++;
+        SoulLog(@"msg-time: share-card size cellH=%.1f original=%.1f card=%.1f target=%.1f",
+                cellView.bounds.size.height, originalH, content.bounds.size.height, targetH);
+    }
+}
 static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
     if (gOrigShareCardSetter) ((void (*)(id, SEL, id))gOrigShareCardSetter)(self, _cmd, cardView);
     if (cardView && [self isKindOfClass:[UIView class]]) {
@@ -2091,27 +2114,9 @@ static void SoulHookShareCardLayout(id self, SEL _cmd) {
         IMP imp = m ? method_getImplementation(m) : NULL;
         if (imp) ((void (*)(id, SEL))imp)(self, _cmd);
     }
-    if (SoulDef(kFxMsgTime) || SoulDef(kFxAntiRecall)) {
-        UIView *cellView = [self isKindOfClass:[UIView class]] ? (UIView *)self : nil;
-        UIView *content = cellView ? SoulMessageContentView(cellView) : nil;
-        if (cellView && content) {
-            double originalH = SoulOriginalLayoutHeight(SoulCellLayout(cellView));
-            if (originalH < 20.0) originalH = cellView.bounds.size.height - kSoulMsgTimeReserve;
-            CGFloat targetH = MAX(20.0, (CGFloat)originalH - 14.0);
-            if (targetH > 20.0 && content.bounds.size.height > targetH + 1.0) {
-                content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-                CGRect cf = content.frame;
-                cf.size.height = targetH;
-                content.frame = cf;
-                static int shrinkLog = 0;
-                if (shrinkLog < 6) {
-                    shrinkLog++;
-                    SoulLog(@"msg-time: share-card size cellH=%.1f original=%.1f card=%.1f target=%.1f",
-                            cellView.bounds.size.height, originalH, content.bounds.size.height, targetH);
-                }
-            }
-        }
-    }
+    UIView *cellView = [self isKindOfClass:[UIView class]] ? (UIView *)self : nil;
+    UIView *content = cellView ? SoulMessageContentView(cellView) : nil;
+    SoulShrinkShareCardIfNeeded(cellView, content);
     SoulMsgTimeRelayout(self);
 }
 
@@ -3158,6 +3163,7 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     const CGFloat rowH = 12.0;
     const CGFloat gap = 7.0;
     UIView *content = SoulMessageContentView(view);
+    SoulShrinkShareCardIfNeeded(view, content);
     CGRect cr = CGRectZero;
     if (content) cr = [content convertRect:content.bounds toView:view];
     if (!SoulUsableContentRect(cr, view)) {
@@ -3651,7 +3657,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v33. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v34. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
