@@ -12,7 +12,7 @@ SOUL 6.17 助手。包名 `com.soulfx.souldicetweak`，注入 `Soul_New`。
 - 图片 / 视频 / 分享：阅后即焚解锁、无水印保存/分享、去除主页分享限制、解除图片/视频选择数量上限。
 - 限制与体验：去除送礼限制、去除礼仪分限制、关闭匹配背景音乐、跳过开屏广告、语音消息解锁装扮。
 - 消息时间：每条消息显示发送时间，格式可自定义（NSDateFormatter 格式，默认 `HH:mm`）。
-- 启动画面：可把开屏那张大 SOUL 标志换成自己的图片（放在 `Library/Preferences/SoulFX/splash.png`，也支持 `splash.jpg`，开关默认关闭）。
+- 启动画面：可跳过 App 自己的启动保持窗口直接进主界面；也可把开屏那张大 SOUL 标志换成自己的图片（`Library/Preferences/SoulFX/splash.png`，也支持 `splash.jpg`）。两项都默认关闭。
 - 调试：可单独打开请求日志落盘。
 
 ## 配置
@@ -23,6 +23,7 @@ SOUL 6.17 助手。包名 `com.soulfx.souldicetweak`，注入 `Soul_New`。
 - `soulfx.log`：调试日志（打开调试后才有）
 - `recall.plist`：防撤回角标记录
 - `skip.txt`：调试跳过分组（新增 `teen`、`msgtime`、`splashimg`）
+- 跳过开屏只抑制 `SOLaunchHoldingWindow` 的展示；系统启动图仍会显示到 App 第一帧，主界面未就绪时可能短暂白屏。
 
 ## 已知限制
 

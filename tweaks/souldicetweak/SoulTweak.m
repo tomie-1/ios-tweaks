@@ -45,6 +45,7 @@ static NSString * const kFxNoTeenPopup   = @"soulfx_no_teen_popup";
 static NSString * const kFxMsgTime       = @"soulfx_msg_time";
 static NSString * const kFxMsgTimeFmt    = @"soulfx_msg_time_format";
 static NSString * const kFxCustomSplash  = @"soulfx_custom_splash";
+static NSString * const kFxSkipSplash    = @"soulfx_skip_splash";
 
 #pragma mark - 插件独立目录（不写 App 自身配置）
 
@@ -295,7 +296,8 @@ static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
             [SoulFxRow switchRow:@"每条消息显示时间" key:kFxMsgTime def:NO],
             [SoulFxRow textRow:@"时间格式" key:kFxMsgTimeFmt placeholder:@"HH:mm"],
         ]),
-        SoulFxGroupMake(@"启动画面", @"替换开屏大 logo", @[
+        SoulFxGroupMake(@"启动画面", @"替换或跳过开屏", @[
+            [SoulFxRow switchRow:@"跳过开屏（直接进主界面）" key:kFxSkipSplash def:NO],
             [SoulFxRow switchRow:@"自定义开屏图（SoulFX/splash.png）" key:kFxCustomSplash def:NO],
         ]),
         SoulFxGroupMake(@"调试", @"请求与功能排查", @[
@@ -2511,11 +2513,21 @@ static void SoulApplyCustomSplash(id window) {
 static void (*gOrigHoldingInit)(id, SEL);
 static void SoulHookHoldingInit(id self, SEL _cmd) {
     if (gOrigHoldingInit) gOrigHoldingInit(self, _cmd);
+    if (SoulDef(kFxSkipSplash)) {
+        ((UIWindow *)self).hidden = YES;
+        SoulLog(@"skip-splash: holding window hidden at init");
+        return;
+    }
     SoulApplyCustomSplash(self);
 }
 
 static void (*gOrigHoldingShow)(id, SEL);
 static void SoulHookHoldingShow(id self, SEL _cmd) {
+    if (SoulDef(kFxSkipSplash)) {
+        ((UIWindow *)self).hidden = YES;
+        SoulLog(@"skip-splash: smartShowWindow suppressed");
+        return;
+    }
     SoulApplyCustomSplash(self);
     if (gOrigHoldingShow) gOrigHoldingShow(self, _cmd);
 }
