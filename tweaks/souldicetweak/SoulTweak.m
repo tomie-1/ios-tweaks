@@ -3086,18 +3086,18 @@ static void SoulApplyMsgTime(id cell, id layout) {
     label.tag = mine ? 1 : 0;
     label.text = SoulMsgTimeText(ms);
     label.hidden = NO;
-    static int logged = 0;
-    if (logged < 3) {
-        logged++;
-        SoulLog(@"msg-time: label %@ row=%.0f width=%.0f", label.text, h,
-                ((UIView *)cell).bounds.size.width);
-    }
     double h = 0;
     SEL hSel = NSSelectorFromString(@"cellHeight");
     if (layout && [layout respondsToSelector:hSel]) {
         h = ((double (*)(id, SEL))objc_msgSend)(layout, hSel);
     }
     SoulMsgTimePlace(cell, h, ((UIView *)cell).bounds.size.width);
+    static int logged = 0;
+    if (logged < 3) {
+        logged++;
+        SoulLog(@"msg-time: label %@ row=%.0f frame=%@", label.text, h,
+                NSStringFromCGRect(label.frame));
+    }
 }
 
 /* 每个 cell 类一份 hook 函数、一份原实现槽：
