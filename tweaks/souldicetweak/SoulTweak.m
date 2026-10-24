@@ -1821,6 +1821,7 @@ static BOOL SoulRecallIsBlocked(id obj) {
 }
 
 static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
+static void SoulMsgTimeRelayout(id cell);
 
 /* 从 cell 上取布局对象（用于把角标贴到气泡下方） */
 static id SoulCellLayout(UIView *cell) {
@@ -1895,6 +1896,7 @@ static void SoulApplyRecallBadge(UIView *cell, id layout, BOOL blocked) {
                 cell.bounds.size.height, bubble ? NSStringFromCGRect([bubble convertRect:bubble.bounds toView:cell]) : @"nil", bx, by);
         l.frame = f;
     }
+    SoulMsgTimeRelayout(cell);
 }
 
 /* 立刻扫描当前可见 cell 贴角标（撤回到达时消息已在屏上） */
@@ -2969,6 +2971,12 @@ static long long SoulMsgTimestamp(id msg) {
         SoulLog(@"msg-time: no timestamp cls=%@ selectors=%@", NSStringFromClass([msg class]), have);
     }
     return ms;
+}
+
+static void SoulMsgTimeRelayout(id cell) {
+    UILabel *label = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
+    if (!label || label.hidden) return;
+    SoulMsgTimePlace(cell, ((UIView *)cell).bounds.size.height, ((UIView *)cell).bounds.size.width);
 }
 
 static void SoulMsgTimePlace(id cell, double height, double width) {
