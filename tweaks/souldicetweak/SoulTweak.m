@@ -44,6 +44,7 @@ static NSString * const kFxVoiceUnlock   = @"soulfx_voice_unlock";
 static NSString * const kFxNoTeenPopup   = @"soulfx_no_teen_popup";
 static NSString * const kFxMsgTime       = @"soulfx_msg_time";
 static NSString * const kFxMsgTimeFmt    = @"soulfx_msg_time_format";
+static NSString * const kFxCustomSplash  = @"soulfx_custom_splash";
 
 #pragma mark - 插件独立目录（不写 App 自身配置）
 
@@ -293,6 +294,9 @@ static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
         SoulFxGroupMake(@"消息时间", @"每条消息单独显示发送时间", @[
             [SoulFxRow switchRow:@"每条消息显示时间" key:kFxMsgTime def:NO],
             [SoulFxRow textRow:@"时间格式" key:kFxMsgTimeFmt placeholder:@"HH:mm"],
+        ]),
+        SoulFxGroupMake(@"启动画面", @"替换开屏大 logo", @[
+            [SoulFxRow switchRow:@"自定义开屏图（SoulFX/splash.png）" key:kFxCustomSplash def:NO],
         ]),
         SoulFxGroupMake(@"调试", @"请求与功能排查", @[
             [SoulFxRow switchRow:@"调试日志（请求日志 + 落盘）" key:kFxDebugLog def:NO],
@@ -2477,6 +2481,61 @@ static BOOL SoulInstallVoiceHooks(void) {
     return NO;
 }
 
+// —— K. 自定义开屏图（SOLaunchHoldingWindow 持有 launch_launchImage）——
+static UIImage *SoulCustomSplashImage(void) {
+    if (!SoulDef(kFxCustomSplash)) return nil;
+    NSArray<NSString *> *names = @[@"splash.png", @"splash.jpg", @"splash.jpeg"];
+    for (NSString *name in names) {
+        NSString *path = SoulFXPath(name);
+        if (![[NSFileManager defaultManager] fileExistsAtPath:path]) continue;
+        UIImage *img = [UIImage imageWithContentsOfFile:path];
+        if (img) return img;
+    }
+    return nil;
+}
+
+static void SoulApplyCustomSplash(id window) {
+    UIImage *img = SoulCustomSplashImage();
+    if (!img || !window) return;
+    SEL sel = NSSelectorFromString(@"launchImageView");
+    if (![window respondsToSelector:sel]) return;
+    id v = ((id (*)(id, SEL))objc_msgSend)(window, sel);
+    if (![v isKindOfClass:[UIImageView class]]) return;
+    UIImageView *iv = (UIImageView *)v;
+    iv.image = img;
+    iv.contentMode = UIViewContentModeScaleAspectFill;
+    iv.clipsToBounds = YES;
+    SoulLog(@"custom-splash: applied size=%@", NSStringFromCGSize(img.size));
+}
+
+static void (*gOrigHoldingInit)(id, SEL);
+static void SoulHookHoldingInit(id self, SEL _cmd) {
+    if (gOrigHoldingInit) gOrigHoldingInit(self, _cmd);
+    SoulApplyCustomSplash(self);
+}
+
+static void (*gOrigHoldingShow)(id, SEL);
+static void SoulHookHoldingShow(id self, SEL _cmd) {
+    SoulApplyCustomSplash(self);
+    if (gOrigHoldingShow) gOrigHoldingShow(self, _cmd);
+}
+
+static BOOL SoulInstallCustomSplashHooks(void) {
+    static BOOL done = NO;
+    if (done) return YES;
+    Class cls = objc_getClass("SOLaunchHoldingWindow");
+    if (!cls) return NO;
+    BOOL a = SoulInstallMethodHook(cls, NSSelectorFromString(@"init"),
+                                   (IMP)SoulHookHoldingInit, (IMP *)&gOrigHoldingInit);
+    BOOL b = SoulInstallMethodHook(cls, NSSelectorFromString(@"smartShowWindow"),
+                                   (IMP)SoulHookHoldingShow, (IMP *)&gOrigHoldingShow);
+    if (a || b) {
+        done = YES;
+        SoulLog(@"custom-splash: hooks installed (init=%d show=%d)", a, b);
+    }
+    return a || b;
+}
+
 // —— I. 每条消息显示时间（SODCMsgCell / SODCMsgLayout）——
 static const void *kSoulMsgTimeLabelKey = &kSoulMsgTimeLabelKey;
 
@@ -2796,6 +2855,7 @@ static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"voice")) SoulRetryInstall(^BOOL{ return SoulInstallVoiceHooks(); }, 12);
     if (!SoulSkipGroup(@"msgtime")) SoulRetryInstall(^BOOL{ return SoulInstallMsgTimeHooks(); }, 24);
     if (!SoulSkipGroup(@"teen")) SoulRetryInstall(^BOOL{ return SoulInstallTeenHooks(); }, 24);
+    if (!SoulSkipGroup(@"splashimg")) SoulRetryInstall(^BOOL{ return SoulInstallCustomSplashHooks(); }, 8);
     SoulInstallClearNotif();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });

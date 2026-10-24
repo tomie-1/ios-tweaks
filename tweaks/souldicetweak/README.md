@@ -12,6 +12,7 @@ SOUL 6.17 助手。包名 `com.soulfx.souldicetweak`，注入 `Soul_New`。
 - 图片 / 视频 / 分享：阅后即焚解锁、无水印保存/分享、去除主页分享限制、解除图片/视频选择数量上限。
 - 限制与体验：去除送礼限制、去除礼仪分限制、关闭匹配背景音乐、跳过开屏广告、语音消息解锁装扮。
 - 消息时间：每条消息显示发送时间，格式可自定义（NSDateFormatter 格式，默认 `HH:mm`）。
+- 启动画面：可把开屏那张大 SOUL 标志换成自己的图片（放在 `Library/Preferences/SoulFX/splash.png`，也支持 `splash.jpg`，开关默认关闭）。
 - 调试：可单独打开请求日志落盘。
 
 ## 配置
@@ -21,9 +22,10 @@ SOUL 6.17 助手。包名 `com.soulfx.souldicetweak`，注入 `Soul_New`。
 - `config.plist`：功能开关（含 `soulfx_no_teen_popup`、`soulfx_msg_time`、`soulfx_msg_time_format`）
 - `soulfx.log`：调试日志（打开调试后才有）
 - `recall.plist`：防撤回角标记录
-- `skip.txt`：调试跳过分组（新增 `teen`、`msgtime`）
+- `skip.txt`：调试跳过分组（新增 `teen`、`msgtime`、`splashimg`）
 
 ## 已知限制
 
 - 青少年弹窗通过拦截 `SOMainSquareViewController` 的展示入口和 `SOPrivateChatViewController` 的青少年提示实现；服务端强推或其它页面入口若未覆盖，可打开调试日志按 `teen:` 前缀排查后补充。
+- 开屏图分两层：iOS 在进程启动前绘制的是 `Assets.car` 里的 `launch_launchImage`（`SOLaunchScreen.storyboardc` 引用），dylib 改不到；插件替换的是启动后 `SOLaunchHoldingWindow.launchImageView` 持有的同一张图，所以系统启动图那一瞬间仍会闪原图。要把第一帧也换掉只能改 App 包的启动图并重新签名。
 - 每条消息的时间挂在 `SODCMsgCell` 上，并通过 `SODCMsgLayout.cellHeight` 额外预留 13pt；不同消息类型的视觉位置需要真机确认后再微调。
