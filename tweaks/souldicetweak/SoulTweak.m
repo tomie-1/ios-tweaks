@@ -1824,6 +1824,7 @@ static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
 static const CGFloat kSoulMsgTimeReserve = 18.0;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulApplyMsgTime(id cell, id layout);
+static double SoulOriginalLayoutHeight(id layout);
 
 /* 从 cell 上取布局对象（用于把角标贴到气泡下方） */
 static id SoulCellLayout(UIView *cell) {
@@ -2089,6 +2090,26 @@ static void SoulHookShareCardLayout(id self, SEL _cmd) {
         Method m = sup ? class_getInstanceMethod(sup, _cmd) : NULL;
         IMP imp = m ? method_getImplementation(m) : NULL;
         if (imp) ((void (*)(id, SEL))imp)(self, _cmd);
+    }
+    if (SoulDef(kFxMsgTime) || SoulDef(kFxAntiRecall)) {
+        UIView *content = SoulMessageContentView(self);
+        if (content) {
+            double originalH = SoulOriginalLayoutHeight(SoulCellLayout(self));
+            if (originalH < 20.0) originalH = self.bounds.size.height - kSoulMsgTimeReserve;
+            CGFloat targetH = MAX(20.0, (CGFloat)originalH - 14.0);
+            if (targetH > 20.0 && content.bounds.size.height > targetH + 1.0) {
+                content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+                CGRect cf = content.frame;
+                cf.size.height = targetH;
+                content.frame = cf;
+                static int shrinkLog = 0;
+                if (shrinkLog < 6) {
+                    shrinkLog++;
+                    SoulLog(@"msg-time: share-card size cellH=%.1f original=%.1f card=%.1f target=%.1f",
+                            self.bounds.size.height, originalH, content.bounds.size.height, targetH);
+                }
+            }
+        }
     }
     SoulMsgTimeRelayout(self);
 }
@@ -3181,8 +3202,6 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         if (bottom > cr.origin.y) cr.size.height = bottom - cr.origin.y;
     }
 
-    NSString *footerCellCN = NSStringFromClass([view class]).lowercaseString;
-    BOOL shareCard = [footerCellCN containsString:@"shareusercard"];
     BOOL mine = showTime && time.tag == 1;
     if (!showTime && cr.size.width > 0) mine = cr.origin.x > width * 0.45;
 
@@ -3200,7 +3219,7 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     }
     CGFloat totalW = timeW + badgeW + ((showTime && showBadge) ? gap : 0.0);
 
-    BOOL alignTrailing = mine || shareCard;
+    BOOL alignTrailing = mine;
     CGFloat x;
     if (alignTrailing) {
         x = CGRectGetMaxX(cr) - totalW;
@@ -3213,16 +3232,10 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     }
     if (x < 6.0) x = 6.0;
 
-    CGFloat y;
-    if (shareCard && SoulUsableContentRect(cr, view) && cr.size.height > rowH + 18.0) {
-        /* 分享主页自带深色底栏，时间放在右侧空白，不额外撑高卡片。 */
-        y = CGRectGetMaxY(cr) - rowH - 7.0;
-    } else {
-        y = CGRectGetMaxY(cr) + 2.0;
-        if (y + rowH > height - 1.0) {
-            CGFloat above = cr.origin.y - rowH - 2.0;
-            y = (above >= 1.0) ? above : MAX(1.0, height - rowH - 2.0);
-        }
+    CGFloat y = CGRectGetMaxY(cr) + 2.0;
+    if (y + rowH > height - 1.0) {
+        CGFloat above = cr.origin.y - rowH - 2.0;
+        y = (above >= 1.0) ? above : MAX(1.0, height - rowH - 2.0);
     }
 
     CGRect oldT = time.frame, oldB = badge.frame;
@@ -3388,9 +3401,16 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
+static double SoulOriginalLayoutHeight(id layout) {
+    if (!layout || !gOrigMsgCellHeight) return 0;
+    SEL sel = NSSelectorFromString(@"cellHeight");
+    if (![layout respondsToSelector:sel]) return 0;
+    return gOrigMsgCellHeight(layout, sel);
+}
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
-    /* 不改消息行高：普通气泡本身已有底部留白，大卡片拉伸会破坏原生尺寸。 */
-    return gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
+    double h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
+    if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return h;
+    return h + kSoulMsgTimeReserve;
 }
 
 static BOOL SoulInstallMsgTimeHooks(void) {
@@ -3630,7 +3650,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v32. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v33. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
