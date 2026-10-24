@@ -2406,6 +2406,44 @@ static long long SoulHookMsgTimestamp(id self, SEL _cmd) {
 
 static void SoulAppendMenuItems(id handler, id msg, id cell);
 
+/* 当前私聊实际走 showMenuViewWithMsg:cell:recognizer:，
+   旧的 SOPCMenuHandler.addMenuItems... 只覆盖部分旧路径。 */
+static IMP gOrigShowMenu1 = NULL;
+static IMP gOrigShowMenu2 = NULL;
+static void SoulHookShowMenuView1(id self, SEL _cmd, id msg, id cell, id recognizer) {
+    if (gOrigShowMenu1) ((void (*)(id, SEL, id, id, id))gOrigShowMenu1)(self, _cmd, msg, cell, recognizer);
+    id handler = nil;
+    SEL hs = NSSelectorFromString(@"menuHandler");
+    @try { if ([self respondsToSelector:hs]) handler = ((id (*)(id, SEL))objc_msgSend)(self, hs); }
+    @catch (__unused NSException *e) {}
+    SoulLog(@"menu: showMenuView msg=%@ cell=%@ handler=%@",
+            NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
+    SoulAppendMenuItems(handler, msg, cell);
+}
+static void SoulHookShowMenuView2(id self, SEL _cmd, id msg, id cell, id recognizer) {
+    if (gOrigShowMenu2) ((void (*)(id, SEL, id, id, id))gOrigShowMenu2)(self, _cmd, msg, cell, recognizer);
+    id handler = nil;
+    SEL hs = NSSelectorFromString(@"menuHandler");
+    @try { if ([self respondsToSelector:hs]) handler = ((id (*)(id, SEL))objc_msgSend)(self, hs); }
+    @catch (__unused NSException *e) {}
+    SoulLog(@"menu: virtual showMenuView msg=%@ cell=%@ handler=%@",
+            NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
+    SoulAppendMenuItems(handler, msg, cell);
+}
+static BOOL gShowMenuHooksDone = NO;
+static void SoulInstallShowMenuHooks(void) {
+    if (gShowMenuHooksDone) return;
+    SEL sel = NSSelectorFromString(@"showMenuViewWithMsg:cell:recognizer:");
+    Class pc = objc_getClass("SOPrivateChatViewController");
+    Class vc = objc_getClass("SOVirtualManChatViewController");
+    BOOL a = pc && SoulInstallMethodHook(pc, sel, (IMP)SoulHookShowMenuView1, (IMP *)&gOrigShowMenu1);
+    BOOL b = vc && SoulInstallMethodHook(vc, sel, (IMP)SoulHookShowMenuView2, (IMP *)&gOrigShowMenu2);
+    if (a || b) {
+        gShowMenuHooksDone = YES;
+        SoulLog(@"menu: showMenuView hooks installed private=%d virtual=%d", a, b);
+    }
+}
+
 static void (*gOrigMenuAddItems)(id, SEL, id, id, id);
 static void SoulHookMenuAddItems(id self, SEL _cmd, id msg, id cell, id recognizer) {
     BOOL mine = NO;
@@ -2463,6 +2501,7 @@ static void SoulInstallOwnRecallHooks(void) {
         gOwnRecallMenuDone = YES;
         SoulLog(@"own-recall: menu hook installed");
     }
+    SoulInstallShowMenuHooks();
 }
 static void SoulInstallOwnRecallHooksRetry(int n) {
     SoulInstallOwnRecallHooks();
@@ -2993,12 +3032,26 @@ static id SoulMenuItem(Class cls, NSString *title, id target, SEL action) {
 }
 
 static void SoulAppendMenuItems(id handler, id msg, id cell) {
-    if (!SoulDef(kFxMenuTools) || !msg || !handler) return;
+    static int menuLog = 0;
+    if (!SoulDef(kFxMenuTools)) {
+        if (menuLog < 4) { menuLog++; SoulLog(@"menu: tools disabled"); }
+        return;
+    }
+    if (!msg || !handler) {
+        if (menuLog < 4) { menuLog++; SoulLog(@"menu: missing msg=%d handler=%d", msg != nil, handler != nil); }
+        return;
+    }
     Class itemCls = objc_getClass("GMenuItem");
     SEL mcSel = NSSelectorFromString(@"menuController");
-    if (!itemCls || ![handler respondsToSelector:mcSel]) return;
+    if (!itemCls || ![handler respondsToSelector:mcSel]) {
+        SoulLog(@"menu: no GMenuItem/controller handler=%@", NSStringFromClass([handler class]));
+        return;
+    }
     id mc = ((id (*)(id, SEL))objc_msgSend)(handler, mcSel);
-    if (!mc) return;
+    if (!mc) {
+        SoulLog(@"menu: menuController nil handler=%@", NSStringFromClass([handler class]));
+        return;
+    }
     NSMutableArray *items = [NSMutableArray array];
     SEL itemsSel = NSSelectorFromString(@"menuItems");
     if ([mc respondsToSelector:itemsSel]) {
@@ -3029,7 +3082,13 @@ static void SoulAppendMenuItems(id handler, id msg, id cell) {
     SEL setSel = NSSelectorFromString(@"setMenuItems:");
     if (added && [mc respondsToSelector:setSel]) {
         ((void (*)(id, SEL, id))objc_msgSend)(mc, setSel, items);
-        SoulLog(@"menu: appended custom items total=%lu", (unsigned long)items.count);
+        SoulLog(@"menu: appended custom items total=%lu bubble=%d audio=%d voice=%d",
+                (unsigned long)items.count, bubble.length > 0, audio.length > 0, voice != nil);
+    } else if (menuLog < 8) {
+        menuLog++;
+        SoulLog(@"menu: nothing appended bubble=%@ audio=%@ voice=%@ setter=%d",
+                bubble.length ? @"yes" : @"no", audio.length ? @"yes" : @"no",
+                voice ? @"yes" : @"no", [mc respondsToSelector:setSel]);
     }
 }
 
@@ -3665,7 +3724,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v35. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v36. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
