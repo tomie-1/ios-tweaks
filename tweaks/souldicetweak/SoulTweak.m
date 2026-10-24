@@ -632,7 +632,7 @@ static UIColor *SoulFxCardBackground(void) {
         _groups = SoulFxGroups();
         self.title = @"Soul 助手";
         self.tableView.estimatedRowHeight = 58;
-        self.tableView.backgroundColor = [UIColor clearColor];
+        self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
     }
     return self;
 }
@@ -678,7 +678,7 @@ static UIColor *SoulFxCardBackground(void) {
         _group = group;
         self.title = group.title;
         self.tableView.estimatedRowHeight = 50;
-        self.tableView.backgroundColor = [UIColor clearColor];
+        self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
     }
     return self;
 }
@@ -811,7 +811,7 @@ static UIColor *SoulFxCardBackground(void) {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
         _row = row;
         self.title = row.title;
-        self.tableView.backgroundColor = [UIColor clearColor];
+        self.tableView.backgroundColor = [UIColor systemGroupedBackgroundColor];
     }
     return self;
 }
@@ -863,88 +863,14 @@ static UIColor *SoulFxCardBackground(void) {
 }
 @end
 
-@interface SoulFxPanelHost : UIViewController <UIGestureRecognizerDelegate>
-@property (nonatomic, strong) NSLayoutConstraint *cardHeight;
-@property (nonatomic, weak) UINavigationController *nav;
-@property (nonatomic, assign) BOOL heightLocked;
-@end
-
-@implementation SoulFxPanelHost
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.30];
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                                                         action:@selector(soulBackdrop:)];
-    tap.delegate = self;
-    [self.view addGestureRecognizer:tap];
-
-    UIView *card = [[UIView alloc] init];
-    card.translatesAutoresizingMaskIntoConstraints = NO;
-    card.backgroundColor = SoulFxCardBackground();
-    card.layer.cornerRadius = 22;
-    card.layer.masksToBounds = YES;
-    [self.view addSubview:card];
-
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[SoulFxRootVC new]];
-    nav.view.translatesAutoresizingMaskIntoConstraints = NO;
-    nav.view.backgroundColor = SoulFxCardBackground();
-    UINavigationBarAppearance *ap = [[UINavigationBarAppearance alloc] init];
-    [ap configureWithDefaultBackground];
-    ap.titleTextAttributes = @{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
-    nav.navigationBar.standardAppearance = ap;
-    nav.navigationBar.scrollEdgeAppearance = ap;
-    nav.navigationBar.tintColor = SoulAccent();
-    [self addChildViewController:nav];
-    [card addSubview:nav.view];
-    [nav didMoveToParentViewController:self];
-    self.nav = nav;
-
-    CGSize screen = UIScreen.mainScreen.bounds.size;
-    CGFloat w = MIN(430.0, screen.width - 24.0);
-    CGFloat h = MIN(440.0, screen.height - 140.0);
-    self.cardHeight = [card.heightAnchor constraintEqualToConstant:h];
-    [NSLayoutConstraint activateConstraints:@[
-        [card.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [card.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-        [card.widthAnchor constraintEqualToConstant:w],
-        self.cardHeight,
-        [nav.view.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
-        [nav.view.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
-        [nav.view.topAnchor constraintEqualToAnchor:card.topAnchor],
-        [nav.view.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
-    ]];
-}
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    if (self.heightLocked) return;
-    UIViewController *top = self.nav.topViewController;
-    if (![top isKindOfClass:[UITableViewController class]] || !self.cardHeight) return;
-    UITableView *tv = ((UITableViewController *)top).tableView;
-    CGFloat content = tv.contentSize.height;
-    if (content < 1) return;
-    CGFloat navH = self.nav.navigationBar.frame.size.height + 10;
-    CGFloat maxH = UIScreen.mainScreen.bounds.size.height - 140.0;
-    CGFloat h = MIN(maxH, navH + content + 26.0);
-    h = MAX(h, 240.0);
-    if (fabs(self.cardHeight.constant - h) > 1.0) self.cardHeight.constant = h;
-    self.heightLocked = YES;
-}
-- (void)soulBackdrop:(UITapGestureRecognizer *)g {
-    if (g.state == UIGestureRecognizerStateEnded) SoulHidePanel();
-}
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)g shouldReceiveTouch:(UITouch *)touch {
-    return touch.view == self.view;
-}
-@end
-
-static SoulFxPanelHost *gSoulPanelVC = nil;
+static UINavigationController *gSoulPanelNav = nil;
 static BOOL gSoulPanelTransitioning = NO;
 
 static void SoulHidePanel(void) {
-    SoulFxPanelHost *vc = gSoulPanelVC;
-    gSoulPanelVC = nil;
-    if (!vc) return;
-    UIViewController *presenter = vc.presentingViewController;
+    UINavigationController *nav = gSoulPanelNav;
+    gSoulPanelNav = nil;
+    if (!nav) return;
+    UIViewController *presenter = nav.presentingViewController;
     gSoulPanelTransitioning = YES;
     if (presenter) {
         [presenter dismissViewControllerAnimated:YES completion:^{ gSoulPanelTransitioning = NO; }];
@@ -955,15 +881,16 @@ static void SoulHidePanel(void) {
 
 static void SoulTogglePanel(void) {
     if (gSoulPanelTransitioning) return;
-    if (gSoulPanelVC) { SoulHidePanel(); return; }
+    if (gSoulPanelNav) { SoulHidePanel(); return; }
     UIViewController *top = SoulTopViewController();
     if (!top) { SoulLog(@"toggle: no top view controller"); return; }
-    SoulFxPanelHost *vc = [SoulFxPanelHost new];
-    vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
-    vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
-    gSoulPanelVC = vc;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[SoulFxRootVC new]];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    nav.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
+    nav.navigationBar.tintColor = SoulAccent();
+    gSoulPanelNav = nav;
     gSoulPanelTransitioning = YES;
-    [top presentViewController:vc animated:YES completion:^{ gSoulPanelTransitioning = NO; }];
+    [top presentViewController:nav animated:YES completion:^{ gSoulPanelTransitioning = NO; }];
 }
 
 #pragma mark - 设置页入口图标
@@ -3426,7 +3353,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v23. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v24. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
