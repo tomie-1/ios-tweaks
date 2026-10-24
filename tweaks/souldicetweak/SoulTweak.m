@@ -2092,10 +2092,11 @@ static void SoulHookShareCardLayout(id self, SEL _cmd) {
         if (imp) ((void (*)(id, SEL))imp)(self, _cmd);
     }
     if (SoulDef(kFxMsgTime) || SoulDef(kFxAntiRecall)) {
-        UIView *content = SoulMessageContentView(self);
-        if (content) {
-            double originalH = SoulOriginalLayoutHeight(SoulCellLayout(self));
-            if (originalH < 20.0) originalH = self.bounds.size.height - kSoulMsgTimeReserve;
+        UIView *cellView = [self isKindOfClass:[UIView class]] ? (UIView *)self : nil;
+        UIView *content = cellView ? SoulMessageContentView(cellView) : nil;
+        if (cellView && content) {
+            double originalH = SoulOriginalLayoutHeight(SoulCellLayout(cellView));
+            if (originalH < 20.0) originalH = cellView.bounds.size.height - kSoulMsgTimeReserve;
             CGFloat targetH = MAX(20.0, (CGFloat)originalH - 14.0);
             if (targetH > 20.0 && content.bounds.size.height > targetH + 1.0) {
                 content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
@@ -2106,7 +2107,7 @@ static void SoulHookShareCardLayout(id self, SEL _cmd) {
                 if (shrinkLog < 6) {
                     shrinkLog++;
                     SoulLog(@"msg-time: share-card size cellH=%.1f original=%.1f card=%.1f target=%.1f",
-                            self.bounds.size.height, originalH, content.bounds.size.height, targetH);
+                            cellView.bounds.size.height, originalH, content.bounds.size.height, targetH);
                 }
             }
         }
