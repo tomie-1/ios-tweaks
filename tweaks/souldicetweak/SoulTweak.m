@@ -197,6 +197,7 @@ static NSString *SoulCfgString(NSString *key) {
     return s;
 }
 static void SoulSyncLoveBellPatch(void);
+static void SoulRetryInstall(BOOL (^block)(void), int n);
 
 static void SoulSetDef(NSString *key, BOOL on) {
     SoulCfgLoad();
