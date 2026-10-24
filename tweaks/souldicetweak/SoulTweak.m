@@ -44,7 +44,6 @@ static NSString * const kFxVoiceUnlock   = @"soulfx_voice_unlock";
 static NSString * const kFxNoTeenPopup   = @"soulfx_no_teen_popup";
 static NSString * const kFxMsgTime       = @"soulfx_msg_time";
 static NSString * const kFxMsgTimeFmt    = @"soulfx_msg_time_format";
-static NSString * const kFxSkipSplash    = @"soulfx_skip_splash";
 static NSString * const kFxNoScreenshot  = @"soulfx_no_screenshot_notify";
 static NSString * const kFxNoAds         = @"soulfx_no_ads";
 static NSString * const kFxAutoVoiceText = @"soulfx_auto_voice_text";
@@ -219,10 +218,10 @@ static void SoulSetCfgString(NSString *key, NSString *val) {
 }
 static BOOL SoulDiceOn(void) { return SoulDef(kDiceEnabledKey); }
 
-// 面板数据：一个分组 = 二级页面；行分「开关」和「文本」两种。
+// 面板数据：一个分组 = 二级页面；行分「开关」和「选项」两种。
 typedef NS_ENUM(NSInteger, SoulFxRowKind) {
     SoulFxRowKindSwitch = 0,
-    SoulFxRowKindText   = 1,
+    SoulFxRowKindChoice = 1,
 };
 
 @interface SoulFxRow : NSObject
@@ -230,7 +229,6 @@ typedef NS_ENUM(NSInteger, SoulFxRowKind) {
 @property (nonatomic, copy) NSString *key;
 @property (nonatomic, assign) BOOL defaultOn;
 @property (nonatomic, assign) SoulFxRowKind kind;
-@property (nonatomic, copy) NSString *placeholder;
 @end
 
 @implementation SoulFxRow
@@ -242,12 +240,11 @@ typedef NS_ENUM(NSInteger, SoulFxRowKind) {
     r.kind = SoulFxRowKindSwitch;
     return r;
 }
-+ (instancetype)textRow:(NSString *)title key:(NSString *)key placeholder:(NSString *)placeholder {
++ (instancetype)choiceRow:(NSString *)title key:(NSString *)key {
     SoulFxRow *r = [SoulFxRow new];
     r.title = title;
     r.key = key;
-    r.kind = SoulFxRowKindText;
-    r.placeholder = placeholder;
+    r.kind = SoulFxRowKindChoice;
     return r;
 }
 @end
@@ -269,9 +266,21 @@ static SoulFxGroup *SoulFxGroupMake(NSString *title, NSString *summary, NSArray<
     return g;
 }
 
+static NSArray<NSArray<NSString *> *> *SoulTimeFormatOptions(void) {
+    return @[
+        @[@"时:分", @"HH:mm"],
+        @[@"时:分:秒", @"HH:mm:ss"],
+        @[@"月-日 时:分", @"MM-dd HH:mm"],
+        @[@"月-日 时:分:秒", @"MM-dd HH:mm:ss"],
+        @[@"年-月-日 时:分", @"yyyy-MM-dd HH:mm"],
+        @[@"周几 时:分", @"EEE HH:mm"],
+        @[@"月日 时:分", @"M月d日 HH:mm"],
+    ];
+}
+
 static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
     return @[
-        SoulFxGroupMake(@"聊天与消息", @"骰子、撤回、状态、已读、通知", @[
+        SoulFxGroupMake(@"聊天与消息", @"骰子、撤回、截图、语音、菜单", @[
             [SoulFxRow switchRow:@"自定义骰子 / 猜拳" key:kDiceEnabledKey def:NO],
             [SoulFxRow switchRow:@"防撤回（私聊 / 群聊）" key:kFxAntiRecall def:NO],
             [SoulFxRow switchRow:@"超 2 分钟也能撤回自己的消息" key:kFxOwnRecall def:YES],
@@ -301,10 +310,7 @@ static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
         ]),
         SoulFxGroupMake(@"消息时间", @"每条消息单独显示发送时间", @[
             [SoulFxRow switchRow:@"每条消息显示时间" key:kFxMsgTime def:NO],
-            [SoulFxRow textRow:@"时间格式" key:kFxMsgTimeFmt placeholder:@"HH:mm"],
-        ]),
-        SoulFxGroupMake(@"启动画面", @"启动时不再挡住主界面", @[
-            [SoulFxRow switchRow:@"跳过开屏（直接进主界面）" key:kFxSkipSplash def:NO],
+            [SoulFxRow choiceRow:@"时间格式" key:kFxMsgTimeFmt],
         ]),
         SoulFxGroupMake(@"调试", @"请求与功能排查", @[
             [SoulFxRow switchRow:@"调试日志（请求日志 + 落盘）" key:kFxDebugLog def:NO],
@@ -598,9 +604,11 @@ typedef NS_ENUM(NSInteger, SoulGameMode) {
 
 @end
 
-#pragma mark - 设置面板（分层：分组 → 开关 / 文本）
+#pragma mark - 设置面板（分组 → 开关 / 选项）
 
 static void SoulHidePanel(void);
+static void SoulShowFloatButton(void);
+static void SoulSetFloatVisible(BOOL visible);
 
 static UIColor *SoulFxCardBackground(void) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
@@ -614,7 +622,7 @@ static UIColor *SoulFxCardBackground(void) {
 - (instancetype)initWithGroup:(SoulFxGroup *)group;
 @end
 
-@interface SoulFxTextVC : UIViewController <UITextFieldDelegate>
+@interface SoulFxChoiceVC : UITableViewController
 - (instancetype)initWithRow:(SoulFxRow *)row;
 @end
 
@@ -625,6 +633,7 @@ static UIColor *SoulFxCardBackground(void) {
 - (instancetype)init {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
         self.title = @"Soul 助手";
+        self.tableView.estimatedRowHeight = 60;
     }
     return self;
 }
@@ -644,6 +653,8 @@ static UIColor *SoulFxCardBackground(void) {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
+        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12.5];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
     SoulFxGroup *group = SoulFxGroups()[indexPath.row];
@@ -667,6 +678,7 @@ static UIColor *SoulFxCardBackground(void) {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
         _group = group;
         self.title = group.title;
+        self.tableView.estimatedRowHeight = 52;
     }
     return self;
 }
@@ -680,14 +692,18 @@ static UIColor *SoulFxCardBackground(void) {
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     SoulFxRow *row = _group.rows[indexPath.row];
-    if (row.kind == SoulFxRowKindText) {
-        static NSString *tid = @"soulfx-text";
+    if (row.kind == SoulFxRowKindChoice) {
+        static NSString *tid = @"soulfx-choice";
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:tid];
-        if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:tid];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:tid];
+            cell.textLabel.font = [UIFont systemFontOfSize:16];
+            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        }
         cell.textLabel.text = row.title;
         NSString *val = SoulCfgString(row.key);
-        cell.detailTextLabel.text = val.length ? val : @"默认";
-        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.detailTextLabel.text = val.length ? val : @"HH:mm";
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
         return cell;
     }
@@ -697,9 +713,10 @@ static UIColor *SoulFxCardBackground(void) {
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:sid];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.font = [UIFont systemFontOfSize:16];
         cell.textLabel.numberOfLines = 2;
-        cell.textLabel.font = [UIFont systemFontOfSize:15];
         sw = [[UISwitch alloc] init];
+        sw.transform = CGAffineTransformMakeScale(0.9, 0.9);
         [sw addTarget:self action:@selector(soulSwitchChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
     } else {
@@ -718,78 +735,67 @@ static UIColor *SoulFxCardBackground(void) {
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     SoulFxRow *row = _group.rows[indexPath.row];
-    if (row.kind != SoulFxRowKindText) return;
-    SoulFxTextVC *vc = [[SoulFxTextVC alloc] initWithRow:row];
+    if (row.kind != SoulFxRowKindChoice) return;
+    SoulFxChoiceVC *vc = [[SoulFxChoiceVC alloc] initWithRow:row];
     [self.navigationController pushViewController:vc animated:YES];
 }
 @end
 
-@implementation SoulFxTextVC {
+@implementation SoulFxChoiceVC {
     SoulFxRow *_row;
-    UITextField *_field;
 }
 - (instancetype)initWithRow:(SoulFxRow *)row {
-    if ((self = [super init])) {
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
         _row = row;
         self.title = row.title;
     }
     return self;
 }
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
-    self.navigationItem.rightBarButtonItem =
-        [[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone
-                                        target:self action:@selector(soulSave)];
-
-    _field = [[UITextField alloc] init];
-    _field.translatesAutoresizingMaskIntoConstraints = NO;
-    _field.borderStyle = UITextBorderStyleRoundedRect;
-    _field.backgroundColor = SoulFxCardBackground();
-    _field.placeholder = _row.placeholder ?: @"";
-    _field.text = SoulCfgString(_row.key) ?: @"";
-    _field.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    _field.autocorrectionType = UITextAutocorrectionTypeNo;
-    _field.clearButtonMode = UITextFieldViewModeWhileEditing;
-    _field.returnKeyType = UIReturnKeyDone;
-    _field.delegate = self;
-    [_field addTarget:self action:@selector(soulSave) forControlEvents:UIControlEventEditingDidEndOnExit];
-    [self.view addSubview:_field];
-
-    UILabel *hint = [[UILabel alloc] init];
-    hint.translatesAutoresizingMaskIntoConstraints = NO;
-    hint.numberOfLines = 0;
-    hint.font = [UIFont systemFontOfSize:13];
-    hint.textColor = [UIColor secondaryLabelColor];
-    hint.text = @"使用 NSDateFormatter 格式，例如 HH:mm、HH:mm:ss、MM-dd HH:mm。留空保存即恢复默认 HH:mm。";
-    [self.view addSubview:hint];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [_field.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:24],
-        [_field.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20],
-        [_field.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
-        [_field.heightAnchor constraintEqualToConstant:44],
-        [hint.topAnchor constraintEqualToAnchor:_field.bottomAnchor constant:12],
-        [hint.leadingAnchor constraintEqualToAnchor:_field.leadingAnchor],
-        [hint.trailingAnchor constraintEqualToAnchor:_field.trailingAnchor],
-    ]];
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
 }
-- (void)soulSave {
-    NSString *val = [_field.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (val.length > 40) val = [val substringToIndex:40];
-    SoulSetCfgString(_row.key, val.length ? val : nil);
-    [self.navigationController popViewControllerAnimated:YES];
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return (NSInteger)SoulTimeFormatOptions().count;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *cid = @"soulfx-format";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cid];
+        cell.textLabel.font = [UIFont systemFontOfSize:16];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:13];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    }
+    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row];
+    NSString *cur = SoulCfgString(_row.key);
+    if (!cur.length) cur = @"HH:mm";
+    cell.textLabel.text = opt[0];
+    cell.detailTextLabel.text = opt[1];
+    cell.accessoryType = [cur isEqualToString:opt[1]] ? UITableViewCellAccessoryCheckmark
+                                                       : UITableViewCellAccessoryNone;
+    cell.tintColor = SoulAccent();
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row];
+    SoulSetCfgString(_row.key, opt[1]);
+    [tableView reloadData];
+    SoulLog(@"msg-time: format -> %@", opt[1]);
 }
 @end
 
 @interface SoulFxPanelHost : UIViewController <UIGestureRecognizerDelegate>
+@property (nonatomic, strong) NSLayoutConstraint *cardHeight;
+@property (nonatomic, weak) UINavigationController *nav;
 @end
 
 @implementation SoulFxPanelHost
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.30];
-
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self
                                                                          action:@selector(soulBackdrop:)];
     tap.delegate = self;
@@ -798,7 +804,7 @@ static UIColor *SoulFxCardBackground(void) {
     UIView *card = [[UIView alloc] init];
     card.translatesAutoresizingMaskIntoConstraints = NO;
     card.backgroundColor = SoulFxCardBackground();
-    card.layer.cornerRadius = 18;
+    card.layer.cornerRadius = 22;
     card.layer.masksToBounds = YES;
     [self.view addSubview:card];
 
@@ -808,20 +814,35 @@ static UIColor *SoulFxCardBackground(void) {
     [self addChildViewController:nav];
     [card addSubview:nav.view];
     [nav didMoveToParentViewController:self];
+    self.nav = nav;
 
     CGSize screen = UIScreen.mainScreen.bounds.size;
-    CGFloat w = MIN(340.0, screen.width - 40.0);
-    CGFloat h = MIN(560.0, screen.height - 120.0);
+    CGFloat w = MIN(430.0, screen.width - 24.0);
+    CGFloat h = MIN(440.0, screen.height - 140.0);
+    self.cardHeight = [card.heightAnchor constraintEqualToConstant:h];
     [NSLayoutConstraint activateConstraints:@[
         [card.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [card.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
         [card.widthAnchor constraintEqualToConstant:w],
-        [card.heightAnchor constraintEqualToConstant:h],
+        self.cardHeight,
         [nav.view.leadingAnchor constraintEqualToAnchor:card.leadingAnchor],
         [nav.view.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
         [nav.view.topAnchor constraintEqualToAnchor:card.topAnchor],
         [nav.view.bottomAnchor constraintEqualToAnchor:card.bottomAnchor],
     ]];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    UIViewController *top = self.nav.topViewController;
+    if (![top isKindOfClass:[UITableViewController class]] || !self.cardHeight) return;
+    UITableView *tv = ((UITableViewController *)top).tableView;
+    CGFloat content = tv.contentSize.height;
+    if (content < 1) return;
+    CGFloat navH = self.nav.navigationBar.frame.size.height + 10;
+    CGFloat maxH = UIScreen.mainScreen.bounds.size.height - 140.0;
+    CGFloat h = MIN(maxH, navH + content + 26.0);
+    h = MAX(h, 240.0);
+    if (fabs(self.cardHeight.constant - h) > 1.0) self.cardHeight.constant = h;
 }
 - (void)soulBackdrop:(UITapGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateEnded) SoulHidePanel();
@@ -836,88 +857,227 @@ static SoulFxPanelHost *gSoulPanelVC = nil;
 static void SoulHidePanel(void) {
     SoulFxPanelHost *vc = gSoulPanelVC;
     gSoulPanelVC = nil;
-    if (!vc) return;
+    if (!vc) { SoulShowFloatButton(); return; }
     UIViewController *presenter = vc.presentingViewController;
-    if (presenter) [presenter dismissViewControllerAnimated:YES completion:nil];
+    if (presenter) {
+        [presenter dismissViewControllerAnimated:YES completion:^{ SoulShowFloatButton(); }];
+    } else {
+        SoulShowFloatButton();
+    }
 }
 
 static void SoulTogglePanel(void) {
-    if (gSoulPanelVC) {
-        SoulLog(@"entry tapped. panel=open, closing");
-        SoulHidePanel();
-        return;
-    }
+    if (gSoulPanelVC) { SoulHidePanel(); return; }
     UIViewController *top = SoulTopViewController();
     if (!top) { SoulLog(@"toggle: no top view controller"); return; }
     SoulFxPanelHost *vc = [SoulFxPanelHost new];
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
     vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     gSoulPanelVC = vc;
+    SoulSetFloatVisible(NO);
     [top presentViewController:vc animated:YES completion:nil];
-    SoulLog(@"entry tapped. panel=closed, opening");
 }
 
-#pragma mark - 右上角入口图标（与导航栏标题垂直对齐）
+#pragma mark - 悬浮入口（可拖动图标）
 
-static const void *kSoulEntryInstalledKey = &kSoulEntryInstalledKey;
+@interface SoulFloatWindow : UIWindow
+@end
 
-static UILabel *SoulFindWidestLabel(UIView *root, UILabel *best) {
-    if ([root isKindOfClass:[UILabel class]]) {
-        UILabel *l = (UILabel *)root;
-        if (l.text.length && !l.hidden && l.alpha > 0.05 && CGRectGetWidth(l.bounds) > 30) {
-            if (!best || CGRectGetWidth(l.bounds) > CGRectGetWidth(best.bounds)) best = l;
+@implementation SoulFloatWindow
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    if (!hit || hit == self || hit == self.rootViewController.view) return nil;
+    return hit;
+}
+@end
+
+@interface SoulFloatTarget : NSObject
++ (instancetype)shared;
+- (void)soulTapped:(id)sender;
+- (void)soulPanned:(UIPanGestureRecognizer *)g;
+@end
+
+@implementation SoulFloatTarget
++ (instancetype)shared {
+    static SoulFloatTarget *t = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ t = [SoulFloatTarget new]; });
+    return t;
+}
+- (void)soulTapped:(id)sender { SoulTogglePanel(); }
+- (void)soulPanned:(UIPanGestureRecognizer *)g {
+    UIView *btn = g.view;
+    UIWindow *win = btn.window;
+    if (!win) return;
+    CGPoint p = [g translationInView:win];
+    CGPoint c = CGPointMake(btn.center.x + p.x, btn.center.y + p.y);
+    CGSize size = win.bounds.size;
+    c.x = MAX(30, MIN(c.x, size.width - 30));
+    c.y = MAX(70, MIN(c.y, size.height - 40));
+    btn.center = c;
+    [g setTranslation:CGPointZero inView:win];
+    if (g.state == UIGestureRecognizerStateEnded) {
+        [[NSUserDefaults standardUserDefaults] setObject:NSStringFromCGPoint(c)
+                                                  forKey:@"soulfx_float_center"];
+    }
+}
+@end
+
+static SoulFloatWindow *gFloatWindow = nil;
+
+static void SoulSetFloatVisible(BOOL visible) {
+    if (!gFloatWindow) {
+        if (visible) SoulShowFloatButton();
+        return;
+    }
+    gFloatWindow.hidden = !visible;
+}
+
+static void SoulShowFloatButton(void) {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ SoulShowFloatButton(); });
+        return;
+    }
+    if (gFloatWindow) { gFloatWindow.hidden = NO; return; }
+    UIWindowScene *scene = nil;
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if ([s isKindOfClass:[UIWindowScene class]] &&
+            s.activationState == UISceneActivationStateForegroundActive) {
+            scene = (UIWindowScene *)s;
+            break;
         }
     }
-    for (UIView *s in root.subviews) best = SoulFindWidestLabel(s, best);
-    return best;
+    if (!scene) return;
+
+    SoulFloatWindow *win = [[SoulFloatWindow alloc] initWithWindowScene:scene];
+    win.frame = scene.coordinateSpace.bounds;
+    win.windowLevel = UIWindowLevelNormal + 1;
+    win.backgroundColor = [UIColor clearColor];
+    UIViewController *root = [UIViewController new];
+    root.view.backgroundColor = [UIColor clearColor];
+    win.rootViewController = root;
+
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+    btn.frame = CGRectMake(0, 0, 48, 48);
+    btn.layer.cornerRadius = 24;
+    btn.backgroundColor = SoulAccent();
+    btn.tintColor = [UIColor whiteColor];
+    btn.layer.shadowColor = [UIColor blackColor].CGColor;
+    btn.layer.shadowOpacity = 0.28;
+    btn.layer.shadowRadius = 8;
+    btn.layer.shadowOffset = CGSizeMake(0, 3);
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:21
+                                                                                     weight:UIImageSymbolWeightSemibold];
+    UIImage *icon = [UIImage systemImageNamed:@"sparkles" withConfiguration:cfg];
+    if (!icon) icon = [UIImage systemImageNamed:@"wand.and.stars" withConfiguration:cfg];
+    [btn setImage:icon forState:UIControlStateNormal];
+    [btn addTarget:[SoulFloatTarget shared] action:@selector(soulTapped:)
+  forControlEvents:UIControlEventTouchUpInside];
+
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:[SoulFloatTarget shared]
+                                                                        action:@selector(soulPanned:)];
+    [btn addGestureRecognizer:pan];
+
+    CGSize size = win.bounds.size;
+    CGPoint center = CGPointMake(size.width - 34, size.height * 0.42);
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"soulfx_float_center"];
+    if (saved.length) center = CGPointFromString(saved);
+    center.x = MAX(30, MIN(center.x, size.width - 30));
+    center.y = MAX(70, MIN(center.y, size.height - 40));
+    btn.center = center;
+
+    [root.view addSubview:btn];
+    win.hidden = NO;
+    gFloatWindow = win;
+    SoulLog(@"float: button shown at %.0f,%.0f", center.x, center.y);
 }
 
-static void SoulInstallEntry(UIViewController *vc) {
-    if (!vc) return;
-    if (objc_getAssociatedObject(vc, kSoulEntryInstalledKey)) return;
-    objc_setAssociatedObject(vc, kSoulEntryInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+#pragma mark - 长按底部「自己」调出面板
 
-    UIImage *icon = [UIImage systemImageNamed:@"die.face.5.fill"];
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    btn.translatesAutoresizingMaskIntoConstraints = NO;
-    if (icon) {
-        [btn setImage:icon forState:UIControlStateNormal];
-    } else {
-        [btn setTitle:@"🎲" forState:UIControlStateNormal];
-        btn.titleLabel.font = [UIFont systemFontOfSize:20];
-    }
-    btn.tintColor = SoulText();
-    btn.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.16];
-    btn.layer.cornerRadius = 17;
-    [btn addTarget:vc action:@selector(soulEntryTapped:) forControlEvents:UIControlEventTouchUpInside];
-
-    UIView *nav = nil;
-    SEL navSel = NSSelectorFromString(@"navView");
-    if ([vc respondsToSelector:navSel]) {
-        id v = ((id (*)(id, SEL))objc_msgSend)(vc, navSel);
-        if ([v isKindOfClass:[UIView class]]) nav = v;
-    }
-
-    UIView *host = nav ?: vc.view;
-    [host addSubview:btn];
-
-    UILabel *titleLabel = nav ? SoulFindWidestLabel(nav, nil) : nil;
-
-    NSMutableArray *cs = [NSMutableArray array];
-    [cs addObject:[btn.widthAnchor constraintEqualToConstant:34]];
-    [cs addObject:[btn.heightAnchor constraintEqualToConstant:34]];
-    [cs addObject:[btn.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:-12]];
-    if (titleLabel) {
-        [cs addObject:[btn.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor]];
-    } else {
-        [cs addObject:[btn.centerYAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.topAnchor constant:22]];
-    }
-    [NSLayoutConstraint activateConstraints:cs];
-}
-
-@implementation UIViewController (SoulEntry)
-- (void)soulEntryTapped:(id)sender { SoulTogglePanel(); }
+@interface SoulTabPressTarget : NSObject
+@property (nonatomic, weak) UITabBarController *tabBarController;
++ (instancetype)shared;
+- (void)longPressed:(UILongPressGestureRecognizer *)g;
 @end
+
+@implementation SoulTabPressTarget
++ (instancetype)shared {
+    static SoulTabPressTarget *t = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ t = [SoulTabPressTarget new]; });
+    return t;
+}
+static NSString *SoulFirstLabelText(UIView *view) {
+    if ([view isKindOfClass:[UILabel class]]) return ((UILabel *)view).text;
+    for (UIView *sub in view.subviews) {
+        NSString *s = SoulFirstLabelText(sub);
+        if (s.length) return s;
+    }
+    return nil;
+}
+- (void)longPressed:(UILongPressGestureRecognizer *)g {
+    if (g.state != UIGestureRecognizerStateBegan) return;
+    UITabBarController *tbc = self.tabBarController;
+    if (!tbc) return;
+    CGPoint p = [g locationInView:tbc.tabBar];
+    for (UIView *sub in tbc.tabBar.subviews) {
+        if (!CGRectContainsPoint(sub.frame, p)) continue;
+        NSString *text = SoulFirstLabelText(sub);
+        SoulLog(@"tab long-press title=%@", text ?: @"?");
+        if ([text containsString:@"自己"] || [text containsString:@"我的"]) SoulTogglePanel();
+        return;
+    }
+}
+@end
+
+static void (*gOrigTabDidAppear)(id, SEL, BOOL);
+static void SoulHookTabDidAppear(id self, SEL _cmd, BOOL animated) {
+    if (gOrigTabDidAppear) gOrigTabDidAppear(self, _cmd, animated);
+    if (![self isKindOfClass:[UITabBarController class]]) return;
+    UITabBarController *tbc = (UITabBarController *)self;
+    static const void *key = &key;
+    if (!objc_getAssociatedObject(tbc, key)) {
+        objc_setAssociatedObject(tbc, key, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        UILongPressGestureRecognizer *lp =
+            [[UILongPressGestureRecognizer alloc] initWithTarget:[SoulTabPressTarget shared]
+                                                          action:@selector(longPressed:)];
+        lp.minimumPressDuration = 0.6;
+        [tbc.tabBar addGestureRecognizer:lp];
+        [SoulTabPressTarget shared].tabBarController = tbc;
+        SoulLog(@"tab: long-press installed");
+    }
+    SoulShowFloatButton();
+}
+
+static BOOL SoulInstallFloatHooks(void);
+
+static void SoulInstallFloatEntry(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            SoulShowFloatButton();
+        }];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ SoulShowFloatButton(); });
+        SoulRetryInstall(^BOOL{ return SoulInstallFloatHooks(); }, 24);
+    });
+}
+
+static BOOL SoulInstallFloatHooks(void) {
+    static BOOL done = NO;
+    if (done) return YES;
+    Class cls = objc_getClass("NewTabBarController");
+    if (!cls) return NO;
+    if (SoulInstallMethodHook(cls, NSSelectorFromString(@"viewDidAppear:"),
+                              (IMP)SoulHookTabDidAppear, (IMP *)&gOrigTabDidAppear)) {
+        done = YES;
+        SoulLog(@"float: tab hook installed");
+    }
+    return done;
+}
 
 #pragma mark - 骰子/猜拳 hook
 
@@ -1501,7 +1661,6 @@ static void SoulHookWebDidAppear(id self, SEL _cmd, BOOL animated) {
     if (url.length) {
         NSString *l = url.lowercaseString;
         if ([l containsString:@"/setting"] || [l containsString:@"setting/#"]) {
-            SoulInstallEntry((UIViewController *)self);
         }
     }
 }
@@ -2773,42 +2932,6 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
     });
 }
 
-// —— K. 跳过开屏（SOLaunchHoldingWindow 不再遮挡主界面）——
-static void (*gOrigHoldingInit)(id, SEL);
-static void SoulHookHoldingInit(id self, SEL _cmd) {
-    if (gOrigHoldingInit) gOrigHoldingInit(self, _cmd);
-    if (SoulDef(kFxSkipSplash)) {
-        ((UIWindow *)self).hidden = YES;
-        SoulLog(@"skip-splash: holding window hidden at init");
-    }
-}
-
-static void (*gOrigHoldingShow)(id, SEL);
-static void SoulHookHoldingShow(id self, SEL _cmd) {
-    if (SoulDef(kFxSkipSplash)) {
-        ((UIWindow *)self).hidden = YES;
-        SoulLog(@"skip-splash: smartShowWindow suppressed");
-        return;
-    }
-    if (gOrigHoldingShow) gOrigHoldingShow(self, _cmd);
-}
-
-static BOOL SoulInstallSkipSplashHooks(void) {
-    static BOOL done = NO;
-    if (done) return YES;
-    Class cls = objc_getClass("SOLaunchHoldingWindow");
-    if (!cls) return NO;
-    BOOL a = SoulInstallMethodHook(cls, NSSelectorFromString(@"init"),
-                                   (IMP)SoulHookHoldingInit, (IMP *)&gOrigHoldingInit);
-    BOOL b = SoulInstallMethodHook(cls, NSSelectorFromString(@"smartShowWindow"),
-                                   (IMP)SoulHookHoldingShow, (IMP *)&gOrigHoldingShow);
-    if (a || b) {
-        done = YES;
-        SoulLog(@"skip-splash: hooks installed (init=%d show=%d)", a, b);
-    }
-    return a || b;
-}
-
 // —— I. 每条消息显示时间（SODCMsgCell / SODCMsgLayout）——
 static const void *kSoulMsgTimeLabelKey = &kSoulMsgTimeLabelKey;
 
@@ -2904,24 +3027,38 @@ static void SoulApplyMsgTime(id cell, id layout) {
     SoulMsgTimeLayout(cell);
 }
 
-static void (*gOrigMsgCellConfig)(id, SEL, id);
+static NSMutableDictionary<NSString *, NSValue *> *gMsgConfigOrig = nil;
+static NSMutableDictionary<NSString *, NSValue *> *gMsgPrepareOrig = nil;
+static NSMutableDictionary<NSString *, NSValue *> *gMsgLayoutOrig = nil;
+
+static IMP SoulMsgOrigFor(NSMutableDictionary<NSString *, NSValue *> *map, id obj) {
+    if (!map) return NULL;
+    for (Class c = object_getClass(obj); c; c = class_getSuperclass(c)) {
+        NSValue *v = nil;
+        @synchronized (map) { v = map[NSStringFromClass(c)]; }
+        if (v) return (IMP)v.pointerValue;
+    }
+    return NULL;
+}
+
 static void SoulHookMsgCellConfig(id self, SEL _cmd, id layout) {
-    if (gOrigMsgCellConfig) gOrigMsgCellConfig(self, _cmd, layout);
+    IMP orig = SoulMsgOrigFor(gMsgConfigOrig, self);
+    if (orig) ((void (*)(id, SEL, id))orig)(self, _cmd, layout);
     SoulApplyMsgTime(self, layout);
     SoulMaybeAutoVoiceText(self, layout);
 }
 
-static void (*gOrigMsgCellPrepare)(id, SEL, id, id);
 static void SoulHookMsgCellPrepare(id self, SEL _cmd, id cell, id layout) {
-    if (gOrigMsgCellPrepare) gOrigMsgCellPrepare(self, _cmd, cell, layout);
+    IMP orig = SoulMsgOrigFor(gMsgPrepareOrig, self);
+    if (orig) ((void (*)(id, SEL, id, id))orig)(self, _cmd, cell, layout);
     id target = [cell isKindOfClass:[UIView class]] ? cell : self;
     SoulApplyMsgTime(target, layout);
     SoulMaybeAutoVoiceText(target, layout);
 }
 
-static void (*gOrigMsgCellLayout)(id, SEL);
 static void SoulHookMsgCellLayout(id self, SEL _cmd) {
-    if (gOrigMsgCellLayout) gOrigMsgCellLayout(self, _cmd);
+    IMP orig = SoulMsgOrigFor(gMsgLayoutOrig, self);
+    if (orig) ((void (*)(id, SEL))orig)(self, _cmd);
     SoulMsgTimeLayout(self);
 }
 
@@ -2931,27 +3068,83 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     return h + (SoulDef(kFxMsgTime) ? 13.0 : 0.0);
 }
 
+static BOOL SoulHookClassName(NSString *className, NSString *selName, IMP hook,
+                              NSMutableDictionary<NSString *, NSValue *> *map) {
+    Class cls = objc_getClass(className.UTF8String);
+    if (!cls) return NO;
+    SEL sel = NSSelectorFromString(selName);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return NO;
+    if (method_getImplementation(m) == hook) return YES;   // 继承到的就是我们的 hook
+    IMP orig = NULL;
+    if (!SoulInstallMethodHook(cls, sel, hook, &orig) || !orig) return NO;
+    @synchronized (map) { map[className] = [NSValue valueWithPointer:orig]; }
+    return YES;
+}
+
 static BOOL SoulInstallMsgTimeHooks(void) {
     static BOOL done = NO;
     if (done) return YES;
-    Class cell = objc_getClass("SODCMsgCell");
     Class layout = objc_getClass("SODCMsgLayout");
-    if (!cell || !layout) return NO;
-    BOOL ok = NO;
-    ok |= SoulInstallMethodHook(cell, NSSelectorFromString(@"configWithMsgLayout:"),
-                                (IMP)SoulHookMsgCellConfig, (IMP *)&gOrigMsgCellConfig);
-    ok |= SoulInstallMethodHook(cell, NSSelectorFromString(@"prepareCell:withMsgLayout:"),
-                                (IMP)SoulHookMsgCellPrepare, (IMP *)&gOrigMsgCellPrepare);
-    ok |= SoulInstallMethodHook(cell, NSSelectorFromString(@"layoutSubviews"),
-                                (IMP)SoulHookMsgCellLayout, (IMP *)&gOrigMsgCellLayout);
-    ok |= SoulInstallMethodHook(layout, NSSelectorFromString(@"cellHeight"),
-                                (IMP)SoulHookMsgCellHeight, (IMP *)&gOrigMsgCellHeight);
-    if (ok) {
-        done = YES;
-        SoulLog(@"msg-time: hooks installed (config=%d layout=%d height=%d)",
-                gOrigMsgCellConfig != NULL, gOrigMsgCellLayout != NULL, gOrigMsgCellHeight != NULL);
+    if (!layout) return NO;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        gMsgConfigOrig = [NSMutableDictionary dictionary];
+        gMsgPrepareOrig = [NSMutableDictionary dictionary];
+        gMsgLayoutOrig = [NSMutableDictionary dictionary];
+    });
+    NSArray<NSString *> *configClasses = @[
+        @"SODCMsgCell",
+        @"SOPrivateChatTableViewCell",
+        @"SOChatTextMessageTableViewCell",
+        @"SOChatAudioMessageTableViewCell",
+        @"SOChatPhotoMessageTableViewCell",
+        @"SOCRBaseAvatarMessageCell",
+        @"SOChatRoomBaseMessageCell",
+        @"SOGCMsgBaseCell",
+        @"SOChatPhotoExchangeCell",
+        @"SOChatRoomRoomLevelCell",
+        @"SOLittleAssistantNoticeCell",
+    ];
+    NSArray<NSString *> *prepareClasses = @[
+        @"SODCMsgCell",
+        @"SOPrivateChatTableViewCell",
+        @"SOCRBaseAvatarMessageCell",
+        @"SOChatRoomBaseMessageCell",
+        @"SOGCMsgBaseCell",
+        @"SOChatSystemHintMessageTableViewCell",
+        @"SOChatUserBackMetionTableViewCell",
+        @"SODiceGameMessageTableViewCell",
+        @"SOMetaPopMessageCell",
+        @"SOPCQuestionCell",
+        @"SOPCSignalDetailCell",
+    ];
+    NSArray<NSString *> *layoutClasses = @[
+        @"SODCMsgCell",
+        @"SOPrivateChatTableViewCell",
+        @"SOCRBaseAvatarMessageCell",
+        @"SOChatRoomBaseMessageCell",
+        @"SOGCMsgBaseCell",
+    ];
+    BOOL any = NO;
+    for (NSString *name in configClasses) {
+        any |= SoulHookClassName(name, @"configWithMsgLayout:", (IMP)SoulHookMsgCellConfig, gMsgConfigOrig);
     }
-    return ok;
+    for (NSString *name in prepareClasses) {
+        any |= SoulHookClassName(name, @"prepareCell:withMsgLayout:", (IMP)SoulHookMsgCellPrepare, gMsgPrepareOrig);
+    }
+    for (NSString *name in layoutClasses) {
+        any |= SoulHookClassName(name, @"layoutSubviews", (IMP)SoulHookMsgCellLayout, gMsgLayoutOrig);
+    }
+    any |= SoulInstallMethodHook(layout, NSSelectorFromString(@"cellHeight"),
+                                 (IMP)SoulHookMsgCellHeight, (IMP *)&gOrigMsgCellHeight);
+    if (any) {
+        done = YES;
+        SoulLog(@"msg-time: hooks installed config=%lu prepare=%lu layout=%lu height=%d",
+                (unsigned long)gMsgConfigOrig.count, (unsigned long)gMsgPrepareOrig.count,
+                (unsigned long)gMsgLayoutOrig.count, gOrigMsgCellHeight != NULL);
+    }
+    return any;
 }
 
 // —— J. 青少年弹窗（SOMainSquareViewController / SOPrivateChatViewController）——
@@ -3124,14 +3317,14 @@ static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"voice")) SoulRetryInstall(^BOOL{ return SoulInstallVoiceHooks(); }, 12);
     if (!SoulSkipGroup(@"msgtime") || !SoulSkipGroup(@"autovoice")) SoulRetryInstall(^BOOL{ return SoulInstallMsgTimeHooks(); }, 24);
     if (!SoulSkipGroup(@"teen")) SoulRetryInstall(^BOOL{ return SoulInstallTeenHooks(); }, 24);
-    if (!SoulSkipGroup(@"startsplash")) SoulRetryInstall(^BOOL{ return SoulInstallSkipSplashHooks(); }, 8);
     if (!SoulSkipGroup(@"screenshot")) SoulRetryInstall(^BOOL{ return SoulInstallScreenshotHooks(); }, 15);
     if (!SoulSkipGroup(@"ads")) SoulRetryInstall(^BOOL{ return SoulInstallAdHooks(); }, 15);
+    SoulInstallFloatEntry();
     SoulInstallClearNotif();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v19. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v20. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
