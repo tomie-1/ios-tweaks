@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           cd tweaks/safarimodernizer
-          ./build.sh
+          bash ./build.sh
           ls -l tweak/packages
 
       - uses: actions/upload-artifact@v4
