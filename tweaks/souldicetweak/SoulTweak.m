@@ -1881,6 +1881,9 @@ static void SoulHookPCUpdateInChatRecall(id self, SEL _cmd, id model, id recalMs
 static void SoulHookGCRecallMsg(id self, SEL _cmd, id msg) {
     if (SoulDef(kFxAntiRecall)) {
         SoulLog(@"anti-recall: group-chat recall blocked");
+        SoulRecallMarkBlocked(msg);
+        if ([NSThread isMainThread]) SoulRefreshRecallBadges();
+        else dispatch_async(dispatch_get_main_queue(), ^{ SoulRefreshRecallBadges(); });
         return;
     }
     if (gOrigGCRecallMsg) gOrigGCRecallMsg(self, _cmd, msg);
