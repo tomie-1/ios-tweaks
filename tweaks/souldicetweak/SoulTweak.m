@@ -3209,6 +3209,8 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         if (bottom > cr.origin.y) cr.size.height = bottom - cr.origin.y;
     }
 
+    NSString *footerCellCN = NSStringFromClass([view class]).lowercaseString;
+    BOOL shareCard = [footerCellCN containsString:@"shareusercard"];
     BOOL mine = showTime && time.tag == 1;
     if (!showTime && cr.size.width > 0) mine = cr.origin.x > width * 0.45;
 
@@ -3239,10 +3241,16 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     }
     if (x < 6.0) x = 6.0;
 
-    CGFloat y = CGRectGetMaxY(cr) + 2.0;
-    if (y + rowH > height - 1.0) {
-        CGFloat above = cr.origin.y - rowH - 2.0;
-        y = (above >= 1.0) ? above : MAX(1.0, height - rowH - 2.0);
+    CGFloat y;
+    if (shareCard) {
+        /* 这个 cell 的内部 UIView 不含最外层底栏，直接贴 cell 底边才在卡片外。 */
+        y = MAX(1.0, height - rowH - 2.0);
+    } else {
+        y = CGRectGetMaxY(cr) + 2.0;
+        if (y + rowH > height - 1.0) {
+            CGFloat above = cr.origin.y - rowH - 2.0;
+            y = (above >= 1.0) ? above : MAX(1.0, height - rowH - 2.0);
+        }
     }
 
     CGRect oldT = time.frame, oldB = badge.frame;
@@ -3657,7 +3665,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v34. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v35. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
