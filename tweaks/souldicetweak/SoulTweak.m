@@ -2072,6 +2072,15 @@ static void SoulInstallRecallCellLayoutHook(void) {
 static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
+static IMP gOrigShareCardSetter = NULL;
+static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
+    if (gOrigShareCardSetter) ((void (*)(id, SEL, id))gOrigShareCardSetter)(self, _cmd, cardView);
+    if (cardView && [self isKindOfClass:[UIView class]]) {
+        SoulLog(@"msg-time: share-card view set cls=%@ card=%@",
+                NSStringFromClass([self class]), NSStringFromClass([cardView class]));
+        dispatch_async(dispatch_get_main_queue(), ^{ SoulMsgTimeRelayout(self); });
+    }
+}
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
     if (gOrigShareCardLayout) {
         ((void (*)(id, SEL))gOrigShareCardLayout)(self, _cmd);
@@ -2100,7 +2109,11 @@ static void SoulInstallShareCardLayoutHook(void) {
     }
     gShareCardLayoutClass = c;
     gShareCardLayoutHooked = YES;
-    SoulLog(@"msg-time: share-card layout hook installed own=%d", own);
+    SEL setSel = NSSelectorFromString(@"setShareCardView:");
+    if (class_getInstanceMethod(c, setSel)) {
+        SoulInstallMethodHook(c, setSel, (IMP)SoulHookShareCardViewSet, (IMP *)&gOrigShareCardSetter);
+    }
+    SoulLog(@"msg-time: share-card layout hook installed own=%d setter=%d", own, gOrigShareCardSetter != NULL);
 }
 
 static void SoulInstallRecallBadgeHook(void) {
@@ -3214,11 +3227,14 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         badge.frame = CGRectMake(bx, y, badgeW, rowH);
     }
     static int footerLog = 0;
+    NSString *cellCN = NSStringFromClass([view class]).lowercaseString;
+    BOOL logThisCell = footerLog < 8 || [cellCN containsString:@"shareusercard"];
     BOOL moved = (showTime && !CGRectEqualToRect(oldT, time.frame)) ||
                  (showBadge && !CGRectEqualToRect(oldB, badge.frame));
-    if (moved && footerLog < 8) {
-        footerLog++;
-        SoulLog(@"msg-time: footer content=%@ frame=%@ time=%@ badge=%@ cellH=%.1f",
+    if (moved && logThisCell) {
+        if (footerLog < 8) footerLog++;
+        SoulLog(@"msg-time: footer cell=%@ content=%@ frame=%@ time=%@ badge=%@ cellH=%.1f",
+                NSStringFromClass([view class]),
                 content ? NSStringFromClass([content class]) : @"nil",
                 NSStringFromCGRect(cr), showTime ? NSStringFromCGRect(time.frame) : @"off",
                 showBadge ? NSStringFromCGRect(badge.frame) : @"off", height);
@@ -3605,7 +3621,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v29. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v30. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
