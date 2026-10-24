@@ -2978,10 +2978,13 @@ static void SoulMsgTimePlace(id cell, double height, double width) {
     if (width < 1) width = view.bounds.size.width;
     if (width < 1) width = UIScreen.mainScreen.bounds.size.width;
     if (height < 20) height = view.bounds.size.height;
+    if (height < 20) height = 60;
+
     const CGFloat h = 11;
-    const CGFloat lw = 82;
-    CGFloat x = (label.tag == 1) ? (width - lw - 14) : 14;
-    CGFloat y = height - h - 1;
+    CGFloat maxW = MAX(40.0, width - 24.0);
+    CGSize fit = [label sizeThatFits:CGSizeMake(maxW, h)];
+    CGFloat lw = MIN(MAX(fit.width + 2.0, 40.0), maxW);
+
     SEL bs = NSSelectorFromString(@"bubbleView");
     UIView *bubble = nil;
     if ([cell respondsToSelector:bs]) {
@@ -2989,18 +2992,27 @@ static void SoulMsgTimePlace(id cell, double height, double width) {
         if ([v isKindOfClass:[UIView class]]) bubble = v;
     }
     CGRect bf = CGRectZero;
-    if (bubble) {
-        bf = [bubble convertRect:bubble.bounds toView:view];
-        if (bf.size.width > 0) {
-            x = (label.tag == 1) ? (CGRectGetMaxX(bf) - lw) : CGRectGetMinX(bf);
-            x = MAX(0, MIN(x, width - lw));
+    if (bubble) bf = [bubble convertRect:bubble.bounds toView:view];
+
+    BOOL hasBadge = ([cell viewWithTag:kSoulRecallBadgeTag] != nil);
+    CGFloat y = 0;
+    if (bf.size.height > 0) {
+        if (hasBadge) {
+            y = bf.origin.y - h - 1;
+        } else {
+            y = CGRectGetMaxY(bf) + 1;
+            if (y + h > height - 1) y = bf.origin.y - h - 1;
         }
-    }
-    /* 行高可能没按预期加上去，标签优先放到气泡上方，保证一定在可见区域内。 */
-    if (bf.size.height > 0 && bf.origin.y >= h + 2) {
-        y = bf.origin.y - h - 1;
+    } else {
+        y = height - h - 1;
     }
     y = MAX(0, MIN(y, height - h - 1));
+
+    CGFloat x = (label.tag == 1) ? (width - lw - 14) : 14;
+    if (bf.size.width > 0) {
+        x = (label.tag == 1) ? (CGRectGetMaxX(bf) - lw) : bf.origin.x;
+    }
+    x = MAX(6, MIN(x, width - lw - 6));
     label.frame = CGRectMake(x, y, lw, h);
     label.textAlignment = (label.tag == 1) ? NSTextAlignmentRight : NSTextAlignmentLeft;
 }
@@ -3366,7 +3378,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v25. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v26. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
