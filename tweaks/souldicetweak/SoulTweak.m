@@ -2004,10 +2004,12 @@ static BOOL SoulSkipGroup(NSString *g);
 static void (*gOrigDisplayWillCell)(id, SEL, id, id, id);
 static void (*gOrigDisplayOnCell)(id, SEL, id, id, id);
 static void SoulInstallRecallCellLayoutHook(void);
+static void SoulInstallShareCardLayoutHook(void);
 
 static void SoulHookDisplayWillCell(id self, SEL _cmd, id dc, id cell, id layout) {
     if (gOrigDisplayWillCell) gOrigDisplayWillCell(self, _cmd, dc, cell, layout);
     SoulInstallRecallCellLayoutHook();
+    SoulInstallShareCardLayoutHook();
     if ([cell isKindOfClass:[UIView class]]) SoulApplyMsgTime(cell, layout);
     BOOL b = SoulDef(kFxAntiRecall) && SoulRecallIsBlocked(layout);
     if (b) SoulLog(@"anti-recall: badge shown cell=%@ id=%@", NSStringFromClass([cell class]), SoulRecallMsgId(layout));
@@ -2067,6 +2069,40 @@ static void SoulInstallRecallCellLayoutHook(void) {
     SoulLog(@"anti-recall: cell layout hook installed own=%d", own);
 }
 
+static IMP gOrigShareCardLayout = NULL;
+static Class gShareCardLayoutClass = nil;
+static BOOL gShareCardLayoutHooked = NO;
+static void SoulHookShareCardLayout(id self, SEL _cmd) {
+    if (gOrigShareCardLayout) {
+        ((void (*)(id, SEL))gOrigShareCardLayout)(self, _cmd);
+    } else if (gShareCardLayoutClass) {
+        Class sup = class_getSuperclass(gShareCardLayoutClass);
+        Method m = sup ? class_getInstanceMethod(sup, _cmd) : NULL;
+        IMP imp = m ? method_getImplementation(m) : NULL;
+        if (imp) ((void (*)(id, SEL))imp)(self, _cmd);
+    }
+    SoulMsgTimeRelayout(self);
+}
+
+/* 分享主页的气泡在 willDisplay 时还是 0×0，等它自己布局完再贴时间。 */
+static void SoulInstallShareCardLayoutHook(void) {
+    if (gShareCardLayoutHooked) return;
+    Class c = objc_getClass("SOPrivateShareUserCardCell");
+    if (!c) return;
+    SEL sel = NSSelectorFromString(@"layoutSubviews");
+    BOOL own = SoulClassImplements(c, sel);
+    if (own) {
+        SoulInstallMethodHook(c, sel, (IMP)SoulHookShareCardLayout, (IMP *)&gOrigShareCardLayout);
+        if (!gOrigShareCardLayout) return;
+    } else {
+        if (!class_addMethod(c, sel, (IMP)SoulHookShareCardLayout, "v@:")) return;
+        gOrigShareCardLayout = NULL;
+    }
+    gShareCardLayoutClass = c;
+    gShareCardLayoutHooked = YES;
+    SoulLog(@"msg-time: share-card layout hook installed own=%d", own);
+}
+
 static void SoulInstallRecallBadgeHook(void) {
     if (gAntiRecallBadge) return;
     Class c = objc_getClass("SOPCMessageDisplayCenter");
@@ -2081,6 +2117,7 @@ static void SoulInstallRecallBadgeHook(void) {
                 gOrigDisplayWillCell != NULL, gOrigDisplayOnCell != NULL);
     }
     SoulInstallRecallCellLayoutHook();
+    SoulInstallShareCardLayoutHook();
 }
 
 static void SoulRecallKickRefresh(id manager, id model) {
@@ -2995,6 +3032,7 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
 
 // —— I. 每条消息显示时间（按 cell 类分别 hook）——
 static const void *kSoulMsgTimeLabelKey = &kSoulMsgTimeLabelKey;
+static const void *kSoulMsgTimeRetryKey = &kSoulMsgTimeRetryKey;
 
 static NSString *SoulMsgTimePattern(void) {
     NSString *fmt = SoulCfgString(kFxMsgTimeFmt);
@@ -3111,6 +3149,17 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
             }
             SoulLog(@"msg-time: content miss cell=%@ shareCard=%d subviews=%@",
                     NSStringFromClass([view class]), shareCard, subs);
+        }
+        if (!objc_getAssociatedObject(view, kSoulMsgTimeRetryKey)) {
+            objc_setAssociatedObject(view, kSoulMsgTimeRetryKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            __weak UIView *weakCell = view;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                UIView *c = weakCell;
+                if (!c) return;
+                objc_setAssociatedObject(c, kSoulMsgTimeRetryKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (c.window) SoulMsgTimeRelayout(c);
+            });
         }
     }
     /* 某些卡片会随着附加行高一起拉伸；此时把内容底边收回预留区上方。 */
@@ -3556,7 +3605,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v28. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v29. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
