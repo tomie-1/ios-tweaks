@@ -1896,13 +1896,16 @@ static UIView *SoulBestContentChild(UIView *parent, UIView *cell, int depth) {
 
 static UIView *SoulMessageContentView(UIView *cell) {
     if (!cell) return nil;
-    SEL bs = NSSelectorFromString(@"bubbleView");
-    if ([cell respondsToSelector:bs]) {
-        id v = ((id (*)(id, SEL))objc_msgSend)(cell, bs);
-        if ([v isKindOfClass:[UIView class]]) {
-            CGRect r = [(UIView *)v convertRect:((UIView *)v).bounds toView:cell];
-            if (SoulUsableContentRect(r, cell)) return (UIView *)v;
-        }
+    NSArray<NSString *> *sels = @[@"bubbleView", @"shareCardView", @"homePageShareCardView",
+                                  @"homepageShareCardView", @"userCardView", @"cardView",
+                                  @"messageContentView", @"contentCardView"];
+    for (NSString *name in sels) {
+        SEL sel = NSSelectorFromString(name);
+        if (![cell respondsToSelector:sel]) continue;
+        id v = ((id (*)(id, SEL))objc_msgSend)(cell, sel);
+        if (![v isKindOfClass:[UIView class]]) continue;
+        CGRect r = [(UIView *)v convertRect:((UIView *)v).bounds toView:cell];
+        if (SoulUsableContentRect(r, cell)) return (UIView *)v;
     }
     UIView *root = cell;
     if ([cell isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)cell).contentView;
@@ -3086,8 +3089,29 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (content) cr = [content convertRect:content.bounds toView:view];
     if (!SoulUsableContentRect(cr, view)) {
         CGFloat fx = 14.0;
-        if (showTime && time.tag == 1) fx = width - 14.0;
-        cr = CGRectMake(fx, MAX(0.0, height - kSoulMsgTimeReserve), 1.0, 1.0);
+        BOOL mineFallback = showTime && time.tag == 1;
+        if (mineFallback) fx = width - 14.0;
+        NSString *cellCN = NSStringFromClass([view class]).lowercaseString;
+        BOOL shareCard = [cellCN containsString:@"shareusercard"] ||
+                         [cellCN containsString:@"homepageshare"] ||
+                         [cellCN containsString:@"usercardcell"];
+        /* 分享主页这类自绘卡片会撑满 cell，底部留白并不可靠；时间放卡片上沿。 */
+        cr = shareCard ? CGRectMake(fx, 1.0, 1.0, 1.0)
+                       : CGRectMake(fx, MAX(0.0, height - kSoulMsgTimeReserve), 1.0, 1.0);
+        static int missLog = 0;
+        if (missLog < 4) {
+            missLog++;
+            NSMutableArray<NSString *> *subs = [NSMutableArray array];
+            UIView *root = view;
+            if ([view isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)view).contentView;
+            else if ([view isKindOfClass:[UICollectionViewCell class]]) root = ((UICollectionViewCell *)view).contentView;
+            for (UIView *sv in root.subviews) {
+                [subs addObject:[NSString stringWithFormat:@"%@ %@", NSStringFromClass([sv class]),
+                                 NSStringFromCGRect([sv convertRect:sv.bounds toView:view])]];
+            }
+            SoulLog(@"msg-time: content miss cell=%@ shareCard=%d subviews=%@",
+                    NSStringFromClass([view class]), shareCard, subs);
+        }
     }
     /* 某些卡片会随着附加行高一起拉伸；此时把内容底边收回预留区上方。 */
     if (height > kSoulMsgTimeReserve + rowH && CGRectGetMaxY(cr) > height - 2.0) {
@@ -3532,7 +3556,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v27. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v28. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
