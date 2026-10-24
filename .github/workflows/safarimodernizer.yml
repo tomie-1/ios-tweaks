@@ -33,9 +33,14 @@ jobs:
       - name: Build packages
         run: |
           set -euo pipefail
-          cd tweaks/safarimodernizer
-          bash ./build.sh
-          ls -l tweak/packages
+          cd tweaks/safarimodernizer/web
+          npm ci
+          npm run build
+          cd ../tweak
+          python3 embed.py ../web/polyfill.min.js polyfill.h polyfill_js
+          python3 embed.py ../web/smfix.min.js smfix.h smfix_js
+          bash ./build-all.sh
+          ls -l packages
 
       - uses: actions/upload-artifact@v4
         with:
