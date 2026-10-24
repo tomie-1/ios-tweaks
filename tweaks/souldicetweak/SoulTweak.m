@@ -819,33 +819,13 @@ static UIColor *SoulFxCardBackground(void) {
     [super viewWillAppear:animated];
     [self.tableView reloadData];
 }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 2; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return section == 0 ? 1 : (NSInteger)SoulTimeFormatOptions().count;
-}
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 0 ? @"自定义" : @"常用";
+    return 1 + (NSInteger)SoulTimeFormatOptions().count;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     NSString *current = SoulCfgString(_row.key);
-    if (indexPath.section == 0) {
-        static NSString *cid = @"soulfx-custom";
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
-        if (!cell) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cid];
-            cell.textLabel.font = [UIFont systemFontOfSize:16];
-            cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
-            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        }
-        BOOL isPreset = NO;
-        for (NSArray<NSString *> *opt in SoulTimeFormatOptions()) {
-            if ([current isEqualToString:opt[1]]) { isPreset = YES; break; }
-        }
-        cell.textLabel.text = @"自定义格式";
-        cell.detailTextLabel.text = isPreset ? @"未设置" : (current.length ? current : @"未设置");
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        return cell;
-    }
+    if (!current.length) current = @"HH:mm";
     static NSString *cid = @"soulfx-format";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
@@ -854,8 +834,14 @@ static UIColor *SoulFxCardBackground(void) {
         cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:13 weight:UIFontWeightRegular];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
-    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row];
-    if (!current.length) current = @"HH:mm";
+    if (indexPath.row == 0) {
+        cell.textLabel.text = @"自定义格式";
+        cell.detailTextLabel.text = current;
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+        cell.tintColor = SoulAccent();
+        return cell;
+    }
+    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row - 1];
     cell.textLabel.text = opt[0];
     cell.detailTextLabel.text = opt[1];
     cell.accessoryType = [current isEqualToString:opt[1]] ? UITableViewCellAccessoryCheckmark
@@ -865,12 +851,12 @@ static UIColor *SoulFxCardBackground(void) {
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 0) {
+    if (indexPath.row == 0) {
         SoulFxTextVC *vc = [[SoulFxTextVC alloc] initWithRow:_row];
         [self.navigationController pushViewController:vc animated:YES];
         return;
     }
-    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row];
+    NSArray<NSString *> *opt = SoulTimeFormatOptions()[indexPath.row - 1];
     SoulSetCfgString(_row.key, opt[1]);
     [tableView reloadData];
     SoulLog(@"msg-time: format -> %@", opt[1]);
@@ -952,16 +938,23 @@ static UIColor *SoulFxCardBackground(void) {
 @end
 
 static SoulFxPanelHost *gSoulPanelVC = nil;
+static BOOL gSoulPanelTransitioning = NO;
 
 static void SoulHidePanel(void) {
     SoulFxPanelHost *vc = gSoulPanelVC;
     gSoulPanelVC = nil;
     if (!vc) return;
     UIViewController *presenter = vc.presentingViewController;
-    if (presenter) [presenter dismissViewControllerAnimated:YES completion:nil];
+    gSoulPanelTransitioning = YES;
+    if (presenter) {
+        [presenter dismissViewControllerAnimated:YES completion:^{ gSoulPanelTransitioning = NO; }];
+    } else {
+        gSoulPanelTransitioning = NO;
+    }
 }
 
 static void SoulTogglePanel(void) {
+    if (gSoulPanelTransitioning) return;
     if (gSoulPanelVC) { SoulHidePanel(); return; }
     UIViewController *top = SoulTopViewController();
     if (!top) { SoulLog(@"toggle: no top view controller"); return; }
@@ -969,7 +962,8 @@ static void SoulTogglePanel(void) {
     vc.modalPresentationStyle = UIModalPresentationOverFullScreen;
     vc.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     gSoulPanelVC = vc;
-    [top presentViewController:vc animated:YES completion:nil];
+    gSoulPanelTransitioning = YES;
+    [top presentViewController:vc animated:YES completion:^{ gSoulPanelTransitioning = NO; }];
 }
 
 #pragma mark - 设置页入口图标
@@ -1074,11 +1068,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
         }
     }
     UIView *hit = deepest ?: tbc.tabBar;
-    CGPoint center = [hit convertPoint:hit.center toView:tbc.tabBar];
     NSInteger count = (NSInteger)tbc.tabBar.items.count;
     if (count <= 0) return;
     CGFloat slot = tbc.tabBar.bounds.size.width / (CGFloat)count;
-    NSInteger index = (NSInteger)(center.x / MAX(slot, 1.0));
+    NSInteger index = (NSInteger)(p.x / MAX(slot, 1.0));
     index = MIN(MAX(index, 0), count - 1);
     NSString *title = tbc.tabBar.items[index].title;
     if (!title.length) title = SoulFirstLabelText(hit);
@@ -3017,12 +3010,37 @@ static NSString *SoulMsgTimeText(long long ms) {
 }
 
 static long long SoulMsgTimestamp(id msg) {
+    static int missLogged = 0;
     long long ms = 0;
-    @try {
-        id v = [msg valueForKey:@"timestamp"];
-        if ([v isKindOfClass:[NSNumber class]] || [v isKindOfClass:[NSString class]]) ms = [v longLongValue];
-    } @catch (__unused NSException *e) {}
+    NSArray<NSString *> *names = @[@"timestamp", @"sendTime", @"msgTime", @"createTime", @"time"];
+    for (NSString *name in names) {
+        SEL sel = NSSelectorFromString(name);
+        if (![msg respondsToSelector:sel]) continue;
+        @try {
+            NSMethodSignature *sig = [msg methodSignatureForSelector:sel];
+            const char *type = sig.methodReturnType;
+            if (!type) continue;
+            if (type[0] == 'q' || type[0] == 'Q' || type[0] == 'i' || type[0] == 'I') {
+                ms = ((long long (*)(id, SEL))objc_msgSend)(msg, sel);
+            } else if (type[0] == 'd' || type[0] == 'f') {
+                double d = ((double (*)(id, SEL))objc_msgSend)(msg, sel);
+                ms = (long long)(d > 100000000000.0 ? d : d * 1000.0);
+            } else if (type[0] == '@') {
+                id v = ((id (*)(id, SEL))objc_msgSend)(msg, sel);
+                if ([v isKindOfClass:[NSNumber class]]) ms = [v longLongValue];
+                else if ([v isKindOfClass:[NSString class]]) ms = [v longLongValue];
+                else if ([v isKindOfClass:[NSDate class]]) ms = (long long)([(NSDate *)v timeIntervalSince1970] * 1000.0);
+            }
+        } @catch (__unused NSException *e) {}
+        if (ms > 0) break;
+    }
     if (ms > 0 && ms < 100000000000LL) ms *= 1000;
+    if (ms <= 0 && missLogged < 4) {
+        missLogged++;
+        NSMutableArray *have = [NSMutableArray array];
+        for (NSString *name in names) if ([msg respondsToSelector:NSSelectorFromString(name)]) [have addObject:name];
+        SoulLog(@"msg-time: no timestamp cls=%@ selectors=%@", NSStringFromClass([msg class]), have);
+    }
     return ms;
 }
 
@@ -3067,6 +3085,14 @@ static void SoulApplyMsgTime(id cell, id layout) {
     SEL msgSel = NSSelectorFromString(@"message");
     if (layout && [layout respondsToSelector:msgSel]) {
         msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
+    }
+    if (!msg && layout && [layout respondsToSelector:NSSelectorFromString(@"item")]) {
+        msg = ((id (*)(id, SEL))objc_msgSend)(layout, NSSelectorFromString(@"item"));
+    }
+    static int nilLogged = 0;
+    if (!msg && nilLogged < 4) {
+        nilLogged++;
+        SoulLog(@"msg-time: no message layout=%@", NSStringFromClass([layout class]));
     }
     long long ms = msg ? SoulMsgTimestamp(msg) : 0;
     if (ms <= 0) { label.hidden = YES; return; }
@@ -3400,7 +3426,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v22. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v23. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
