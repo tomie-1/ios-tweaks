@@ -624,9 +624,12 @@ static UIColor *SoulFxCardBackground(void) {
 @interface SoulFxRootVC : UITableViewController
 @end
 
-@implementation SoulFxRootVC
+@implementation SoulFxRootVC {
+    NSArray<SoulFxGroup *> *_groups;
+}
 - (instancetype)init {
     if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
+        _groups = SoulFxGroups();
         self.title = @"Soul 助手";
         self.tableView.estimatedRowHeight = 58;
         self.tableView.backgroundColor = [UIColor clearColor];
@@ -642,7 +645,7 @@ static UIColor *SoulFxCardBackground(void) {
 - (void)soulDone { SoulHidePanel(); }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return (NSInteger)SoulFxGroups().count;
+    return (NSInteger)_groups.count;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *cid = @"soulfx-group";
@@ -653,7 +656,7 @@ static UIColor *SoulFxCardBackground(void) {
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12.5];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
-    SoulFxGroup *group = SoulFxGroups()[indexPath.row];
+    SoulFxGroup *group = _groups[indexPath.row];
     cell.textLabel.text = group.title;
     cell.detailTextLabel.text = group.summary;
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -661,7 +664,7 @@ static UIColor *SoulFxCardBackground(void) {
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    SoulFxGroup *group = SoulFxGroups()[indexPath.row];
+    SoulFxGroup *group = _groups[indexPath.row];
     SoulFxGroupVC *vc = [[SoulFxGroupVC alloc] initWithGroup:group];
     [self.navigationController pushViewController:vc animated:YES];
 }
@@ -877,6 +880,7 @@ static UIColor *SoulFxCardBackground(void) {
 @interface SoulFxPanelHost : UIViewController <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) NSLayoutConstraint *cardHeight;
 @property (nonatomic, weak) UINavigationController *nav;
+@property (nonatomic, assign) BOOL heightLocked;
 @end
 
 @implementation SoulFxPanelHost
@@ -899,7 +903,7 @@ static UIColor *SoulFxCardBackground(void) {
     nav.view.translatesAutoresizingMaskIntoConstraints = NO;
     nav.view.backgroundColor = SoulFxCardBackground();
     UINavigationBarAppearance *ap = [[UINavigationBarAppearance alloc] init];
-    [ap configureWithTransparentBackground];
+    [ap configureWithDefaultBackground];
     ap.titleTextAttributes = @{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]};
     nav.navigationBar.standardAppearance = ap;
     nav.navigationBar.scrollEdgeAppearance = ap;
@@ -926,6 +930,7 @@ static UIColor *SoulFxCardBackground(void) {
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    if (self.heightLocked) return;
     UIViewController *top = self.nav.topViewController;
     if (![top isKindOfClass:[UITableViewController class]] || !self.cardHeight) return;
     UITableView *tv = ((UITableViewController *)top).tableView;
@@ -936,6 +941,7 @@ static UIColor *SoulFxCardBackground(void) {
     CGFloat h = MIN(maxH, navH + content + 26.0);
     h = MAX(h, 240.0);
     if (fabs(self.cardHeight.constant - h) > 1.0) self.cardHeight.constant = h;
+    self.heightLocked = YES;
 }
 - (void)soulBackdrop:(UITapGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateEnded) SoulHidePanel();
@@ -991,9 +997,9 @@ static void SoulInstallEntry(UIViewController *vc) {
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
     btn.translatesAutoresizingMaskIntoConstraints = NO;
     [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg] forState:UIControlStateNormal];
-    btn.tintColor = SoulAccent();
-    btn.backgroundColor = [UIColor colorWithWhite:0.5 alpha:0.14];
-    btn.layer.cornerRadius = 17;
+    btn.tintColor = [UIColor whiteColor];
+    btn.backgroundColor = SoulAccent();
+    btn.layer.cornerRadius = 24;
     [btn addTarget:vc action:@selector(soulEntryTapped:) forControlEvents:UIControlEventTouchUpInside];
 
     UIView *nav = nil;
@@ -1002,19 +1008,21 @@ static void SoulInstallEntry(UIViewController *vc) {
         id v = ((id (*)(id, SEL))objc_msgSend)(vc, navSel);
         if ([v isKindOfClass:[UIView class]]) nav = v;
     }
-    UIView *host = nav ?: vc.view;
-    [host addSubview:btn];
-    UILabel *titleLabel = nav ? SoulFindWidestLabel(nav, nil) : nil;
-    NSMutableArray *cs = [NSMutableArray array];
-    [cs addObject:[btn.widthAnchor constraintEqualToConstant:34]];
-    [cs addObject:[btn.heightAnchor constraintEqualToConstant:34]];
-    [cs addObject:[btn.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:-12]];
-    if (titleLabel) {
-        [cs addObject:[btn.centerYAnchor constraintEqualToAnchor:titleLabel.centerYAnchor]];
-    } else {
-        [cs addObject:[btn.centerYAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.topAnchor constant:22]];
-    }
-    [NSLayoutConstraint activateConstraints:cs];
+    [vc.view addSubview:btn];
+    [NSLayoutConstraint activateConstraints:@[
+        [btn.widthAnchor constraintEqualToConstant:48],
+        [btn.heightAnchor constraintEqualToConstant:48],
+        [btn.trailingAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.trailingAnchor constant:-18],
+        [btn.bottomAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.bottomAnchor constant:-28],
+    ]];
+    btn.layer.cornerRadius = 24;
+    btn.layer.shadowColor = [UIColor blackColor].CGColor;
+    btn.layer.shadowOpacity = 0.22;
+    btn.layer.shadowRadius = 8;
+    btn.layer.shadowOffset = CGSizeMake(0, 3);
+    UIImageSymbolConfiguration *bigCfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:21 weight:UIImageSymbolWeightSemibold];
+    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:bigCfg] forState:UIControlStateNormal];
 }
 
 @implementation UIViewController (SoulEntry)
@@ -1054,24 +1062,32 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
     UITabBarController *tbc = self.tabBarController;
     if (!tbc) return;
     CGPoint p = [g locationInView:tbc.tabBar];
-    NSMutableArray<UIView *> *buttons = [NSMutableArray array];
-    for (UIView *sub in tbc.tabBar.subviews) {
-        if (sub.userInteractionEnabled && sub.frame.size.width > 0) [buttons addObject:sub];
+    UIView *deepest = nil;
+    NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:tbc.tabBar];
+    while (queue.count) {
+        UIView *v = queue.lastObject;
+        [queue removeLastObject];
+        CGPoint local = [v convertPoint:p fromView:tbc.tabBar];
+        if (CGRectContainsPoint(v.bounds, local)) {
+            deepest = v;
+            for (UIView *sub in v.subviews) [queue addObject:sub];
+        }
     }
-    NSInteger index = -1;
-    for (NSInteger i = 0; i < (NSInteger)buttons.count; i++) {
-        if (CGRectContainsPoint(buttons[i].frame, p)) { index = i; break; }
-    }
-    if (index < 0) return;
-    NSString *title = nil;
-    if (index < (NSInteger)tbc.tabBar.items.count) title = tbc.tabBar.items[index].title;
-    if (!title.length) title = SoulFirstLabelText(buttons[index]);
+    UIView *hit = deepest ?: tbc.tabBar;
+    CGPoint center = [hit convertPoint:hit.center toView:tbc.tabBar];
+    NSInteger count = (NSInteger)tbc.tabBar.items.count;
+    if (count <= 0) return;
+    CGFloat slot = tbc.tabBar.bounds.size.width / (CGFloat)count;
+    NSInteger index = (NSInteger)(center.x / MAX(slot, 1.0));
+    index = MIN(MAX(index, 0), count - 1);
+    NSString *title = tbc.tabBar.items[index].title;
+    if (!title.length) title = SoulFirstLabelText(hit);
     SoulLog(@"tab long-press index=%ld title=%@", (long)index, title ?: @"?");
     if (![title containsString:@"自己"] && ![title containsString:@"我的"]) return;
 
     UIImpactFeedbackGenerator *gen = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [gen impactOccurred];
-    UIView *btn = buttons[index];
+    UIView *btn = hit;
     btn.transform = CGAffineTransformMakeScale(0.88, 0.88);
     [UIView animateWithDuration:0.16 animations:^{ btn.transform = CGAffineTransformIdentity; }];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
@@ -1098,7 +1114,9 @@ static void SoulHookTabDidAppear(id self, SEL _cmd, BOOL animated) {
     lp.delegate = [SoulTabPressTarget shared];
     [tbc.tabBar addGestureRecognizer:lp];
     [SoulTabPressTarget shared].tabBarController = tbc;
-    SoulLog(@"tab: long-press installed %@", NSStringFromClass([tbc class]));
+    NSMutableArray<NSString *> *titles = [NSMutableArray array];
+    for (UITabBarItem *item in tbc.tabBar.items) [titles addObject:item.title ?: @"?"];
+    SoulLog(@"tab: long-press installed %@ titles=%@", NSStringFromClass([tbc class]), titles);
 }
 
 static BOOL SoulInstallTabHooks(void) {
@@ -3025,16 +3043,19 @@ static void SoulMsgTimePlace(id cell, double height, double width) {
         id v = ((id (*)(id, SEL))objc_msgSend)(cell, bs);
         if ([v isKindOfClass:[UIView class]]) bubble = v;
     }
+    CGRect bf = CGRectZero;
     if (bubble) {
-        CGRect bf = [bubble convertRect:bubble.bounds toView:view];
-        if (bf.size.height > 0 && CGRectGetMaxY(bf) > y - 1) {
-            y = MAX(0, CGRectGetMinY(bf) - h - 1);
-        }
+        bf = [bubble convertRect:bubble.bounds toView:view];
         if (bf.size.width > 0) {
             x = (label.tag == 1) ? (CGRectGetMaxX(bf) - lw) : CGRectGetMinX(bf);
             x = MAX(0, MIN(x, width - lw));
         }
     }
+    /* 行高可能没按预期加上去，标签优先放到气泡上方，保证一定在可见区域内。 */
+    if (bf.size.height > 0 && bf.origin.y >= h + 2) {
+        y = bf.origin.y - h - 1;
+    }
+    y = MAX(0, MIN(y, height - h - 1));
     label.frame = CGRectMake(x, y, lw, h);
     label.textAlignment = (label.tag == 1) ? NSTextAlignmentRight : NSTextAlignmentLeft;
 }
@@ -3065,6 +3086,12 @@ static void SoulApplyMsgTime(id cell, id layout) {
     label.tag = mine ? 1 : 0;
     label.text = SoulMsgTimeText(ms);
     label.hidden = NO;
+    static int logged = 0;
+    if (logged < 3) {
+        logged++;
+        SoulLog(@"msg-time: label %@ row=%.0f width=%.0f", label.text, h,
+                ((UIView *)cell).bounds.size.width);
+    }
     double h = 0;
     SEL hSel = NSSelectorFromString(@"cellHeight");
     if (layout && [layout respondsToSelector:hSel]) {
@@ -3373,7 +3400,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v21. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v22. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
