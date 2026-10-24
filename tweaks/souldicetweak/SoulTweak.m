@@ -2973,6 +2973,8 @@ static long long SoulMsgTimestamp(id msg) {
     return ms;
 }
 
+static void SoulMsgTimePlace(id cell, double height, double width);
+
 static void SoulMsgTimeRelayout(id cell) {
     UILabel *label = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
     if (!label || label.hidden) return;
