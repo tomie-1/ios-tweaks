@@ -45,6 +45,10 @@ static NSString * const kFxNoTeenPopup   = @"soulfx_no_teen_popup";
 static NSString * const kFxMsgTime       = @"soulfx_msg_time";
 static NSString * const kFxMsgTimeFmt    = @"soulfx_msg_time_format";
 static NSString * const kFxSkipSplash    = @"soulfx_skip_splash";
+static NSString * const kFxNoScreenshot  = @"soulfx_no_screenshot_notify";
+static NSString * const kFxNoAds         = @"soulfx_no_ads";
+static NSString * const kFxAutoVoiceText = @"soulfx_auto_voice_text";
+static NSString * const kFxMenuTools     = @"soulfx_menu_tools";
 
 #pragma mark - 插件独立目录（不写 App 自身配置）
 
@@ -277,6 +281,9 @@ static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
             [SoulFxRow switchRow:@"禁止弹「挚友」邀请" key:kFxNoCloseFriend def:NO],
             [SoulFxRow switchRow:@"回前台自动清除通知" key:kFxClearNotif def:NO],
             [SoulFxRow switchRow:@"去除青少年弹窗" key:kFxNoTeenPopup def:NO],
+            [SoulFxRow switchRow:@"截图不提醒对方" key:kFxNoScreenshot def:NO],
+            [SoulFxRow switchRow:@"语音消息自动转文字" key:kFxAutoVoiceText def:NO],
+            [SoulFxRow switchRow:@"长按菜单增强（复制文本 / 保存语音）" key:kFxMenuTools def:NO],
         ]),
         SoulFxGroupMake(@"图片 / 视频 / 分享", @"阅后即焚、水印、分享、选择数量", @[
             [SoulFxRow switchRow:@"阅后即焚解锁（截屏 / 多次查看）" key:kFxSnapUnlock def:NO],
@@ -290,6 +297,7 @@ static NSArray<SoulFxGroup *> *SoulFxGroups(void) {
             [SoulFxRow switchRow:@"关闭匹配背景音乐" key:kFxMuteMatchBgm def:NO],
             [SoulFxRow switchRow:@"跳过开屏 / 启动广告" key:kFxNoSplashAd def:NO],
             [SoulFxRow switchRow:@"语音消息解锁装扮" key:kFxVoiceUnlock def:NO],
+            [SoulFxRow switchRow:@"去除广告（信息流 / 搜索 / 评论 / 聊天）" key:kFxNoAds def:NO],
         ]),
         SoulFxGroupMake(@"消息时间", @"每条消息单独显示发送时间", @[
             [SoulFxRow switchRow:@"每条消息显示时间" key:kFxMsgTime def:NO],
@@ -2099,6 +2107,8 @@ static long long SoulHookMsgTimestamp(id self, SEL _cmd) {
     return orig ? ((long long (*)(id, SEL))orig)(self, _cmd) : 0;
 }
 
+static void SoulAppendMenuItems(id handler, id msg, id cell);
+
 static void (*gOrigMenuAddItems)(id, SEL, id, id, id);
 static void SoulHookMenuAddItems(id self, SEL _cmd, id msg, id cell, id recognizer) {
     BOOL mine = NO;
@@ -2138,10 +2148,12 @@ static void SoulHookMenuAddItems(id self, SEL _cmd, id msg, id cell, id recogniz
             gOwnRecallFake = NO;
             gOwnRecallFakeMsg = nil;
         }
+        SoulAppendMenuItems(self, msg, cell);
         SoulLog(@"own-recall: menu rebuilt with fresh time cls=%@", cn ?: @"?");
         return;
     }
     if (gOrigMenuAddItems) gOrigMenuAddItems(self, _cmd, msg, cell, recognizer);
+    SoulAppendMenuItems(self, msg, cell);
 }
 
 static BOOL gOwnRecallMenuDone = NO;
@@ -2481,6 +2493,286 @@ static BOOL SoulInstallVoiceHooks(void) {
     return NO;
 }
 
+// —— L. 通用 block 调用 ——
+static void SoulRunBlock(id block, id arg) {
+    if (!block) return;
+    void (^cb)(id) = block;
+    cb(arg);
+}
+
+static void SoulToast(NSString *message) {
+    if (!message.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *top = SoulTopViewController();
+        if (!top || top.presentedViewController) return;
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [top presentViewController:alert animated:YES completion:nil];
+    });
+}
+
+// —— M. 截图不提醒对方（SOPCScreenshotAuditManager）——
+static void (*gOrigScreenshotHandle)(id, SEL);
+static void SoulHookScreenshotHandle(id self, SEL _cmd) {
+    if (SoulDef(kFxNoScreenshot)) {
+        SoulLog(@"screenshot: audit suppressed");
+        return;
+    }
+    if (gOrigScreenshotHandle) gOrigScreenshotHandle(self, _cmd);
+}
+
+static BOOL SoulInstallScreenshotHooks(void) {
+    static BOOL done = NO;
+    if (done) return YES;
+    Class cls = objc_getClass("_TtC15SoulPrivateChat26SOPCScreenshotAuditManager");
+    if (!cls) return NO;
+    if (SoulInstallMethodHook(cls, NSSelectorFromString(@"handleScreenshot"),
+                              (IMP)SoulHookScreenshotHandle, (IMP *)&gOrigScreenshotHandle)) {
+        done = YES;
+        SoulLog(@"screenshot: audit hook installed");
+    }
+    return done;
+}
+
+// —— N. 去广告（信息流 / 推荐 / 评论 / 搜索 / 群聊 / 横幅）——
+static BOOL (*gOrigSquareAdEnabled)(id, SEL);
+static BOOL SoulHookSquareAdEnabled(id self, SEL _cmd) {
+    if (SoulDef(kFxNoAds)) return NO;
+    return gOrigSquareAdEnabled ? gOrigSquareAdEnabled(self, _cmd) : NO;
+}
+
+static BOOL (*gOrigRecAdEnabled)(id, SEL);
+static BOOL SoulHookRecAdEnabled(id self, SEL _cmd) {
+    if (SoulDef(kFxNoAds)) return NO;
+    return gOrigRecAdEnabled ? gOrigRecAdEnabled(self, _cmd) : NO;
+}
+
+static BOOL (*gOrigGCAdAutoDisplay)(id, SEL);
+static BOOL SoulHookGCAdAutoDisplay(id self, SEL _cmd) {
+    if (SoulDef(kFxNoAds)) return NO;
+    return gOrigGCAdAutoDisplay ? gOrigGCAdAutoDisplay(self, _cmd) : NO;
+}
+
+static void (*gOrigCommentAdRequest)(id, SEL, id);
+static void SoulHookCommentAdRequest(id self, SEL _cmd, id done) {
+    if (SoulDef(kFxNoAds)) {
+        SoulLog(@"ads: comment ad request skipped");
+        SoulRunBlock(done, nil);
+        return;
+    }
+    if (gOrigCommentAdRequest) gOrigCommentAdRequest(self, _cmd, done);
+}
+
+static void (*gOrigSearchAdRequest)(id, SEL, id, id, id);
+static void SoulHookSearchAdRequest(id self, SEL _cmd, id request, id success, id failure) {
+    if (SoulDef(kFxNoAds)) {
+        SoulLog(@"ads: search ad request skipped");
+        SoulRunBlock(success, nil);
+        return;
+    }
+    if (gOrigSearchAdRequest) gOrigSearchAdRequest(self, _cmd, request, success, failure);
+}
+
+static void (*gOrigBannerDidMove)(id, SEL);
+static void SoulHookBannerDidMove(id self, SEL _cmd) {
+    if (gOrigBannerDidMove) gOrigBannerDidMove(self, _cmd);
+    if (SoulDef(kFxNoAds)) ((UIView *)self).hidden = YES;
+}
+
+static BOOL SoulInstallAdHooks(void) {
+    static BOOL done = NO;
+    if (done) return YES;
+    BOOL ok = NO;
+    Class square = objc_getClass("SoulAdSquareViewModel");
+    if (square) {
+        ok |= SoulInstallMethodHook(square, NSSelectorFromString(@"requestAdEnabed"),
+                                    (IMP)SoulHookSquareAdEnabled, (IMP *)&gOrigSquareAdEnabled);
+    }
+    Class rec = objc_getClass("SORecommandSubViewModel");
+    if (rec) {
+        ok |= SoulInstallMethodHook(rec, NSSelectorFromString(@"requestAdEnabed"),
+                                    (IMP)SoulHookRecAdEnabled, (IMP *)&gOrigRecAdEnabled);
+    }
+    Class gc = objc_getClass("SOGCViewController");
+    if (gc) {
+        ok |= SoulInstallMethodHook(gc, NSSelectorFromString(@"nativeAdEnableAutoDisplay"),
+                                    (IMP)SoulHookGCAdAutoDisplay, (IMP *)&gOrigGCAdAutoDisplay);
+    }
+    Class pc = objc_getClass("SOPostCommentsViewModel");
+    if (pc) {
+        ok |= SoulInstallMethodHook(pc, NSSelectorFromString(@"requestAdData:"),
+                                    (IMP)SoulHookCommentAdRequest, (IMP *)&gOrigCommentAdRequest);
+    }
+    Class search = objc_getClass("SOSearchVC");
+    if (search) {
+        ok |= SoulInstallMethodHook(search, NSSelectorFromString(@"requestAd:success:failure:"),
+                                    (IMP)SoulHookSearchAdRequest, (IMP *)&gOrigSearchAdRequest);
+    }
+    Class banner = objc_getClass("SoulBannerAdBaseView");
+    if (banner) {
+        ok |= SoulInstallMethodHook(banner, NSSelectorFromString(@"didMoveToWindow"),
+                                    (IMP)SoulHookBannerDidMove, (IMP *)&gOrigBannerDidMove);
+    }
+    if (ok) {
+        done = YES;
+        SoulLog(@"ads: hooks installed");
+    }
+    return ok;
+}
+
+// —— O. 长按菜单增强（复制文本 / 复制转写 / 保存语音）——
+@interface SoulMenuTools : NSObject
+@property (nonatomic, weak) id msg;
+@property (nonatomic, weak) id cell;
++ (instancetype)shared;
+- (void)soulCopyText;
+- (void)soulCopyVoiceText;
+- (void)soulSaveVoice;
+@end
+
+@implementation SoulMenuTools
++ (instancetype)shared {
+    static SoulMenuTools *tools = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ tools = [SoulMenuTools new]; });
+    return tools;
+}
+- (void)soulCopyText {
+    NSString *text = nil;
+    @try { text = [self.msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
+    if (![text isKindOfClass:[NSString class]] || !text.length) { SoulToast(@"没有可复制的文本"); return; }
+    [UIPasteboard generalPasteboard].string = text;
+    SoulLog(@"menu: copied text len=%lu", (unsigned long)text.length);
+}
+- (void)soulCopyVoiceText {
+    NSString *text = nil;
+    @try { text = [self.msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
+    if (![text isKindOfClass:[NSString class]] || !text.length) { SoulToast(@"这条语音还没有转写文字"); return; }
+    [UIPasteboard generalPasteboard].string = text;
+    SoulLog(@"menu: copied voice text len=%lu", (unsigned long)text.length);
+}
+- (void)soulSaveVoice {
+    id voice = nil;
+    @try { voice = [self.msg valueForKey:@"voiceIMModel"]; } @catch (__unused NSException *e) {}
+    NSString *url = nil;
+    SEL urlSel = NSSelectorFromString(@"remoteURL");
+    if (voice && [voice respondsToSelector:urlSel]) {
+        id u = ((id (*)(id, SEL))objc_msgSend)(voice, urlSel);
+        if ([u isKindOfClass:[NSURL class]]) url = [(NSURL *)u absoluteString];
+        else if ([u isKindOfClass:[NSString class]]) url = u;
+    }
+    if (!url.length) { SoulToast(@"没有找到语音地址"); return; }
+    NSString *mid = nil;
+    @try { mid = [[self.msg valueForKey:@"msgId"] description]; } @catch (__unused NSException *e) {}
+    if (!mid.length) mid = [NSString stringWithFormat:@"voice-%lld",
+                            (long long)([[NSDate date] timeIntervalSince1970] * 1000.0)];
+    NSString *ext = [url.pathExtension lowercaseString];
+    if (!ext.length) ext = @"m4a";
+    NSString *dir = [SoulFXDir() stringByAppendingPathComponent:@"voice"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSString *path = [dir stringByAppendingPathComponent:[mid stringByAppendingPathExtension:ext]];
+    NSURL *u = [NSURL URLWithString:url];
+    if (!u) { SoulToast(@"语音地址无效"); return; }
+    SoulLog(@"menu: saving voice %@", url);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:u
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (data.length && [data writeToFile:path atomically:YES]) {
+            SoulLog(@"menu: voice saved %@", path);
+            SoulToast([NSString stringWithFormat:@"语音已保存\n%@", path]);
+        } else {
+            SoulToast([NSString stringWithFormat:@"保存失败：%@", error.localizedDescription ?: @"未知错误"]);
+        }
+    }];
+    [task resume];
+}
+@end
+
+static id SoulMenuItem(Class cls, NSString *title, id target, SEL action) {
+    if (!cls) return nil;
+    return ((id (*)(id, SEL, id, id, SEL))objc_msgSend)([cls alloc],
+        NSSelectorFromString(@"initWithTitle:target:action:"), title, target, action);
+}
+
+static void SoulAppendMenuItems(id handler, id msg, id cell) {
+    if (!SoulDef(kFxMenuTools) || !msg || !handler) return;
+    Class itemCls = objc_getClass("GMenuItem");
+    SEL mcSel = NSSelectorFromString(@"menuController");
+    if (!itemCls || ![handler respondsToSelector:mcSel]) return;
+    id mc = ((id (*)(id, SEL))objc_msgSend)(handler, mcSel);
+    if (!mc) return;
+    NSMutableArray *items = [NSMutableArray array];
+    SEL itemsSel = NSSelectorFromString(@"menuItems");
+    if ([mc respondsToSelector:itemsSel]) {
+        id cur = ((id (*)(id, SEL))objc_msgSend)(mc, itemsSel);
+        if ([cur isKindOfClass:[NSArray class]]) [items addObjectsFromArray:(NSArray *)cur];
+    }
+    SoulMenuTools *tools = [SoulMenuTools shared];
+    tools.msg = msg;
+    tools.cell = cell;
+    NSString *bubble = nil;
+    NSString *audio = nil;
+    id voice = nil;
+    @try { bubble = [msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
+    @try { audio = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
+    @try { voice = [msg valueForKey:@"voiceIMModel"]; } @catch (__unused NSException *e) {}
+    BOOL added = NO;
+    if ([bubble isKindOfClass:[NSString class]] && [(NSString *)bubble length]) {
+        id item = SoulMenuItem(itemCls, @"复制文本", tools, @selector(soulCopyText));
+        if (item) { [items addObject:item]; added = YES; }
+    } else if ([audio isKindOfClass:[NSString class]] && [(NSString *)audio length]) {
+        id item = SoulMenuItem(itemCls, @"复制转写文字", tools, @selector(soulCopyVoiceText));
+        if (item) { [items addObject:item]; added = YES; }
+    }
+    if (voice) {
+        id item = SoulMenuItem(itemCls, @"保存语音", tools, @selector(soulSaveVoice));
+        if (item) { [items addObject:item]; added = YES; }
+    }
+    SEL setSel = NSSelectorFromString(@"setMenuItems:");
+    if (added && [mc respondsToSelector:setSel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(mc, setSel, items);
+        SoulLog(@"menu: appended custom items total=%lu", (unsigned long)items.count);
+    }
+}
+
+// —— P. 语音消息自动转文字（复用 cell 自带转写按钮）——
+static NSMutableSet<NSString *> *gVoiceTextTried = nil;
+
+static void SoulMaybeAutoVoiceText(id cell, id layout) {
+    if (!SoulDef(kFxAutoVoiceText)) return;
+    NSString *className = NSStringFromClass([cell class]);
+    if (![className containsString:@"Audio"]) return;
+    id msg = nil;
+    SEL msgSel = NSSelectorFromString(@"message");
+    if (layout && [layout respondsToSelector:msgSel]) {
+        msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
+    }
+    if (!msg) return;
+    NSString *existing = nil;
+    @try { existing = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
+    if ([existing isKindOfClass:[NSString class]] && existing.length) return;
+    NSString *mid = nil;
+    @try { mid = [[msg valueForKey:@"msgId"] description]; } @catch (__unused NSException *e) {}
+    if (!mid.length) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ gVoiceTextTried = [NSMutableSet set]; });
+    @synchronized (gVoiceTextTried) {
+        if ([gVoiceTextTried containsObject:mid]) return;
+        if (gVoiceTextTried.count > 300) [gVoiceTextTried removeAllObjects];
+        [gVoiceTextTried addObject:mid];
+    }
+    SEL btnSel = NSSelectorFromString(@"convertVoiceBtn");
+    if (![cell respondsToSelector:btnSel]) return;
+    id btn = ((id (*)(id, SEL))objc_msgSend)(cell, btnSel);
+    if (![btn isKindOfClass:[UIControl class]]) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!SoulDef(kFxAutoVoiceText)) return;
+        [(UIControl *)btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+        SoulLog(@"voice-text: auto convert msg=%@", mid);
+    });
+}
+
 // —— K. 跳过开屏（SOLaunchHoldingWindow 不再遮挡主界面）——
 static void (*gOrigHoldingInit)(id, SEL);
 static void SoulHookHoldingInit(id self, SEL _cmd) {
@@ -2616,6 +2908,7 @@ static void (*gOrigMsgCellConfig)(id, SEL, id);
 static void SoulHookMsgCellConfig(id self, SEL _cmd, id layout) {
     if (gOrigMsgCellConfig) gOrigMsgCellConfig(self, _cmd, layout);
     SoulApplyMsgTime(self, layout);
+    SoulMaybeAutoVoiceText(self, layout);
 }
 
 static void (*gOrigMsgCellPrepare)(id, SEL, id, id);
@@ -2623,6 +2916,7 @@ static void SoulHookMsgCellPrepare(id self, SEL _cmd, id cell, id layout) {
     if (gOrigMsgCellPrepare) gOrigMsgCellPrepare(self, _cmd, cell, layout);
     id target = [cell isKindOfClass:[UIView class]] ? cell : self;
     SoulApplyMsgTime(target, layout);
+    SoulMaybeAutoVoiceText(target, layout);
 }
 
 static void (*gOrigMsgCellLayout)(id, SEL);
@@ -2662,12 +2956,6 @@ static BOOL SoulInstallMsgTimeHooks(void) {
 
 // —— J. 青少年弹窗（SOMainSquareViewController / SOPrivateChatViewController）——
 static BOOL SoulTeenOff(void) { return SoulDef(kFxNoTeenPopup); }
-
-static void SoulRunBlock(id block, id arg) {
-    if (!block) return;
-    void (^cb)(id) = block;
-    cb(arg);
-}
 
 static void (*gOrigTeenYoungAlert)(id, SEL);
 static void SoulHookTeenYoungAlert(id self, SEL _cmd) {
@@ -2834,14 +3122,17 @@ static void SoulTweakInit(void) {
     if (!SoulSkipGroup(@"autoread")) SoulRetryInstall(^BOOL{ return SoulInstallAutoReadHooks(); }, 12);
     if (!SoulSkipGroup(@"closefriend")) SoulRetryInstall(^BOOL{ return SoulInstallCloseFriendHooks(); }, 12);
     if (!SoulSkipGroup(@"voice")) SoulRetryInstall(^BOOL{ return SoulInstallVoiceHooks(); }, 12);
-    if (!SoulSkipGroup(@"msgtime")) SoulRetryInstall(^BOOL{ return SoulInstallMsgTimeHooks(); }, 24);
+    if (!SoulSkipGroup(@"msgtime") || !SoulSkipGroup(@"autovoice")) SoulRetryInstall(^BOOL{ return SoulInstallMsgTimeHooks(); }, 24);
     if (!SoulSkipGroup(@"teen")) SoulRetryInstall(^BOOL{ return SoulInstallTeenHooks(); }, 24);
     if (!SoulSkipGroup(@"startsplash")) SoulRetryInstall(^BOOL{ return SoulInstallSkipSplashHooks(); }, 8);
+    if (!SoulSkipGroup(@"screenshot")) SoulRetryInstall(^BOOL{ return SoulInstallScreenshotHooks(); }, 15);
+    if (!SoulSkipGroup(@"ads")) SoulRetryInstall(^BOOL{ return SoulInstallAdHooks(); }, 15);
     SoulInstallClearNotif();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v18. dice=%d snapUnlock=%d msgTime=%d teenOff=%d",
+    SoulLog(@"loaded v19. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
-            (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup));
+            (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
+            (int)SoulDef(kFxNoAds));
 }
