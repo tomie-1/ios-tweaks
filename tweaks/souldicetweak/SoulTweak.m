@@ -1895,6 +1895,32 @@ static UIView *SoulBestContentChild(UIView *parent, UIView *cell, int depth) {
     return best;
 }
 
+static CGRect SoulUnionBubbleRect(UIView *cell, int *countOut) {
+    if (countOut) *countOut = 0;
+    UIView *root = cell;
+    if ([cell isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)cell).contentView;
+    else if ([cell isKindOfClass:[UICollectionViewCell class]]) root = ((UICollectionViewCell *)cell).contentView;
+    if (!root) return CGRectZero;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    CGRect u = CGRectNull;
+    int count = 0;
+    while (stack.count) {
+        UIView *v = [stack lastObject]; [stack removeLastObject];
+        NSString *cn = NSStringFromClass([v class]);
+        if ([cn containsString:@"Bubble"] && !v.hidden && v.alpha > 0.01 &&
+            v.bounds.size.width > 4.0 && v.bounds.size.height > 4.0) {
+            CGRect r = [v convertRect:v.bounds toView:cell];
+            if (SoulUsableContentRect(r, cell)) {
+                u = CGRectIsNull(u) ? r : CGRectUnion(u, r);
+                count++;
+            }
+        }
+        for (UIView *sv in v.subviews) [stack addObject:sv];
+    }
+    if (countOut) *countOut = count;
+    return CGRectIsNull(u) ? CGRectZero : u;
+}
+
 static UIView *SoulMessageContentView(UIView *cell) {
     if (!cell) return nil;
     NSArray<NSString *> *sels = @[@"bubbleView", @"shareCardView", @"homePageShareCardView",
@@ -3376,6 +3402,9 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     SoulShrinkShareCardIfNeeded(view, content);
     CGRect cr = CGRectZero;
     if (content) cr = [content convertRect:content.bounds toView:view];
+    int bubbleCount = 0;
+    CGRect bubbleUnion = SoulUnionBubbleRect(view, &bubbleCount);
+    if (bubbleCount >= 2 && SoulUsableContentRect(bubbleUnion, view)) cr = bubbleUnion;
     if (!SoulUsableContentRect(cr, view)) {
         CGFloat fx = 14.0;
         BOOL mineFallback = showTime && time.tag == 1;
@@ -3890,7 +3919,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v41. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v42. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
