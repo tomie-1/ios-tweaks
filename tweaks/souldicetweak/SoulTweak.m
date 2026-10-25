@@ -1824,7 +1824,6 @@ static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
 static const CGFloat kSoulMsgTimeReserve = 14.0;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulApplyMsgTime(id cell, id layout);
-static double SoulOriginalLayoutHeight(id layout);
 
 /* 从 cell 上取布局对象（用于把角标贴到气泡下方） */
 static id SoulCellLayout(UIView *cell) {
@@ -2101,27 +2100,37 @@ static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
 static IMP gOrigShareCardSetter = NULL;
 
-/* 分享卡片的容器会跟随 cell 行高自动拉伸。每次真正排时间前都把它扣回
-   原始卡片高度，多出来的 18pt 只留给时间行。 */
+/* 分享卡片的容器会跟随 cell 行高自动拉伸。这里只把超出“时间行以上”
+   的部分收回，卡片原生高度保持不变，避免被我们压小或拉大。 */
 static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
-    if (!cellView || !content) return;
+    if (!cellView) return;
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
     if ([cn rangeOfString:@"shareusercard"].location == NSNotFound) return;
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
-    double originalH = SoulOriginalLayoutHeight(SoulCellLayout(cellView));
-    if (originalH < 20.0) originalH = cellView.bounds.size.height - kSoulMsgTimeReserve;
-    /* 分享主页卡片原生内容高度是 108；不要从被附加行高撑大的 card.frame 反推。 */
-    CGFloat targetH = 108.0;
-    if (targetH <= 20.0 || content.bounds.size.height <= targetH + 1.0) return;
+    if (!content && [cellView isKindOfClass:[UITableViewCell class]]) {
+        UIView *cv = ((UITableViewCell *)cellView).contentView;
+        CGFloat bestArea = 0;
+        for (UIView *sv in cv.subviews) {
+            if (sv.hidden || sv.alpha < 0.02) continue;
+            if (SoulFooterChromeView(sv)) continue;
+            CGFloat area = sv.bounds.size.width * sv.bounds.size.height;
+            if (area > bestArea) { bestArea = area; content = sv; }
+        }
+    }
+    if (!content) return;
+    CGFloat cellH = cellView.bounds.size.height;
+    CGFloat top = content.frame.origin.y;
+    CGFloat maxH = cellH - kSoulMsgTimeReserve - top - 4.0;
+    if (maxH < 20.0 || content.bounds.size.height <= maxH + 1.0) return;
     content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     CGRect cf = content.frame;
-    cf.size.height = targetH;
+    cf.size.height = maxH;
     content.frame = cf;
     static int shrinkLog = 0;
     if (shrinkLog < 6) {
         shrinkLog++;
-        SoulLog(@"msg-time: share-card size cellH=%.1f original=%.1f card=%.1f target=%.1f",
-                cellView.bounds.size.height, originalH, content.bounds.size.height, targetH);
+        SoulLog(@"msg-time: share-card clamp cellH=%.1f top=%.1f card=%.1f->%.1f",
+                cellH, top, content.bounds.size.height, maxH);
     }
 }
 static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
@@ -3382,6 +3391,54 @@ static UILabel *SoulRecallBadgeLabel(id cell) {
 
 /* 时间和“已拦截撤回”共用气泡下方这一行。时间贴气泡左/右边，
    角标紧挨着它；有角标时不再把时间挪到气泡上方，避免压住消息。 */
+
+typedef struct {
+    BOOL found;
+    CGFloat bottom;
+    CGFloat left;
+    CGFloat right;
+} SoulContentEdge;
+
+static BOOL SoulFooterOwnView(id cell, UIView *v) {
+    if (!v) return YES;
+    if (v.tag == kSoulRecallBadgeTag) return YES;
+    UILabel *time = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
+    return (time && v == (UIView *)time);
+}
+
+/* 扫描 cell 里可见的内容视图，取它们的最低点和水平范围。引用消息由
+   “被引用条 + 回复气泡”两段组成，只按单个气泡定位会把时间卡在两段中间；
+   按整条消息的下沿定位才能落在它下方。 */
+static void SoulScanContentEdge(UIView *parent, UIView *cell, int depth, SoulContentEdge *edge) {
+    if (!parent || depth > 6) return;
+    CGRect cb = cell.bounds;
+    for (UIView *sv in parent.subviews) {
+        if (SoulFooterOwnView(cell, sv)) continue;
+        if (sv.hidden || sv.alpha < 0.02) continue;
+        CGRect r = [sv convertRect:sv.bounds toView:cell];
+        if (!isfinite(r.origin.x) || !isfinite(r.origin.y) ||
+            !isfinite(r.size.width) || !isfinite(r.size.height)) continue;
+        if (r.size.width < 2.0 || r.size.height < 2.0) continue;
+        /* 铺满 cell 的是背景/包裹层，继续往里找真正的内容。 */
+        BOOL fills = (r.size.width >= cb.size.width - 10.0 && r.size.height >= cb.size.height - 10.0) ||
+                     (r.size.width >= cb.size.width * 0.86 && r.size.height >= cb.size.height * 0.86);
+        if (!fills && !SoulFooterChromeView(sv) &&
+            r.size.width >= 8.0 && r.size.height >= 6.0 && CGRectIntersectsRect(r, cb)) {
+            CGFloat b = CGRectGetMaxY(r);
+            if (!edge->found || b > edge->bottom + 0.5) {
+                edge->found = YES;
+                edge->bottom = b;
+                edge->left = CGRectGetMinX(r);
+                edge->right = CGRectGetMaxX(r);
+            } else if (fabs(b - edge->bottom) <= 0.5) {
+                if (CGRectGetMinX(r) < edge->left) edge->left = CGRectGetMinX(r);
+                if (CGRectGetMaxX(r) > edge->right) edge->right = CGRectGetMaxX(r);
+            }
+        }
+        SoulScanContentEdge(sv, cell, depth + 1, edge);
+    }
+}
+
 static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (![cell isKindOfClass:[UIView class]]) return;
     UIView *view = (UIView *)cell;
@@ -3398,60 +3455,51 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
 
     const CGFloat rowH = 12.0;
     const CGFloat gap = 7.0;
+
+    UIView *root = view;
+    if ([view isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)view).contentView;
+    else if ([view isKindOfClass:[UICollectionViewCell class]]) root = ((UICollectionViewCell *)view).contentView;
+    if (!root) root = view;
+
     UIView *content = SoulMessageContentView(view);
     SoulShrinkShareCardIfNeeded(view, content);
-    CGRect cr = CGRectZero;
-    if (content) cr = [content convertRect:content.bounds toView:view];
+
+    SoulContentEdge edge = {0};
+    SoulScanContentEdge(root, view, 0, &edge);
+
     int bubbleCount = 0;
     CGRect bubbleUnion = SoulUnionBubbleRect(view, &bubbleCount);
-    if (bubbleCount >= 2 && SoulUsableContentRect(bubbleUnion, view)) cr = bubbleUnion;
-    if (!SoulUsableContentRect(cr, view)) {
-        CGFloat fx = 14.0;
-        BOOL mineFallback = showTime && time.tag == 1;
-        if (mineFallback) fx = width - 14.0;
-        NSString *cellCN = NSStringFromClass([view class]).lowercaseString;
-        BOOL shareCardMiss = [cellCN containsString:@"shareusercard"] ||
-                             [cellCN containsString:@"homepageshare"] ||
-                             [cellCN containsString:@"usercardcell"];
-        /* 分享主页这类自绘卡片会撑满 cell，底部留白并不可靠；时间先放卡片上沿。 */
-        cr = shareCardMiss ? CGRectMake(fx, 1.0, 1.0, 1.0)
-                           : CGRectMake(fx, MAX(0.0, height - kSoulMsgTimeReserve), 1.0, 1.0);
-        static int missLog = 0;
-        if (missLog < 4) {
-            missLog++;
-            NSMutableArray<NSString *> *subs = [NSMutableArray array];
-            UIView *root = view;
-            if ([view isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)view).contentView;
-            else if ([view isKindOfClass:[UICollectionViewCell class]]) root = ((UICollectionViewCell *)view).contentView;
-            for (UIView *sv in root.subviews) {
-                [subs addObject:[NSString stringWithFormat:@"%@ %@", NSStringFromClass([sv class]),
-                                 NSStringFromCGRect([sv convertRect:sv.bounds toView:view])]];
-            }
-            SoulLog(@"msg-time: content miss cell=%@ shareCard=%d subviews=%@",
-                    NSStringFromClass([view class]), shareCardMiss, subs);
-        }
-        if (!objc_getAssociatedObject(view, kSoulMsgTimeRetryKey)) {
-            objc_setAssociatedObject(view, kSoulMsgTimeRetryKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            __weak UIView *weakCell = view;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                UIView *c = weakCell;
-                if (!c) return;
-                objc_setAssociatedObject(c, kSoulMsgTimeRetryKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                if (c.window) SoulMsgTimeRelayout(c);
-            });
-        }
-    }
-    /* 某些卡片会随着附加行高一起拉伸；此时把内容底边收回预留区上方。 */
-    if (height > kSoulMsgTimeReserve + rowH && CGRectGetMaxY(cr) > height - 2.0) {
-        CGFloat bottom = height - kSoulMsgTimeReserve;
-        if (bottom > cr.origin.y) cr.size.height = bottom - cr.origin.y;
-    }
 
-    NSString *footerCellCN = NSStringFromClass([view class]).lowercaseString;
-    BOOL shareCard = [footerCellCN containsString:@"shareusercard"];
+    CGFloat contentBottom = 0.0, contentLeft = 0.0, contentRight = 0.0;
+    BOOL haveContent = NO;
+    if (edge.found) {
+        contentBottom = edge.bottom;
+        contentLeft = edge.left;
+        contentRight = edge.right;
+        haveContent = YES;
+    }
+    /* 气泡外框是最可信的消息边界，补上扫描可能漏掉的阴影和内边距。 */
+    if (SoulUsableContentRect(bubbleUnion, view)) {
+        CGFloat bb = CGRectGetMaxY(bubbleUnion);
+        if (!haveContent || bb >= contentBottom - 1.0) {
+            if (haveContent && bb > contentBottom) contentBottom = bb;
+            if (!haveContent) contentBottom = bb;
+            contentLeft = bubbleUnion.origin.x;
+            contentRight = CGRectGetMaxX(bubbleUnion);
+            haveContent = YES;
+        }
+    }
+    if (!haveContent) {
+        BOOL mineFallback = showTime && time.tag == 1;
+        contentLeft = mineFallback ? width - 14.0 : 14.0;
+        contentRight = contentLeft;
+        contentBottom = MAX(0.0, height - kSoulMsgTimeReserve);
+    }
+    if (contentBottom > height - kSoulMsgTimeReserve)
+        contentBottom = height - kSoulMsgTimeReserve;
+    if (contentBottom < 0.0) contentBottom = 0.0;
     BOOL mine = showTime && time.tag == 1;
-    if (!showTime && cr.size.width > 0) mine = cr.origin.x > width * 0.45;
+    if (!showTime && contentRight > contentLeft) mine = contentLeft > width * 0.45;
 
     CGFloat maxRowW = MAX(36.0, width - 12.0);
     CGFloat badgeW = 0.0;
@@ -3470,27 +3518,21 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     BOOL alignTrailing = mine;
     CGFloat x;
     if (alignTrailing) {
-        x = CGRectGetMaxX(cr) - totalW;
+        x = contentRight - totalW;
         if (x < 6.0) x = 6.0;
         if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     } else {
-        x = cr.origin.x;
+        x = contentLeft;
         if (x < 6.0) x = 6.0;
         if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     }
     if (x < 6.0) x = 6.0;
 
-    CGFloat y;
-    if (shareCard) {
-        /* 这个 cell 的内部 UIView 不含最外层底栏，直接贴 cell 底边才在卡片外。 */
-        y = MAX(1.0, height - rowH - 2.0);
-    } else {
-        y = CGRectGetMaxY(cr) + 2.0;
-        if (y + rowH > height - 1.0) {
-            CGFloat above = cr.origin.y - rowH - 2.0;
-            y = (above >= 1.0) ? above : MAX(1.0, height - rowH - 2.0);
-        }
-    }
+    /* 时间统一放在整条消息（含引用条、分享卡）下方，不再回到气泡上方。 */
+    CGFloat y = contentBottom + 2.0;
+    CGFloat limit = height - rowH - 1.0;
+    if (y > limit) y = limit;
+    if (y < 0.0) y = 0.0;
 
     CGRect oldT = time.frame, oldB = badge.frame;
     if (showTime) {
@@ -3509,11 +3551,36 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
                  (showBadge && !CGRectEqualToRect(oldB, badge.frame));
     if (moved && logThisCell) {
         if (footerLog < 8) footerLog++;
-        SoulLog(@"msg-time: footer cell=%@ content=%@ frame=%@ time=%@ badge=%@ cellH=%.1f",
+        SoulLog(@"msg-time: footer cell=%@ content=%@ bubbles=%d bottom=%.1f range=%.0f-%.0f time=%@ badge=%@ cellH=%.1f",
                 NSStringFromClass([view class]),
-                content ? NSStringFromClass([content class]) : @"nil",
-                NSStringFromCGRect(cr), showTime ? NSStringFromCGRect(time.frame) : @"off",
+                content ? NSStringFromClass([content class]) : @"nil", bubbleCount,
+                contentBottom, contentLeft, contentRight,
+                showTime ? NSStringFromCGRect(time.frame) : @"off",
                 showBadge ? NSStringFromCGRect(badge.frame) : @"off", height);
+    }
+    if (!haveContent) {
+        static int missLog2 = 0;
+        if (missLog2 < 4) {
+            missLog2++;
+            NSMutableArray<NSString *> *subs = [NSMutableArray array];
+            for (UIView *sv in root.subviews) {
+                [subs addObject:[NSString stringWithFormat:@"%@ %@", NSStringFromClass([sv class]),
+                                 NSStringFromCGRect([sv convertRect:sv.bounds toView:view])]];
+            }
+            SoulLog(@"msg-time: content miss cell=%@ subviews=%@",
+                    NSStringFromClass([view class]), subs);
+        }
+        if (!objc_getAssociatedObject(view, kSoulMsgTimeRetryKey)) {
+            objc_setAssociatedObject(view, kSoulMsgTimeRetryKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            __weak UIView *weakCell = view;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                UIView *c = weakCell;
+                if (!c) return;
+                objc_setAssociatedObject(c, kSoulMsgTimeRetryKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                if (c.window) SoulMsgTimeRelayout(c);
+            });
+        }
     }
 }
 
@@ -3662,12 +3729,6 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
 
 static double (*gOrigMsgCellHeight)(id, SEL);
 static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
-static double SoulOriginalLayoutHeight(id layout) {
-    if (!layout || !gOrigMsgCellHeight) return 0;
-    SEL sel = NSSelectorFromString(@"cellHeight");
-    if (![layout respondsToSelector:sel]) return 0;
-    return gOrigMsgCellHeight(layout, sel);
-}
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
     double h;
@@ -3680,6 +3741,20 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return h;
     /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
     return h + kSoulMsgTimeReserve;
+}
+
+static void (*gOrigSetCellHeight)(id, SEL, double);
+static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
+    NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
+    /* 宿主重新布局时会写入新高度。若写回的正是“基础高度 + 时间行”，说明
+       它读到了我们 hook 后的值，不能把它当成新的基础高度再累加一次。 */
+    double inflated = cached ? [cached doubleValue] + kSoulMsgTimeReserve : -1.0;
+    BOOL echoOfInflated = cached && fabs(h - inflated) <= 0.6;
+    if (!echoOfInflated) {
+        objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h),
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (gOrigSetCellHeight) gOrigSetCellHeight(self, _cmd, h);
 }
 
 static BOOL SoulInstallMsgTimeHooks(void) {
@@ -3734,6 +3809,8 @@ static BOOL SoulInstallMsgTimeHooks(void) {
     }
     any |= SoulInstallMethodHook(layout, NSSelectorFromString(@"cellHeight"),
                                  (IMP)SoulHookMsgCellHeight, (IMP *)&gOrigMsgCellHeight);
+    any |= SoulInstallMethodHook(layout, NSSelectorFromString(@"setCellHeight:"),
+                                 (IMP)SoulHookSetCellHeight, (IMP *)&gOrigSetCellHeight);
     if (any) {
         done = YES;
         SoulLog(@"msg-time: hooks installed config=%d prepare=%d height=%d",
@@ -3919,7 +3996,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v42. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v43. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
