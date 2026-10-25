@@ -2411,22 +2411,27 @@ static void SoulAppendMenuItems(id handler, id msg, id cell);
    旧的 SOPCMenuHandler.addMenuItems... 只覆盖部分旧路径。 */
 static IMP gOrigShowMenu1 = NULL;
 static IMP gOrigShowMenu2 = NULL;
-static void SoulHookShowMenuView1(id self, SEL _cmd, id msg, id cell, id recognizer) {
-    if (gOrigShowMenu1) ((void (*)(id, SEL, id, id, id))gOrigShowMenu1)(self, _cmd, msg, cell, recognizer);
-    id handler = nil;
+static id SoulMenuHandlerForController(id self) {
     SEL hs = NSSelectorFromString(@"menuHandler");
+    id handler = nil;
     @try { if ([self respondsToSelector:hs]) handler = ((id (*)(id, SEL))objc_msgSend)(self, hs); }
     @catch (__unused NSException *e) {}
+    return handler;
+}
+static void SoulHookShowMenuView1(id self, SEL _cmd, id msg, id cell, id recognizer) {
+    id handler = SoulMenuHandlerForController(self);
+    SoulAppendMenuItems(handler, msg, cell);
+    if (gOrigShowMenu1) ((void (*)(id, SEL, id, id, id))gOrigShowMenu1)(self, _cmd, msg, cell, recognizer);
+    handler = SoulMenuHandlerForController(self);
     SoulLog(@"menu: showMenuView msg=%@ cell=%@ handler=%@",
             NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
     SoulAppendMenuItems(handler, msg, cell);
 }
 static void SoulHookShowMenuView2(id self, SEL _cmd, id msg, id cell, id recognizer) {
+    id handler = SoulMenuHandlerForController(self);
+    SoulAppendMenuItems(handler, msg, cell);
     if (gOrigShowMenu2) ((void (*)(id, SEL, id, id, id))gOrigShowMenu2)(self, _cmd, msg, cell, recognizer);
-    id handler = nil;
-    SEL hs = NSSelectorFromString(@"menuHandler");
-    @try { if ([self respondsToSelector:hs]) handler = ((id (*)(id, SEL))objc_msgSend)(self, hs); }
-    @catch (__unused NSException *e) {}
+    handler = SoulMenuHandlerForController(self);
     SoulLog(@"menu: virtual showMenuView msg=%@ cell=%@ handler=%@",
             NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
     SoulAppendMenuItems(handler, msg, cell);
@@ -2972,6 +2977,7 @@ static BOOL SoulInstallAdHooks(void) {
 static NSString *SoulMenuText(id obj);
 static id SoulMenuVoice(id obj);
 static NSString *SoulMenuVoiceURL(id voice);
+static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys);
 
 @implementation SoulMenuTools
 + (instancetype)shared {
@@ -3037,6 +3043,16 @@ static BOOL SoulMenuStringValue(id v, NSString **out) {
     return NO;
 }
 
+static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys) {
+    for (NSString *key in keys) {
+        id v = nil;
+        @try { v = [obj valueForKey:key]; } @catch (__unused NSException *e) {}
+        NSString *str = nil;
+        if (SoulMenuStringValue(v, &str)) return str;
+    }
+    return nil;
+}
+
 /* SOChatMessageModel 的文本主要在 text/originText；旧版字段 bubbleText
    并不一定被填充。消息对象里还可能是 SOIMC2CMessage.textElem.text。 */
 static NSString *SoulMenuText(id obj) {
@@ -3077,7 +3093,14 @@ static id SoulMenuVoice(id obj) {
     for (NSString *key in keys) {
         id v = nil;
         @try { v = [obj valueForKey:key]; } @catch (__unused NSException *e) {}
-        if (v) return v;
+        if (!v) continue;
+        NSString *cn = NSStringFromClass([v class]).lowercaseString;
+        NSString *url = SoulMenuVoiceURL(v);
+        NSString *word = SoulStringValue(v, @[@"word", @"audioText", @"text"]);
+        id duration = SoulSafeValue(v, @"duration");
+        /* 文本消息里也可能挂着无关的 elem，只有真正带语音内容的才使用。 */
+        if ([cn containsString:@"voice"] || [cn containsString:@"audio"] ||
+            url.length || word.length || duration) return v;
     }
     SEL ms = NSSelectorFromString(@"message");
     @try {
@@ -3128,14 +3151,24 @@ static void SoulAppendMenuItems(id handler, id msg, id cell) {
         id cur = ((id (*)(id, SEL))objc_msgSend)(mc, itemsSel);
         if ([cur isKindOfClass:[NSArray class]]) [items addObjectsFromArray:(NSArray *)cur];
     }
+    NSString *cellCN = NSStringFromClass([cell class]);
+    BOOL textCell = [cellCN containsString:@"TextMessage"] || [cellCN containsString:@"TextTableViewCell"];
+    BOOL voiceCell = [cellCN containsString:@"Audio"] || [cellCN containsString:@"Voice"];
+    if (!textCell && !voiceCell) {
+        if (menuLog < 8) { menuLog++; SoulLog(@"menu: skip unsupported cell=%@", cellCN); }
+        return;
+    }
     SoulMenuTools *tools = [SoulMenuTools shared];
     tools.msg = msg;
     tools.cell = cell;
-    NSString *bubble = SoulMenuText(msg);
+    NSString *bubble = textCell ? SoulMenuText(msg) : nil;
     NSString *audio = nil;
-    id voice = SoulMenuVoice(msg);
-    @try { audio = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
-    if (![audio isKindOfClass:[NSString class]] || ![(NSString *)audio length]) audio = nil;
+    id voice = voiceCell ? SoulMenuVoice(msg) : nil;
+    if (voiceCell) {
+        @try { audio = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
+        if (![audio isKindOfClass:[NSString class]] || ![(NSString *)audio length]) audio = nil;
+        if (!audio.length && voice) audio = SoulStringValue(voice, @[@"word", @"audioText", @"text"]);
+    }
     static int fieldLog = 0;
     if (fieldLog < 8) {
         fieldLog++;
@@ -3143,20 +3176,27 @@ static void SoulAppendMenuItems(id handler, id msg, id cell) {
         @try { origin = [msg valueForKey:@"originText"]; } @catch (__unused NSException *e) {}
         @try { text = [msg valueForKey:@"text"]; } @catch (__unused NSException *e) {}
         @try { bubbleField = [msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
-        SoulLog(@"menu: fields text=%@ origin=%@ bubble=%@ audio=%@ voice=%@ resolved=%@",
-                text.length ? @"yes" : @"no", origin.length ? @"yes" : @"no",
+        SoulLog(@"menu: cell=%@ text=%@ origin=%@ bubble=%@ audio=%@ voice=%@ resolved=%@",
+                cellCN, text.length ? @"yes" : @"no", origin.length ? @"yes" : @"no",
                 bubbleField.length ? @"yes" : @"no", audio.length ? @"yes" : @"no",
                 voice ? @"yes" : @"no", bubble.length ? @"yes" : @"no");
     }
+    NSMutableSet<NSString *> *titles = [NSMutableSet set];
+    for (id it in items) {
+        id t = SoulSafeValue(it, @"title");
+        if ([t isKindOfClass:[NSString class]] && [(NSString *)t length]) [titles addObject:t];
+    }
     BOOL added = NO;
-    if ([bubble isKindOfClass:[NSString class]] && [(NSString *)bubble length]) {
+    if (textCell && [bubble isKindOfClass:[NSString class]] && [(NSString *)bubble length] &&
+        ![titles containsObject:@"复制文本"]) {
         id item = SoulMenuItem(itemCls, @"复制文本", tools, @selector(soulCopyText));
         if (item) { [items addObject:item]; added = YES; }
-    } else if ([audio isKindOfClass:[NSString class]] && [(NSString *)audio length]) {
+    } else if (voiceCell && [audio isKindOfClass:[NSString class]] && [(NSString *)audio length] &&
+               ![titles containsObject:@"复制转写文字"]) {
         id item = SoulMenuItem(itemCls, @"复制转写文字", tools, @selector(soulCopyVoiceText));
         if (item) { [items addObject:item]; added = YES; }
     }
-    if (voice) {
+    if (voiceCell && voice && ![titles containsObject:@"保存语音"]) {
         id item = SoulMenuItem(itemCls, @"保存语音", tools, @selector(soulSaveVoice));
         if (item) { [items addObject:item]; added = YES; }
     }
@@ -3805,7 +3845,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v38. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v40. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
