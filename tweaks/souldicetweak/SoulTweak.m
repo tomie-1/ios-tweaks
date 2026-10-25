@@ -3043,6 +3043,14 @@ static BOOL SoulMenuStringValue(id v, NSString **out) {
     return NO;
 }
 
+static id SoulSafeValue(id obj, NSString *key) {
+    if (!obj || !key.length) return nil;
+    SEL sel = NSSelectorFromString(key);
+    if (![obj respondsToSelector:sel]) return nil;
+    @try { return ((id (*)(id, SEL))objc_msgSend)(obj, sel); }
+    @catch (__unused NSException *e) { return nil; }
+}
+
 static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys) {
     for (NSString *key in keys) {
         id v = nil;
