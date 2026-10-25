@@ -1821,7 +1821,7 @@ static BOOL SoulRecallIsBlocked(id obj) {
 }
 
 static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
-static const CGFloat kSoulMsgTimeReserve = 18.0;
+static const CGFloat kSoulMsgTimeReserve = 14.0;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulApplyMsgTime(id cell, id layout);
 static double SoulOriginalLayoutHeight(id layout);
@@ -2411,6 +2411,13 @@ static void SoulAppendMenuItems(id handler, id msg, id cell);
    旧的 SOPCMenuHandler.addMenuItems... 只覆盖部分旧路径。 */
 static IMP gOrigShowMenu1 = NULL;
 static IMP gOrigShowMenu2 = NULL;
+static IMP gOrigSetMenuItems = NULL;
+static BOOL gMenuBuildActive = NO;
+static BOOL gMenuBuildInjected = NO;
+static __unsafe_unretained id gMenuBuildMsg = nil;
+static __unsafe_unretained id gMenuBuildCell = nil;
+static void SoulHookSetMenuItems(id self, SEL _cmd, id items);
+static NSMutableArray *SoulMenuItemsWithAdditions(NSArray *base, id msg, id cell);
 static id SoulMenuHandlerForController(id self) {
     SEL hs = NSSelectorFromString(@"menuHandler");
     id handler = nil;
@@ -2420,21 +2427,31 @@ static id SoulMenuHandlerForController(id self) {
 }
 static void SoulHookShowMenuView1(id self, SEL _cmd, id msg, id cell, id recognizer) {
     id handler = SoulMenuHandlerForController(self);
-    SoulAppendMenuItems(handler, msg, cell);
-    if (gOrigShowMenu1) ((void (*)(id, SEL, id, id, id))gOrigShowMenu1)(self, _cmd, msg, cell, recognizer);
-    handler = SoulMenuHandlerForController(self);
-    SoulLog(@"menu: showMenuView msg=%@ cell=%@ handler=%@",
-            NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
-    SoulAppendMenuItems(handler, msg, cell);
+    gMenuBuildMsg = msg; gMenuBuildCell = cell;
+    gMenuBuildActive = YES; gMenuBuildInjected = NO;
+    @try {
+        if (gOrigShowMenu1) ((void (*)(id, SEL, id, id, id))gOrigShowMenu1)(self, _cmd, msg, cell, recognizer);
+    } @finally {
+        gMenuBuildActive = NO; gMenuBuildMsg = nil; gMenuBuildCell = nil;
+    }
+    SoulLog(@"menu: showMenuView msg=%@ cell=%@ handler=%@ injected=%d",
+            NSStringFromClass([msg class]), NSStringFromClass([cell class]),
+            NSStringFromClass([handler class]), gMenuBuildInjected);
+    if (!gMenuBuildInjected) SoulAppendMenuItems(handler, msg, cell);
 }
 static void SoulHookShowMenuView2(id self, SEL _cmd, id msg, id cell, id recognizer) {
     id handler = SoulMenuHandlerForController(self);
-    SoulAppendMenuItems(handler, msg, cell);
-    if (gOrigShowMenu2) ((void (*)(id, SEL, id, id, id))gOrigShowMenu2)(self, _cmd, msg, cell, recognizer);
-    handler = SoulMenuHandlerForController(self);
-    SoulLog(@"menu: virtual showMenuView msg=%@ cell=%@ handler=%@",
-            NSStringFromClass([msg class]), NSStringFromClass([cell class]), NSStringFromClass([handler class]));
-    SoulAppendMenuItems(handler, msg, cell);
+    gMenuBuildMsg = msg; gMenuBuildCell = cell;
+    gMenuBuildActive = YES; gMenuBuildInjected = NO;
+    @try {
+        if (gOrigShowMenu2) ((void (*)(id, SEL, id, id, id))gOrigShowMenu2)(self, _cmd, msg, cell, recognizer);
+    } @finally {
+        gMenuBuildActive = NO; gMenuBuildMsg = nil; gMenuBuildCell = nil;
+    }
+    SoulLog(@"menu: virtual showMenuView msg=%@ cell=%@ handler=%@ injected=%d",
+            NSStringFromClass([msg class]), NSStringFromClass([cell class]),
+            NSStringFromClass([handler class]), gMenuBuildInjected);
+    if (!gMenuBuildInjected) SoulAppendMenuItems(handler, msg, cell);
 }
 static BOOL gShowMenuHooksDone = NO;
 static void SoulInstallShowMenuHooks(void) {
@@ -2444,9 +2461,12 @@ static void SoulInstallShowMenuHooks(void) {
     Class vc = objc_getClass("SOVirtualManChatViewController");
     BOOL a = pc && SoulInstallMethodHook(pc, sel, (IMP)SoulHookShowMenuView1, (IMP *)&gOrigShowMenu1);
     BOOL b = vc && SoulInstallMethodHook(vc, sel, (IMP)SoulHookShowMenuView2, (IMP *)&gOrigShowMenu2);
-    if (a || b) {
+    Class mc = objc_getClass("GMenuController");
+    BOOL c = mc && SoulInstallMethodHook(mc, NSSelectorFromString(@"setMenuItems:"),
+                                         (IMP)SoulHookSetMenuItems, (IMP *)&gOrigSetMenuItems);
+    if (a || b || c) {
         gShowMenuHooksDone = YES;
-        SoulLog(@"menu: showMenuView hooks installed private=%d virtual=%d", a, b);
+        SoulLog(@"menu: showMenuView hooks installed private=%d virtual=%d setter=%d", a, b, c);
     }
 }
 
@@ -3132,43 +3152,19 @@ static NSString *SoulMenuVoiceURL(id voice) {
     return nil;
 }
 
-static void SoulAppendMenuItems(id handler, id msg, id cell) {
+static NSMutableArray *SoulMenuItemsWithAdditions(NSArray *base, id msg, id cell) {
     static int menuLog = 0;
-    if (!SoulDef(kFxMenuTools)) {
-        if (menuLog < 4) { menuLog++; SoulLog(@"menu: tools disabled"); }
-        return;
-    }
-    if (!msg || !handler) {
-        if (menuLog < 4) { menuLog++; SoulLog(@"menu: missing msg=%d handler=%d", msg != nil, handler != nil); }
-        return;
-    }
+    NSMutableArray *items = base ? [base mutableCopy] : [NSMutableArray array];
+    if (!SoulDef(kFxMenuTools) || !msg || !cell) return items;
     Class itemCls = objc_getClass("GMenuItem");
-    SEL mcSel = NSSelectorFromString(@"menuController");
-    if (!itemCls || ![handler respondsToSelector:mcSel]) {
-        SoulLog(@"menu: no GMenuItem/controller handler=%@", NSStringFromClass([handler class]));
-        return;
-    }
-    id mc = ((id (*)(id, SEL))objc_msgSend)(handler, mcSel);
-    if (!mc) {
-        SoulLog(@"menu: menuController nil handler=%@", NSStringFromClass([handler class]));
-        return;
-    }
-    NSMutableArray *items = [NSMutableArray array];
-    SEL itemsSel = NSSelectorFromString(@"menuItems");
-    if ([mc respondsToSelector:itemsSel]) {
-        id cur = ((id (*)(id, SEL))objc_msgSend)(mc, itemsSel);
-        if ([cur isKindOfClass:[NSArray class]]) [items addObjectsFromArray:(NSArray *)cur];
-    }
+    if (!itemCls) return items;
     NSString *cellCN = NSStringFromClass([cell class]);
     BOOL textCell = [cellCN containsString:@"TextMessage"] || [cellCN containsString:@"TextTableViewCell"];
     BOOL voiceCell = [cellCN containsString:@"Audio"] || [cellCN containsString:@"Voice"];
     if (!textCell && !voiceCell) {
         if (menuLog < 8) { menuLog++; SoulLog(@"menu: skip unsupported cell=%@", cellCN); }
-        return;
+        return items;
     }
-    SoulMenuTools *tools = [SoulMenuTools shared];
-    tools.msg = msg;
-    tools.cell = cell;
     NSString *bubble = textCell ? SoulMenuText(msg) : nil;
     NSString *audio = nil;
     id voice = voiceCell ? SoulMenuVoice(msg) : nil;
@@ -3195,30 +3191,56 @@ static void SoulAppendMenuItems(id handler, id msg, id cell) {
         if ([t isKindOfClass:[NSString class]] && [(NSString *)t length]) [titles addObject:t];
     }
     BOOL added = NO;
-    if (textCell && [bubble isKindOfClass:[NSString class]] && [(NSString *)bubble length] &&
-        ![titles containsObject:@"复制文本"]) {
-        id item = SoulMenuItem(itemCls, @"复制文本", tools, @selector(soulCopyText));
+    if (textCell && bubble.length && ![titles containsObject:@"复制文本"]) {
+        id item = SoulMenuItem(itemCls, @"复制文本", SoulMenuTools.shared, @selector(soulCopyText));
         if (item) { [items addObject:item]; added = YES; }
-    } else if (voiceCell && [audio isKindOfClass:[NSString class]] && [(NSString *)audio length] &&
-               ![titles containsObject:@"复制转写文字"]) {
-        id item = SoulMenuItem(itemCls, @"复制转写文字", tools, @selector(soulCopyVoiceText));
+    } else if (voiceCell && audio.length && ![titles containsObject:@"复制转写文字"]) {
+        id item = SoulMenuItem(itemCls, @"复制转写文字", SoulMenuTools.shared, @selector(soulCopyVoiceText));
         if (item) { [items addObject:item]; added = YES; }
     }
     if (voiceCell && voice && ![titles containsObject:@"保存语音"]) {
-        id item = SoulMenuItem(itemCls, @"保存语音", tools, @selector(soulSaveVoice));
+        id item = SoulMenuItem(itemCls, @"保存语音", SoulMenuTools.shared, @selector(soulSaveVoice));
         if (item) { [items addObject:item]; added = YES; }
     }
-    SEL setSel = NSSelectorFromString(@"setMenuItems:");
-    if (added && [mc respondsToSelector:setSel]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(mc, setSel, items);
-        SoulLog(@"menu: appended custom items total=%lu bubble=%d audio=%d voice=%d",
-                (unsigned long)items.count, bubble.length > 0, audio.length > 0, voice != nil);
-    } else if (menuLog < 8) {
-        menuLog++;
-        SoulLog(@"menu: nothing appended bubble=%@ audio=%@ voice=%@ setter=%d",
-                bubble.length ? @"yes" : @"no", audio.length ? @"yes" : @"no",
-                voice ? @"yes" : @"no", [mc respondsToSelector:setSel]);
+    if (added) {
+        SoulMenuTools.shared.msg = msg;
+        SoulMenuTools.shared.cell = cell;
+        SoulLog(@"menu: injected custom items total=%lu cell=%@",
+                (unsigned long)items.count, cellCN);
     }
+    return items;
+}
+
+static void SoulAppendMenuItems(id handler, id msg, id cell) {
+    if (!msg || !handler) return;
+    SEL mcSel = NSSelectorFromString(@"menuController");
+    if (![handler respondsToSelector:mcSel]) return;
+    id mc = ((id (*)(id, SEL))objc_msgSend)(handler, mcSel);
+    if (!mc) return;
+    NSArray *base = nil;
+    SEL itemsSel = NSSelectorFromString(@"menuItems");
+    if ([mc respondsToSelector:itemsSel]) {
+        id cur = ((id (*)(id, SEL))objc_msgSend)(mc, itemsSel);
+        if ([cur isKindOfClass:[NSArray class]]) base = cur;
+    }
+    NSArray *aug = SoulMenuItemsWithAdditions(base, msg, cell);
+    SEL setSel = NSSelectorFromString(@"setMenuItems:");
+    if (aug.count > base.count && [mc respondsToSelector:setSel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(mc, setSel, aug);
+        SoulLog(@"menu: fallback appended total=%lu", (unsigned long)aug.count);
+    }
+}
+
+static void SoulHookSetMenuItems(id self, SEL _cmd, id items) {
+    id finalItems = items;
+    if (gMenuBuildActive && [items isKindOfClass:[NSArray class]]) {
+        NSArray *aug = SoulMenuItemsWithAdditions((NSArray *)items, gMenuBuildMsg, gMenuBuildCell);
+        if (aug.count > [(NSArray *)items count]) {
+            finalItems = aug;
+            gMenuBuildInjected = YES;
+        }
+    }
+    if (gOrigSetMenuItems) ((void (*)(id, SEL, id))gOrigSetMenuItems)(self, _cmd, finalItems);
 }
 
 // —— P. 语音消息自动转文字（复用 cell 自带转写按钮）——
@@ -3475,6 +3497,12 @@ static void SoulMsgTimePlace(id cell, double height, double width) {
     SoulLayoutMsgFooter(cell, height, width);
 }
 
+static BOOL SoulTimestampLooksValid(long long ms) {
+    if (ms < 946684800000LL) return NO; /* 2000-01-01 */
+    long long now = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+    return ms <= now + 86400000LL;
+}
+
 static void SoulApplyMsgTime(id cell, id layout) {
     UILabel *label = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
     if (!SoulDef(kFxMsgTime)) {
@@ -3495,7 +3523,7 @@ static void SoulApplyMsgTime(id cell, id layout) {
     for (int i = 0; i < 3; i++) {
         if (!candidates[i]) continue;
         long long t = SoulMsgTimestamp(candidates[i]);
-        if (t > 0) { msg = candidates[i]; ms = t; break; }
+        if (SoulTimestampLooksValid(t)) { msg = candidates[i]; ms = t; break; }
     }
     if (!msg) {
         static int nilLogged = 0;
@@ -3604,6 +3632,7 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
+static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
 static double SoulOriginalLayoutHeight(id layout) {
     if (!layout || !gOrigMsgCellHeight) return 0;
     SEL sel = NSSelectorFromString(@"cellHeight");
@@ -3611,8 +3640,16 @@ static double SoulOriginalLayoutHeight(id layout) {
     return gOrigMsgCellHeight(layout, sel);
 }
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
-    double h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
+    NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
+    double h;
+    if (cached) {
+        h = [cached doubleValue];
+    } else {
+        h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
+        objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return h;
+    /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
     return h + kSoulMsgTimeReserve;
 }
 
@@ -3853,7 +3890,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v40. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v41. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
