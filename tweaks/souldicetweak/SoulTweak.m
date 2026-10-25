@@ -2084,7 +2084,8 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
     double originalH = SoulOriginalLayoutHeight(SoulCellLayout(cellView));
     if (originalH < 20.0) originalH = cellView.bounds.size.height - kSoulMsgTimeReserve;
-    CGFloat targetH = MAX(20.0, (CGFloat)originalH - 14.0);
+    /* 分享主页卡片原生内容高度是 108；不要从被附加行高撑大的 card.frame 反推。 */
+    CGFloat targetH = 108.0;
     if (targetH <= 20.0 || content.bounds.size.height <= targetH + 1.0) return;
     content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     CGRect cf = content.frame;
@@ -2968,6 +2969,10 @@ static BOOL SoulInstallAdHooks(void) {
 - (void)soulSaveVoice;
 @end
 
+static NSString *SoulMenuText(id obj);
+static id SoulMenuVoice(id obj);
+static NSString *SoulMenuVoiceURL(id voice);
+
 @implementation SoulMenuTools
 + (instancetype)shared {
     static SoulMenuTools *tools = nil;
@@ -2976,29 +2981,22 @@ static BOOL SoulInstallAdHooks(void) {
     return tools;
 }
 - (void)soulCopyText {
-    NSString *text = nil;
-    @try { text = [self.msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
-    if (![text isKindOfClass:[NSString class]] || !text.length) { SoulToast(@"没有可复制的文本"); return; }
+    NSString *text = SoulMenuText(self.msg);
+    if (!text.length) { SoulToast(@"没有可复制的文本"); return; }
     [UIPasteboard generalPasteboard].string = text;
     SoulLog(@"menu: copied text len=%lu", (unsigned long)text.length);
 }
 - (void)soulCopyVoiceText {
     NSString *text = nil;
     @try { text = [self.msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
-    if (![text isKindOfClass:[NSString class]] || !text.length) { SoulToast(@"这条语音还没有转写文字"); return; }
+    if (![text isKindOfClass:[NSString class]] || !text.length) text = SoulMenuText(self.msg);
+    if (!text.length) { SoulToast(@"这条语音还没有转写文字"); return; }
     [UIPasteboard generalPasteboard].string = text;
     SoulLog(@"menu: copied voice text len=%lu", (unsigned long)text.length);
 }
 - (void)soulSaveVoice {
-    id voice = nil;
-    @try { voice = [self.msg valueForKey:@"voiceIMModel"]; } @catch (__unused NSException *e) {}
-    NSString *url = nil;
-    SEL urlSel = NSSelectorFromString(@"remoteURL");
-    if (voice && [voice respondsToSelector:urlSel]) {
-        id u = ((id (*)(id, SEL))objc_msgSend)(voice, urlSel);
-        if ([u isKindOfClass:[NSURL class]]) url = [(NSURL *)u absoluteString];
-        else if ([u isKindOfClass:[NSString class]]) url = u;
-    }
+    id voice = SoulMenuVoice(self.msg);
+    NSString *url = SoulMenuVoiceURL(voice);
     if (!url.length) { SoulToast(@"没有找到语音地址"); return; }
     NSString *mid = nil;
     @try { mid = [[self.msg valueForKey:@"msgId"] description]; } @catch (__unused NSException *e) {}
@@ -3031,6 +3029,78 @@ static id SoulMenuItem(Class cls, NSString *title, id target, SEL action) {
         NSSelectorFromString(@"initWithTitle:target:action:"), title, target, action);
 }
 
+static BOOL SoulMenuStringValue(id v, NSString **out) {
+    if ([v isKindOfClass:[NSString class]] && [(NSString *)v length]) { *out = v; return YES; }
+    if ([v isKindOfClass:[NSAttributedString class]] && [(NSAttributedString *)v length]) {
+        *out = [(NSAttributedString *)v string]; return YES;
+    }
+    return NO;
+}
+
+/* SOChatMessageModel 的文本主要在 text/originText；旧版字段 bubbleText
+   并不一定被填充。消息对象里还可能是 SOIMC2CMessage.textElem.text。 */
+static NSString *SoulMenuText(id obj) {
+    if (!obj) return nil;
+    NSArray<NSString *> *keys = @[@"text", @"originText", @"bubbleText",
+                                  @"questionText", @"answerText", @"audioText"];
+    for (NSString *key in keys) {
+        id v = nil;
+        @try { v = [obj valueForKey:key]; } @catch (__unused NSException *e) {}
+        NSString *str = nil;
+        if (SoulMenuStringValue(v, &str)) return str;
+    }
+    SEL te = NSSelectorFromString(@"textElem");
+    @try {
+        if ([obj respondsToSelector:te]) {
+            id elem = ((id (*)(id, SEL))objc_msgSend)(obj, te);
+            if (elem) {
+                id v = nil;
+                @try { v = [elem valueForKey:@"text"]; } @catch (__unused NSException *e) {}
+                NSString *str = nil;
+                if (SoulMenuStringValue(v, &str)) return str;
+            }
+        }
+    } @catch (__unused NSException *e) {}
+    SEL ms = NSSelectorFromString(@"message");
+    @try {
+        if ([obj respondsToSelector:ms]) {
+            id nested = ((id (*)(id, SEL))objc_msgSend)(obj, ms);
+            if (nested && nested != obj) return SoulMenuText(nested);
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
+
+static id SoulMenuVoice(id obj) {
+    if (!obj) return nil;
+    NSArray<NSString *> *keys = @[@"voiceIMModel", @"voiceElem", @"audioModel"];
+    for (NSString *key in keys) {
+        id v = nil;
+        @try { v = [obj valueForKey:key]; } @catch (__unused NSException *e) {}
+        if (v) return v;
+    }
+    SEL ms = NSSelectorFromString(@"message");
+    @try {
+        if ([obj respondsToSelector:ms]) {
+            id nested = ((id (*)(id, SEL))objc_msgSend)(obj, ms);
+            if (nested && nested != obj) return SoulMenuVoice(nested);
+        }
+    } @catch (__unused NSException *e) {}
+    return nil;
+}
+
+static NSString *SoulMenuVoiceURL(id voice) {
+    if (!voice) return nil;
+    NSArray<NSString *> *keys = @[@"remoteURL", @"url", @"voiceURL", @"audioURL", @"path"];
+    for (NSString *key in keys) {
+        id v = nil;
+        @try { v = [voice valueForKey:key]; } @catch (__unused NSException *e) {}
+        if ([v isKindOfClass:[NSURL class]]) return [(NSURL *)v absoluteString];
+        if ([v isKindOfClass:[NSString class]] && [(NSString *)v length]) return v;
+    }
+    return nil;
+}
+
 static void SoulAppendMenuItems(id handler, id msg, id cell) {
     static int menuLog = 0;
     if (!SoulDef(kFxMenuTools)) {
@@ -3061,12 +3131,23 @@ static void SoulAppendMenuItems(id handler, id msg, id cell) {
     SoulMenuTools *tools = [SoulMenuTools shared];
     tools.msg = msg;
     tools.cell = cell;
-    NSString *bubble = nil;
+    NSString *bubble = SoulMenuText(msg);
     NSString *audio = nil;
-    id voice = nil;
-    @try { bubble = [msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
+    id voice = SoulMenuVoice(msg);
     @try { audio = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
-    @try { voice = [msg valueForKey:@"voiceIMModel"]; } @catch (__unused NSException *e) {}
+    if (![audio isKindOfClass:[NSString class]] || ![(NSString *)audio length]) audio = nil;
+    static int fieldLog = 0;
+    if (fieldLog < 8) {
+        fieldLog++;
+        NSString *origin = nil, *text = nil, *bubbleField = nil;
+        @try { origin = [msg valueForKey:@"originText"]; } @catch (__unused NSException *e) {}
+        @try { text = [msg valueForKey:@"text"]; } @catch (__unused NSException *e) {}
+        @try { bubbleField = [msg valueForKey:@"bubbleText"]; } @catch (__unused NSException *e) {}
+        SoulLog(@"menu: fields text=%@ origin=%@ bubble=%@ audio=%@ voice=%@ resolved=%@",
+                text.length ? @"yes" : @"no", origin.length ? @"yes" : @"no",
+                bubbleField.length ? @"yes" : @"no", audio.length ? @"yes" : @"no",
+                voice ? @"yes" : @"no", bubble.length ? @"yes" : @"no");
+    }
     BOOL added = NO;
     if ([bubble isKindOfClass:[NSString class]] && [(NSString *)bubble length]) {
         id item = SoulMenuItem(itemCls, @"复制文本", tools, @selector(soulCopyText));
@@ -3724,7 +3805,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v36. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v38. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
