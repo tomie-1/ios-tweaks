@@ -99,6 +99,7 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
 @property(nonatomic, strong) UIScrollView *functionScrollView;
 @property(nonatomic, strong) UIStackView *functionStackView;
 @property(nonatomic, strong) UIButton *shiftButton;
+@property(nonatomic, strong) UIView *lockDot;
 @property(nonatomic, strong) UIView *nativeAccessoryView;
 @property(nonatomic, strong) NSTimer *arrowRepeatTimer;
 @property(nonatomic, weak) UIButton *arrowRepeatButton;
@@ -188,13 +189,30 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
         [self.functionStackView.heightAnchor constraintEqualToAnchor:self.functionScrollView.frameLayoutGuide.heightAnchor],
     ]];
 
-    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:42.0 stack:self.topStackView];
+    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:34.0 stack:self.topStackView];
     UIImageConfiguration *symbolConfiguration =
-        [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightBold];
-    UIImage *shiftImage = [UIImage systemImageNamed:@"shift.fill" withConfiguration:symbolConfiguration];
+        [UIImageSymbolConfiguration configurationWithPointSize:14.0 weight:UIImageSymbolWeightMedium];
+    UIImage *shiftImage = [UIImage systemImageNamed:@"shift" withConfiguration:symbolConfiguration];
+    if (!shiftImage) {
+        shiftImage = [UIImage systemImageNamed:@"shift.fill" withConfiguration:symbolConfiguration];
+    }
     [self.shiftButton setImage:shiftImage forState:UIControlStateNormal];
     self.shiftButton.accessibilityLabel = @"Shift";
     self.shiftButton.accessibilityHint = @"单击一次生效，双击锁定";
+
+    self.lockDot = [[UIView alloc] initWithFrame:CGRectZero];
+    self.lockDot.translatesAutoresizingMaskIntoConstraints = NO;
+    self.lockDot.userInteractionEnabled = NO;
+    self.lockDot.backgroundColor = UIColor.whiteColor;
+    self.lockDot.layer.cornerRadius = 3.0;
+    self.lockDot.hidden = YES;
+    [self.shiftButton addSubview:self.lockDot];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.lockDot.widthAnchor constraintEqualToConstant:6.0],
+        [self.lockDot.heightAnchor constraintEqualToConstant:6.0],
+        [self.lockDot.centerXAnchor constraintEqualToAnchor:self.shiftButton.centerXAnchor],
+        [self.lockDot.bottomAnchor constraintEqualToAnchor:self.shiftButton.bottomAnchor constant:-3.0],
+    ]];
 
     [self addButton:@"NL" action:@selector(sendNewline) width:38.0 stack:self.topStackView];
 
@@ -314,8 +332,7 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     BOOL locked = self.shiftState == TKShiftStateLocked;
     self.shiftButton.backgroundColor = active ? UIColor.systemBlueColor : UIColor.tertiarySystemFillColor;
     self.shiftButton.tintColor = active ? UIColor.whiteColor : UIColor.labelColor;
-    self.shiftButton.layer.borderWidth = locked ? 2.0 : 0.0;
-    self.shiftButton.layer.borderColor = UIColor.whiteColor.CGColor;
+    self.lockDot.hidden = !locked;
     self.shiftButton.accessibilityValue = locked ? @"锁定" : (active ? @"待用" : @"关闭");
 }
 
