@@ -14,7 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const CGFloat TKBarHeight = 48.0;
+static const CGFloat TKBarHeight = 88.0;
+static const CGFloat TKRowHeight = 40.0;
 static const CGFloat TKButtonSize = 34.0;
 static const CGFloat TKButtonSpacing = 7.0;
 
@@ -86,10 +87,92 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     return shiftedF5to12[number - 4];
 }
 
+@interface TKRepeatButton : UIButton
+@property(nonatomic, copy) void (^repeatBlock)(void);
+@property(nonatomic, strong) NSTimer *delayTimer;
+@property(nonatomic, strong) NSTimer *repeatTimer;
+@property(nonatomic, assign) BOOL didRepeat;
+@end
+
+@implementation TKRepeatButton
+
+- (BOOL)beginTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+    BOOL tracking = [super beginTracking:touch withEvent:event];
+    if (!tracking) {
+        return NO;
+    }
+    self.didRepeat = NO;
+    [self.delayTimer invalidate];
+    [self.repeatTimer invalidate];
+    self.delayTimer = [NSTimer timerWithTimeInterval:0.35
+                                              target:self
+                                            selector:@selector(startRepeating)
+                                            userInfo:nil
+                                             repeats:NO];
+    [NSRunLoop.mainRunLoop addTimer:self.delayTimer forMode:NSRunLoopCommonModes];
+    return YES;
+}
+
+- (void)startRepeating {
+    if (!self.isTracking || !self.isEnabled) {
+        return;
+    }
+    self.didRepeat = YES;
+    if (self.repeatBlock) {
+        self.repeatBlock();
+    }
+    self.repeatTimer = [NSTimer timerWithTimeInterval:0.075
+                                               target:self
+                                             selector:@selector(repeatNow)
+                                             userInfo:nil
+                                              repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.repeatTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)repeatNow {
+    if (!self.isTracking || !self.isEnabled) {
+        [self stopRepeating];
+        return;
+    }
+    if (self.repeatBlock) {
+        self.repeatBlock();
+    }
+}
+
+- (void)stopRepeating {
+    [self.delayTimer invalidate];
+    self.delayTimer = nil;
+    [self.repeatTimer invalidate];
+    self.repeatTimer = nil;
+}
+
+- (void)endTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+    [self stopRepeating];
+    if (!self.didRepeat && self.isEnabled && self.repeatBlock) {
+        self.repeatBlock();
+    }
+    [super endTracking:touch withEvent:event];
+}
+
+- (void)cancelTrackingWithEvent:(UIEvent *)event {
+    [self stopRepeating];
+    [super cancelTrackingWithEvent:event];
+}
+
+- (void)dealloc {
+    [self.delayTimer invalidate];
+    [self.repeatTimer invalidate];
+}
+
+@end
+
 @interface TKBarView : UIView
-@property(nonatomic, strong) UIScrollView *scrollView;
-@property(nonatomic, strong) UIStackView *stackView;
+@property(nonatomic, strong) UIScrollView *topScrollView;
+@property(nonatomic, strong) UIStackView *topStackView;
+@property(nonatomic, strong) UIScrollView *functionScrollView;
+@property(nonatomic, strong) UIStackView *functionStackView;
 @property(nonatomic, strong) UIButton *shiftButton;
+@property(nonatomic, strong) UIView *nativeAccessoryView;
 @property(nonatomic, assign) BOOL shiftArmed;
 @end
 
@@ -101,36 +184,49 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
         return nil;
     }
 
-    self.backgroundColor = [UIColor clearColor];
-    self.layer.cornerRadius = 12.0;
+    self.backgroundColor = UIColor.clearColor;
+    self.layer.cornerRadius = 14.0;
     self.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
-    self.layer.masksToBounds = NO;
     self.layer.shadowColor = UIColor.blackColor.CGColor;
-    self.layer.shadowOpacity = 0.22;
+    self.layer.shadowOpacity = 0.18;
     self.layer.shadowRadius = 8.0;
     self.layer.shadowOffset = CGSizeMake(0, -2);
 
     UIVisualEffectView *backdrop =
-        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark]];
+        [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterial]];
     backdrop.translatesAutoresizingMaskIntoConstraints = NO;
-    backdrop.layer.cornerRadius = 12.0;
+    backdrop.layer.cornerRadius = 14.0;
     backdrop.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
     backdrop.clipsToBounds = YES;
     [self addSubview:backdrop];
 
-    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
-    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.scrollView.showsHorizontalScrollIndicator = NO;
-    self.scrollView.alwaysBounceHorizontal = YES;
-    self.scrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
-    [backdrop.contentView addSubview:self.scrollView];
+    self.topScrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    self.topScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.topScrollView.showsHorizontalScrollIndicator = NO;
+    self.topScrollView.alwaysBounceHorizontal = YES;
+    self.topScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
+    [backdrop.contentView addSubview:self.topScrollView];
 
-    self.stackView = [[UIStackView alloc] initWithFrame:CGRectZero];
-    self.stackView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.stackView.axis = UILayoutConstraintAxisHorizontal;
-    self.stackView.alignment = UIStackViewAlignmentCenter;
-    self.stackView.spacing = TKButtonSpacing;
-    [self.scrollView addSubview:self.stackView];
+    self.topStackView = [[UIStackView alloc] initWithFrame:CGRectZero];
+    self.topStackView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.topStackView.axis = UILayoutConstraintAxisHorizontal;
+    self.topStackView.alignment = UIStackViewAlignmentCenter;
+    self.topStackView.spacing = TKButtonSpacing;
+    [self.topScrollView addSubview:self.topStackView];
+
+    self.functionScrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
+    self.functionScrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.functionScrollView.showsHorizontalScrollIndicator = NO;
+    self.functionScrollView.alwaysBounceHorizontal = YES;
+    self.functionScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
+    [backdrop.contentView addSubview:self.functionScrollView];
+
+    self.functionStackView = [[UIStackView alloc] initWithFrame:CGRectZero];
+    self.functionStackView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.functionStackView.axis = UILayoutConstraintAxisHorizontal;
+    self.functionStackView.alignment = UIStackViewAlignmentCenter;
+    self.functionStackView.spacing = TKButtonSpacing;
+    [self.functionScrollView addSubview:self.functionStackView];
 
     [NSLayoutConstraint activateConstraints:@[
         [backdrop.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
@@ -138,33 +234,48 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
         [backdrop.topAnchor constraintEqualToAnchor:self.topAnchor],
         [backdrop.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
 
-        [self.scrollView.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
-        [self.scrollView.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        [self.scrollView.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor],
-        [self.scrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor],
+        [self.topScrollView.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
+        [self.topScrollView.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
+        [self.topScrollView.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor],
+        [self.topScrollView.heightAnchor constraintEqualToConstant:TKRowHeight],
 
-        [self.stackView.leadingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.leadingAnchor constant:8.0],
-        [self.stackView.trailingAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
-        [self.stackView.topAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.topAnchor],
-        [self.stackView.bottomAnchor constraintEqualToAnchor:self.scrollView.contentLayoutGuide.bottomAnchor],
-        [self.stackView.heightAnchor constraintEqualToAnchor:self.scrollView.frameLayoutGuide.heightAnchor],
+        [self.topStackView.leadingAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.leadingAnchor constant:8.0],
+        [self.topStackView.trailingAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
+        [self.topStackView.topAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.topAnchor],
+        [self.topStackView.bottomAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.bottomAnchor],
+        [self.topStackView.heightAnchor constraintEqualToAnchor:self.topScrollView.frameLayoutGuide.heightAnchor],
+
+        [self.functionScrollView.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
+        [self.functionScrollView.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
+        [self.functionScrollView.topAnchor constraintEqualToAnchor:self.topScrollView.bottomAnchor constant:4.0],
+        [self.functionScrollView.heightAnchor constraintEqualToConstant:TKRowHeight],
+        [self.functionScrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor constant:-4.0],
+
+        [self.functionStackView.leadingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.leadingAnchor constant:8.0],
+        [self.functionStackView.trailingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
+        [self.functionStackView.topAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.topAnchor],
+        [self.functionStackView.bottomAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.bottomAnchor],
+        [self.functionStackView.heightAnchor constraintEqualToAnchor:self.functionScrollView.frameLayoutGuide.heightAnchor],
     ]];
 
-    self.shiftButton = [self addButton:@"⇧" action:@selector(toggleShift) width:42.0];
-    [self addButton:@"Esc" action:@selector(sendEscape) width:42.0];
-    [self addButton:@"Tab" action:@selector(sendTab) width:42.0];
-    [self addButton:@"⏎" action:@selector(sendEnter) width:42.0];
-    [self addButton:@"NL" action:@selector(sendNewline) width:42.0];
-    [self addButton:@"←" action:@selector(sendLeft) width:TKButtonSize];
-    [self addButton:@"↑" action:@selector(sendUp) width:TKButtonSize];
-    [self addButton:@"↓" action:@selector(sendDown) width:TKButtonSize];
-    [self addButton:@"→" action:@selector(sendRight) width:TKButtonSize];
-    [self addSeparator];
+    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:50.0 stack:self.topStackView];
+    UIImageConfiguration *symbolConfiguration =
+        [UIImageSymbolConfiguration configurationWithPointSize:19.0 weight:UIImageSymbolWeightBold];
+    UIImage *shiftImage = [UIImage systemImageNamed:@"shift.fill" withConfiguration:symbolConfiguration];
+    [self.shiftButton setImage:shiftImage forState:UIControlStateNormal];
+    self.shiftButton.accessibilityLabel = @"Shift";
+
+    [self addButton:@"NL" action:@selector(sendNewline) width:42.0 stack:self.topStackView];
+    [self addRepeatButton:@"←" width:38.0 block:^{ [self sendLeft]; }];
+    [self addRepeatButton:@"↑" width:38.0 block:^{ [self sendUp]; }];
+    [self addRepeatButton:@"↓" width:38.0 block:^{ [self sendDown]; }];
+    [self addRepeatButton:@"→" width:38.0 block:^{ [self sendRight]; }];
 
     for (NSInteger number = 1; number <= 12; number++) {
         UIButton *button = [self addButton:[NSString stringWithFormat:@"F%ld", (long)number]
                                     action:@selector(sendFunction:)
-                                     width:38.0];
+                                     width:40.0
+                                     stack:self.functionStackView];
         button.tag = number;
     }
 
@@ -172,31 +283,37 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     return self;
 }
 
-- (UIButton *)addButton:(NSString *)title action:(SEL)action width:(CGFloat)width {
+- (UIButton *)addButton:(NSString *)title action:(SEL)action width:(CGFloat)width stack:(UIStackView *)stack {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.translatesAutoresizingMaskIntoConstraints = NO;
     [button setTitle:title forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:12.0 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightSemibold];
     [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
-    button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.14];
+    button.backgroundColor = UIColor.tertiarySystemFillColor;
     button.layer.cornerRadius = TKButtonSize * 0.5;
     button.layer.masksToBounds = YES;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     button.accessibilityLabel = title;
     [button.widthAnchor constraintEqualToConstant:width].active = YES;
     [button.heightAnchor constraintEqualToConstant:TKButtonSize].active = YES;
-    [self.stackView addArrangedSubview:button];
+    [stack addArrangedSubview:button];
     return button;
 }
 
-- (void)addSeparator {
-    UIView *separator = [[UIView alloc] initWithFrame:CGRectZero];
-    separator.translatesAutoresizingMaskIntoConstraints = NO;
-    separator.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.24];
-    separator.layer.cornerRadius = 1.0;
-    [separator.widthAnchor constraintEqualToConstant:2.0].active = YES;
-    [separator.heightAnchor constraintEqualToConstant:22.0].active = YES;
-    [self.stackView addArrangedSubview:separator];
+- (void)addRepeatButton:(NSString *)title width:(CGFloat)width block:(void (^)(void))block {
+    TKRepeatButton *button = [TKRepeatButton buttonWithType:UIButtonTypeSystem];
+    button.translatesAutoresizingMaskIntoConstraints = NO;
+    [button setTitle:title forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
+    [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
+    button.backgroundColor = UIColor.tertiarySystemFillColor;
+    button.layer.cornerRadius = TKButtonSize * 0.5;
+    button.layer.masksToBounds = YES;
+    button.repeatBlock = block;
+    button.accessibilityLabel = title;
+    [button.widthAnchor constraintEqualToConstant:width].active = YES;
+    [button.heightAnchor constraintEqualToConstant:TKButtonSize].active = YES;
+    [self.topStackView addArrangedSubview:button];
 }
 
 - (void)toggleShift {
@@ -205,12 +322,10 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 }
 
 - (void)updateShiftAppearance {
-    self.shiftButton.backgroundColor = self.shiftArmed
-        ? [UIColor colorWithRed:0.22 green:0.52 blue:1.0 alpha:1.0]
-        : [UIColor colorWithWhite:1.0 alpha:0.14];
-    [self.shiftButton setTitleColor:(self.shiftArmed ? UIColor.whiteColor : UIColor.labelColor)
-                           forState:UIControlStateNormal];
-    self.shiftButton.accessibilityValue = self.shiftArmed ? @"开" : @"关";
+    BOOL active = self.shiftArmed;
+    self.shiftButton.backgroundColor = active ? UIColor.systemBlueColor : UIColor.tertiarySystemFillColor;
+    self.shiftButton.tintColor = active ? UIColor.whiteColor : UIColor.labelColor;
+    self.shiftButton.accessibilityValue = active ? @"开" : @"关";
 }
 
 - (BOOL)consumeShift {
@@ -233,24 +348,40 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     }
 }
 
-- (void)sendEscape {
-    [self consumeShift];
-    [self sendText:@"\x1b"];
+static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
+    if ([view isKindOfClass:UIControl.class] &&
+        [view.accessibilityLabel isEqualToString:accessibilityLabel]) {
+        return (UIControl *)view;
+    }
+    for (UIView *subview in view.subviews) {
+        UIControl *found = TKFindButton(subview, accessibilityLabel);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
 }
 
-- (void)sendTab {
-    BOOL shift = [self consumeShift];
-    [self sendText:(shift ? @"\x1b[Z" : @"\t")];
-}
-
-- (void)sendEnter {
-    BOOL shift = [self consumeShift];
-    [self sendText:(shift ? @"\n" : @"\r")];
+- (BOOL)sendControlKeyThroughNativeBar:(NSString *)key {
+    if (!self.nativeAccessoryView) {
+        return NO;
+    }
+    UIControl *control = TKFindButton(self.nativeAccessoryView, @"Control");
+    if (!control || !control.isEnabled) {
+        return NO;
+    }
+    [control sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [self sendText:key];
+    return YES;
 }
 
 - (void)sendNewline {
-    [self consumeShift];
-    [self sendText:@"\n"];
+    if ([self sendControlKeyThroughNativeBar:@"j"]) {
+        return;
+    }
+    // Fallback for terminals without the native Ctrl accessory: a one-byte
+    // LF inside a bracketed paste reaches the app as text, not as Return.
+    [self sendText:@"\x1b[200~\n\x1b[201~"];
 }
 
 - (void)sendLeft { [self sendArrow:'D']; }
@@ -301,6 +432,7 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     self.backgroundColor = UIColor.clearColor;
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     self.termKeysBar = [[TKBarView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(initialFrame), TKBarHeight)];
+    self.termKeysBar.nativeAccessoryView = originalAccessory;
     [self addSubview:self.termKeysBar];
     self.originalAccessory = originalAccessory;
     return self;
@@ -312,6 +444,7 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     }
     [_originalAccessory removeFromSuperview];
     _originalAccessory = originalAccessory;
+    self.termKeysBar.nativeAccessoryView = originalAccessory;
     if (originalAccessory) {
         originalAccessory.translatesAutoresizingMaskIntoConstraints = YES;
         originalAccessory.autoresizingMask = UIViewAutoresizingFlexibleWidth;
