@@ -11,6 +11,8 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#include <dlfcn.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -61,6 +63,70 @@ static UIResponder *TKCurrentInput(void) {
         }
     }
     return nil;
+}
+
+static char TKStatusBarCoverKey;
+
+static void TKUpdateStatusBarCover(UIWindow *window) {
+    if (!window || TKIsKeyboardWindow(window)) {
+        return;
+    }
+    UIView *cover = objc_getAssociatedObject(window, &TKStatusBarCoverKey);
+    if (!cover) {
+        cover = [[UIView alloc] initWithFrame:CGRectZero];
+        cover.userInteractionEnabled = NO;
+        cover.backgroundColor = UIColor.systemBackgroundColor;
+        cover.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        objc_setAssociatedObject(window, &TKStatusBarCoverKey, cover, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [window addSubview:cover];
+    }
+    CGFloat top = window.safeAreaInsets.top;
+    if (top <= 0 && window.windowScene.statusBarManager) {
+        top = window.windowScene.statusBarManager.statusBarFrame.size.height;
+    }
+    if (top <= 0) {
+        top = 44.0;
+    }
+    cover.frame = CGRectMake(0, 0, CGRectGetWidth(window.bounds), top);
+    [window bringSubviewToFront:cover];
+}
+
+typedef bool (*TKSwiftSendKeyFn)(id, uint8_t, uint32_t);
+
+static TKSwiftSendKeyFn TKSwiftSendKeyFunction(void) {
+    static TKSwiftSendKeyFn function;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        const char *name =
+            "$s15GhosttyTerminal14UITerminalViewC7sendKey_9modifiersSbAA0bF0O_AA0B14InputModifiersVtF";
+        function = (TKSwiftSendKeyFn)dlsym(RTLD_DEFAULT, name);
+        if (!function) {
+            char underscored[256];
+            snprintf(underscored, sizeof(underscored), "_%s", name);
+            function = (TKSwiftSendKeyFn)dlsym(RTLD_DEFAULT, underscored);
+        }
+    });
+    return function;
+}
+
+static BOOL TKIsTerminalView(UIResponder *responder) {
+    if (!responder) {
+        return NO;
+    }
+    const char *name = class_getName(object_getClass(responder));
+    return name && strstr(name, "UITerminalView") != NULL;
+}
+
+static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
+    UIResponder *input = TKCurrentInput();
+    if (!TKIsTerminalView(input)) {
+        return NO;
+    }
+    TKSwiftSendKeyFn function = TKSwiftSendKeyFunction();
+    if (!function) {
+        return NO;
+    }
+    return function(input, key, modifiers) ? YES : NO;
 }
 
 static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
@@ -311,6 +377,16 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     self.arrowRepeatButton = nil;
 }
 
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *window = TKHostWindow();
+        if (window) {
+            TKUpdateStatusBarCover(window);
+        }
+    });
+}
+
 - (void)dealloc {
     [self.arrowRepeatTimer invalidate];
 }
@@ -389,6 +465,9 @@ static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
 }
 
 - (void)sendNewline {
+    if (TKTryNativeKey(28, 2u)) { // TerminalKey.j + Ctrl
+        return;
+    }
     if ([self sendControlKeyThroughNativeBar:@"j"]) {
         return;
     }
@@ -404,6 +483,17 @@ static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
 
 - (void)sendArrow:(unichar)final {
     BOOL shift = [self consumeShift];
+    uint8_t nativeKey = 0;
+    switch (final) {
+        case 'A': nativeKey = 77; break; // TerminalKey.arrowUp
+        case 'B': nativeKey = 74; break; // TerminalKey.arrowDown
+        case 'C': nativeKey = 76; break; // TerminalKey.arrowRight
+        case 'D': nativeKey = 75; break; // TerminalKey.arrowLeft
+        default: break;
+    }
+    if (nativeKey && TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
+        return;
+    }
     if (shift) {
         [self sendText:[NSString stringWithFormat:@"\x1b[1;2%C", final]];
     } else {
@@ -413,6 +503,10 @@ static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
 
 - (void)sendFunction:(UIButton *)sender {
     BOOL shift = [self consumeShift];
+    uint8_t nativeKey = (uint8_t)(119 + sender.tag); // F1 = 120 ... F12 = 131
+    if (TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
+        return;
+    }
     [self sendText:TKFunctionKey(sender.tag, shift)];
 }
 
