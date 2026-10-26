@@ -14,10 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const CGFloat TKBarHeight = 68.0;
-static const CGFloat TKRowHeight = 32.0;
-static const CGFloat TKButtonSize = 28.0;
-static const CGFloat TKButtonSpacing = 6.0;
+static const CGFloat TKBarHeight = 88.0;
+static const CGFloat TKRowHeight = 40.0;
+static const CGFloat TKButtonSize = 34.0;
+static const CGFloat TKButtonSpacing = 7.0;
 
 static UIResponder *TKFindFirstResponder(UIView *view) {
     if (view.isFirstResponder) {
@@ -180,9 +180,9 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
 
         [self.functionScrollView.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [self.functionScrollView.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        [self.functionScrollView.topAnchor constraintEqualToAnchor:self.topScrollView.bottomAnchor constant:2.0],
+        [self.functionScrollView.topAnchor constraintEqualToAnchor:self.topScrollView.bottomAnchor constant:4.0],
         [self.functionScrollView.heightAnchor constraintEqualToConstant:TKRowHeight],
-        [self.functionScrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor constant:-2.0],
+        [self.functionScrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor constant:-4.0],
 
         [self.functionStackView.leadingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.leadingAnchor constant:8.0],
         [self.functionStackView.trailingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
@@ -191,7 +191,7 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
         [self.functionStackView.heightAnchor constraintEqualToAnchor:self.functionScrollView.frameLayoutGuide.heightAnchor],
     ]];
 
-    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:34.0 stack:self.topStackView];
+    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:44.0 stack:self.topStackView];
     UIImageConfiguration *symbolConfiguration =
         [UIImageSymbolConfiguration configurationWithPointSize:14.0 weight:UIImageSymbolWeightMedium];
     UIImage *shiftImage = [UIImage systemImageNamed:@"shift" withConfiguration:symbolConfiguration];
@@ -212,11 +212,11 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     [NSLayoutConstraint activateConstraints:@[
         [self.lockDot.widthAnchor constraintEqualToConstant:6.0],
         [self.lockDot.heightAnchor constraintEqualToConstant:6.0],
-        [self.lockDot.centerXAnchor constraintEqualToAnchor:self.shiftButton.centerXAnchor],
-        [self.lockDot.bottomAnchor constraintEqualToAnchor:self.shiftButton.bottomAnchor constant:-3.0],
+        [self.lockDot.trailingAnchor constraintEqualToAnchor:self.shiftButton.trailingAnchor constant:-5.0],
+        [self.lockDot.topAnchor constraintEqualToAnchor:self.shiftButton.topAnchor constant:5.0],
     ]];
 
-    [self addButton:@"NL" action:@selector(sendNewline) width:38.0 stack:self.topStackView];
+    [self addButton:@"NL" action:@selector(sendNewline) width:42.0 stack:self.topStackView];
 
     UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
     [spacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
@@ -231,7 +231,7 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     for (NSInteger number = 1; number <= 12; number++) {
         UIButton *button = [self addButton:[NSString stringWithFormat:@"F%ld", (long)number]
                                     action:@selector(sendFunction:)
-                                     width:32.0
+                                     width:40.0
                                      stack:self.functionStackView];
         button.tag = number;
     }
@@ -258,9 +258,9 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
 }
 
 - (void)addArrowButton:(NSString *)title tag:(NSInteger)tag {
-    UIButton *button = [self addButton:title action:@selector(sendArrowButton:) width:32.0 stack:self.topStackView];
+    UIButton *button = [self addButton:title action:@selector(sendArrowButton:) width:38.0 stack:self.topStackView];
     button.tag = tag;
-    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:14.0 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
     UILongPressGestureRecognizer *longPress =
         [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleArrowLongPress:)];
     longPress.minimumPressDuration = 0.35;
