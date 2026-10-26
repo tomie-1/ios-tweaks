@@ -134,7 +134,9 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     self.topScrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
     self.topScrollView.translatesAutoresizingMaskIntoConstraints = NO;
     self.topScrollView.showsHorizontalScrollIndicator = NO;
-    self.topScrollView.alwaysBounceHorizontal = YES;
+    self.topScrollView.scrollEnabled = NO;
+    self.topScrollView.alwaysBounceHorizontal = NO;
+    self.topScrollView.bounces = NO;
     self.topScrollView.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
     [backdrop.contentView addSubview:self.topScrollView];
 
