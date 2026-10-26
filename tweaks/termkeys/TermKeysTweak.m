@@ -212,8 +212,8 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     [NSLayoutConstraint activateConstraints:@[
         [self.lockDot.widthAnchor constraintEqualToConstant:6.0],
         [self.lockDot.heightAnchor constraintEqualToConstant:6.0],
-        [self.lockDot.trailingAnchor constraintEqualToAnchor:self.shiftButton.trailingAnchor constant:-5.0],
-        [self.lockDot.topAnchor constraintEqualToAnchor:self.shiftButton.topAnchor constant:5.0],
+        [self.lockDot.trailingAnchor constraintEqualToAnchor:self.shiftButton.trailingAnchor constant:-8.0],
+        [self.lockDot.topAnchor constraintEqualToAnchor:self.shiftButton.topAnchor constant:8.0],
     ]];
 
     [self addButton:@"NL" action:@selector(sendNewline) width:42.0 stack:self.topStackView];
