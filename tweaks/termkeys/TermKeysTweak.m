@@ -87,85 +87,6 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     return shiftedF5to12[number - 4];
 }
 
-@interface TKRepeatButton : UIButton
-@property(nonatomic, copy) void (^repeatBlock)(void);
-@property(nonatomic, strong) NSTimer *delayTimer;
-@property(nonatomic, strong) NSTimer *repeatTimer;
-@property(nonatomic, assign) BOOL didRepeat;
-@end
-
-@implementation TKRepeatButton
-
-- (BOOL)beginTracking:(UITouch *)touch withEvent:(UIEvent *)event {
-    BOOL tracking = [super beginTracking:touch withEvent:event];
-    if (!tracking) {
-        return NO;
-    }
-    self.didRepeat = NO;
-    [self.delayTimer invalidate];
-    [self.repeatTimer invalidate];
-    self.delayTimer = [NSTimer timerWithTimeInterval:0.35
-                                              target:self
-                                            selector:@selector(startRepeating)
-                                            userInfo:nil
-                                             repeats:NO];
-    [NSRunLoop.mainRunLoop addTimer:self.delayTimer forMode:NSRunLoopCommonModes];
-    return YES;
-}
-
-- (void)startRepeating {
-    if (!self.isTracking || !self.isEnabled) {
-        return;
-    }
-    self.didRepeat = YES;
-    if (self.repeatBlock) {
-        self.repeatBlock();
-    }
-    self.repeatTimer = [NSTimer timerWithTimeInterval:0.075
-                                               target:self
-                                             selector:@selector(repeatNow)
-                                             userInfo:nil
-                                              repeats:YES];
-    [NSRunLoop.mainRunLoop addTimer:self.repeatTimer forMode:NSRunLoopCommonModes];
-}
-
-- (void)repeatNow {
-    if (!self.isTracking || !self.isEnabled) {
-        [self stopRepeating];
-        return;
-    }
-    if (self.repeatBlock) {
-        self.repeatBlock();
-    }
-}
-
-- (void)stopRepeating {
-    [self.delayTimer invalidate];
-    self.delayTimer = nil;
-    [self.repeatTimer invalidate];
-    self.repeatTimer = nil;
-}
-
-- (void)endTracking:(UITouch *)touch withEvent:(UIEvent *)event {
-    [self stopRepeating];
-    if (!self.didRepeat && self.isEnabled && self.repeatBlock) {
-        self.repeatBlock();
-    }
-    [super endTracking:touch withEvent:event];
-}
-
-- (void)cancelTrackingWithEvent:(UIEvent *)event {
-    [self stopRepeating];
-    [super cancelTrackingWithEvent:event];
-}
-
-- (void)dealloc {
-    [self.delayTimer invalidate];
-    [self.repeatTimer invalidate];
-}
-
-@end
-
 @interface TKBarView : UIView
 @property(nonatomic, strong) UIScrollView *topScrollView;
 @property(nonatomic, strong) UIStackView *topStackView;
@@ -173,6 +94,8 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 @property(nonatomic, strong) UIStackView *functionStackView;
 @property(nonatomic, strong) UIButton *shiftButton;
 @property(nonatomic, strong) UIView *nativeAccessoryView;
+@property(nonatomic, strong) NSTimer *arrowRepeatTimer;
+@property(nonatomic, weak) UIButton *arrowRepeatButton;
 @property(nonatomic, assign) BOOL shiftArmed;
 @end
 
@@ -266,10 +189,10 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     self.shiftButton.accessibilityLabel = @"Shift";
 
     [self addButton:@"NL" action:@selector(sendNewline) width:42.0 stack:self.topStackView];
-    [self addRepeatButton:@"←" width:38.0 block:^{ [self sendLeft]; }];
-    [self addRepeatButton:@"↑" width:38.0 block:^{ [self sendUp]; }];
-    [self addRepeatButton:@"↓" width:38.0 block:^{ [self sendDown]; }];
-    [self addRepeatButton:@"→" width:38.0 block:^{ [self sendRight]; }];
+    [self addArrowButton:@"←" tag:1];
+    [self addArrowButton:@"↑" tag:2];
+    [self addArrowButton:@"↓" tag:3];
+    [self addArrowButton:@"→" tag:4];
 
     for (NSInteger number = 1; number <= 12; number++) {
         UIButton *button = [self addButton:[NSString stringWithFormat:@"F%ld", (long)number]
@@ -300,20 +223,62 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     return button;
 }
 
-- (void)addRepeatButton:(NSString *)title width:(CGFloat)width block:(void (^)(void))block {
-    TKRepeatButton *button = [TKRepeatButton buttonWithType:UIButtonTypeSystem];
-    button.translatesAutoresizingMaskIntoConstraints = NO;
-    [button setTitle:title forState:UIControlStateNormal];
+- (void)addArrowButton:(NSString *)title tag:(NSInteger)tag {
+    UIButton *button = [self addButton:title action:@selector(sendArrowButton:) width:38.0 stack:self.topStackView];
+    button.tag = tag;
     button.titleLabel.font = [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
-    [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
-    button.backgroundColor = UIColor.tertiarySystemFillColor;
-    button.layer.cornerRadius = TKButtonSize * 0.5;
-    button.layer.masksToBounds = YES;
-    button.repeatBlock = block;
-    button.accessibilityLabel = title;
-    [button.widthAnchor constraintEqualToConstant:width].active = YES;
-    [button.heightAnchor constraintEqualToConstant:TKButtonSize].active = YES;
-    [self.topStackView addArrangedSubview:button];
+    UILongPressGestureRecognizer *longPress =
+        [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleArrowLongPress:)];
+    longPress.minimumPressDuration = 0.35;
+    longPress.cancelsTouchesInView = YES;
+    [button addGestureRecognizer:longPress];
+}
+
+- (void)sendArrowButton:(UIButton *)button {
+    switch (button.tag) {
+        case 1: [self sendLeft]; break;
+        case 2: [self sendUp]; break;
+        case 3: [self sendDown]; break;
+        case 4: [self sendRight]; break;
+        default: break;
+    }
+}
+
+- (void)handleArrowLongPress:(UILongPressGestureRecognizer *)gesture {
+    UIButton *button = (UIButton *)gesture.view;
+    if (gesture.state == UIGestureRecognizerStateBegan) {
+        [self stopArrowRepeat];
+        self.arrowRepeatButton = button;
+        [self sendArrowButton:button];
+        self.arrowRepeatTimer = [NSTimer timerWithTimeInterval:0.075
+                                                        target:self
+                                                      selector:@selector(repeatArrow)
+                                                      userInfo:nil
+                                                       repeats:YES];
+        [NSRunLoop.mainRunLoop addTimer:self.arrowRepeatTimer forMode:NSRunLoopCommonModes];
+    } else if (gesture.state == UIGestureRecognizerStateEnded ||
+               gesture.state == UIGestureRecognizerStateCancelled ||
+               gesture.state == UIGestureRecognizerStateFailed) {
+        [self stopArrowRepeat];
+    }
+}
+
+- (void)repeatArrow {
+    if (!self.arrowRepeatButton) {
+        [self stopArrowRepeat];
+        return;
+    }
+    [self sendArrowButton:self.arrowRepeatButton];
+}
+
+- (void)stopArrowRepeat {
+    [self.arrowRepeatTimer invalidate];
+    self.arrowRepeatTimer = nil;
+    self.arrowRepeatButton = nil;
+}
+
+- (void)dealloc {
+    [self.arrowRepeatTimer invalidate];
 }
 
 - (void)toggleShift {
