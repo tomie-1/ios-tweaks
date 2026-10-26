@@ -14,10 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const CGFloat TKBarHeight = 88.0;
-static const CGFloat TKRowHeight = 40.0;
-static const CGFloat TKButtonSize = 34.0;
-static const CGFloat TKButtonSpacing = 7.0;
+static const CGFloat TKBarHeight = 68.0;
+static const CGFloat TKRowHeight = 32.0;
+static const CGFloat TKButtonSize = 28.0;
+static const CGFloat TKButtonSpacing = 6.0;
 
 static UIResponder *TKFindFirstResponder(UIView *view) {
     if (view.isFirstResponder) {
@@ -87,6 +87,12 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     return shiftedF5to12[number - 4];
 }
 
+typedef NS_ENUM(NSInteger, TKShiftState) {
+    TKShiftStateInactive,
+    TKShiftStateArmed,
+    TKShiftStateLocked,
+};
+
 @interface TKBarView : UIView
 @property(nonatomic, strong) UIScrollView *topScrollView;
 @property(nonatomic, strong) UIStackView *topStackView;
@@ -96,7 +102,8 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 @property(nonatomic, strong) UIView *nativeAccessoryView;
 @property(nonatomic, strong) NSTimer *arrowRepeatTimer;
 @property(nonatomic, weak) UIButton *arrowRepeatButton;
-@property(nonatomic, assign) BOOL shiftArmed;
+@property(nonatomic, assign) TKShiftState shiftState;
+@property(nonatomic, strong) NSDate *lastShiftTapDate;
 @end
 
 @implementation TKBarView
@@ -163,16 +170,16 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
         [self.topScrollView.heightAnchor constraintEqualToConstant:TKRowHeight],
 
         [self.topStackView.leadingAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.leadingAnchor constant:8.0],
-        [self.topStackView.trailingAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
+        [self.topStackView.trailingAnchor constraintEqualToAnchor:self.topScrollView.frameLayoutGuide.trailingAnchor constant:-8.0],
         [self.topStackView.topAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.topAnchor],
         [self.topStackView.bottomAnchor constraintEqualToAnchor:self.topScrollView.contentLayoutGuide.bottomAnchor],
         [self.topStackView.heightAnchor constraintEqualToAnchor:self.topScrollView.frameLayoutGuide.heightAnchor],
 
         [self.functionScrollView.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [self.functionScrollView.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        [self.functionScrollView.topAnchor constraintEqualToAnchor:self.topScrollView.bottomAnchor constant:4.0],
+        [self.functionScrollView.topAnchor constraintEqualToAnchor:self.topScrollView.bottomAnchor constant:2.0],
         [self.functionScrollView.heightAnchor constraintEqualToConstant:TKRowHeight],
-        [self.functionScrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor constant:-4.0],
+        [self.functionScrollView.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor constant:-2.0],
 
         [self.functionStackView.leadingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.leadingAnchor constant:8.0],
         [self.functionStackView.trailingAnchor constraintEqualToAnchor:self.functionScrollView.contentLayoutGuide.trailingAnchor constant:-8.0],
@@ -181,14 +188,21 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
         [self.functionStackView.heightAnchor constraintEqualToAnchor:self.functionScrollView.frameLayoutGuide.heightAnchor],
     ]];
 
-    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:50.0 stack:self.topStackView];
+    self.shiftButton = [self addButton:@"" action:@selector(toggleShift) width:42.0 stack:self.topStackView];
     UIImageConfiguration *symbolConfiguration =
-        [UIImageSymbolConfiguration configurationWithPointSize:19.0 weight:UIImageSymbolWeightBold];
+        [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightBold];
     UIImage *shiftImage = [UIImage systemImageNamed:@"shift.fill" withConfiguration:symbolConfiguration];
     [self.shiftButton setImage:shiftImage forState:UIControlStateNormal];
     self.shiftButton.accessibilityLabel = @"Shift";
+    self.shiftButton.accessibilityHint = @"单击一次生效，双击锁定";
 
-    [self addButton:@"NL" action:@selector(sendNewline) width:42.0 stack:self.topStackView];
+    [self addButton:@"NL" action:@selector(sendNewline) width:38.0 stack:self.topStackView];
+
+    UIView *spacer = [[UIView alloc] initWithFrame:CGRectZero];
+    [spacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [spacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+    [self.topStackView addArrangedSubview:spacer];
+
     [self addArrowButton:@"←" tag:1];
     [self addArrowButton:@"↑" tag:2];
     [self addArrowButton:@"↓" tag:3];
@@ -197,7 +211,7 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     for (NSInteger number = 1; number <= 12; number++) {
         UIButton *button = [self addButton:[NSString stringWithFormat:@"F%ld", (long)number]
                                     action:@selector(sendFunction:)
-                                     width:40.0
+                                     width:32.0
                                      stack:self.functionStackView];
         button.tag = number;
     }
@@ -210,7 +224,7 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.translatesAutoresizingMaskIntoConstraints = NO;
     [button setTitle:title forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:13.0 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:(width <= 36.0 ? 11.0 : 12.0) weight:UIFontWeightSemibold];
     [button setTitleColor:UIColor.labelColor forState:UIControlStateNormal];
     button.backgroundColor = UIColor.tertiarySystemFillColor;
     button.layer.cornerRadius = TKButtonSize * 0.5;
@@ -224,9 +238,9 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 }
 
 - (void)addArrowButton:(NSString *)title tag:(NSInteger)tag {
-    UIButton *button = [self addButton:title action:@selector(sendArrowButton:) width:38.0 stack:self.topStackView];
+    UIButton *button = [self addButton:title action:@selector(sendArrowButton:) width:32.0 stack:self.topStackView];
     button.tag = tag;
-    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont monospacedSystemFontOfSize:14.0 weight:UIFontWeightSemibold];
     UILongPressGestureRecognizer *longPress =
         [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleArrowLongPress:)];
     longPress.minimumPressDuration = 0.35;
@@ -282,24 +296,39 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 }
 
 - (void)toggleShift {
-    self.shiftArmed = !self.shiftArmed;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (self.shiftState == TKShiftStateInactive) {
+        self.shiftState = TKShiftStateArmed;
+    } else if (self.shiftState == TKShiftStateArmed &&
+               now - self.lastShiftTapDate.timeIntervalSince1970 < 0.35) {
+        self.shiftState = TKShiftStateLocked;
+    } else {
+        self.shiftState = TKShiftStateInactive;
+    }
+    self.lastShiftTapDate = [NSDate date];
     [self updateShiftAppearance];
 }
 
 - (void)updateShiftAppearance {
-    BOOL active = self.shiftArmed;
+    BOOL active = self.shiftState != TKShiftStateInactive;
+    BOOL locked = self.shiftState == TKShiftStateLocked;
     self.shiftButton.backgroundColor = active ? UIColor.systemBlueColor : UIColor.tertiarySystemFillColor;
     self.shiftButton.tintColor = active ? UIColor.whiteColor : UIColor.labelColor;
-    self.shiftButton.accessibilityValue = active ? @"开" : @"关";
+    self.shiftButton.layer.borderWidth = locked ? 2.0 : 0.0;
+    self.shiftButton.layer.borderColor = UIColor.whiteColor.CGColor;
+    self.shiftButton.accessibilityValue = locked ? @"锁定" : (active ? @"待用" : @"关闭");
 }
 
 - (BOOL)consumeShift {
-    BOOL armed = self.shiftArmed;
-    if (armed) {
-        self.shiftArmed = NO;
-        [self updateShiftAppearance];
+    if (self.shiftState == TKShiftStateLocked) {
+        return YES;
     }
-    return armed;
+    if (self.shiftState == TKShiftStateArmed) {
+        self.shiftState = TKShiftStateInactive;
+        [self updateShiftAppearance];
+        return YES;
+    }
+    return NO;
 }
 
 - (void)sendText:(NSString *)text {
