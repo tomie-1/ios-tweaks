@@ -193,10 +193,15 @@ static void TKEnsureStatusBarClear(UIView *terminal) {
     }
     CGFloat statusBottom = TKStatusBarBottomInWindow(window);
     CGRect terminalInWindow = [terminal convertRect:terminal.bounds toView:window];
-    TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f terminalY=%.1f terminalH=%.1f frame=%@",
-               statusBottom, window.safeAreaInsets.top,
-               CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow),
-               NSStringFromCGRect(terminal.frame));
+    static NSTimeInterval lastGeometryLog;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now - lastGeometryLog >= 0.20) {
+        lastGeometryLog = now;
+        TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f terminalY=%.1f terminalH=%.1f frame=%@",
+                   statusBottom, window.safeAreaInsets.top,
+                   CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow),
+                   NSStringFromCGRect(terminal.frame));
+    }
     if (statusBottom <= 0 || CGRectGetMinY(terminalInWindow) >= statusBottom - 0.5) {
         return;
     }
@@ -698,6 +703,22 @@ static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
 
 @end
 
+typedef void (*TKLayoutSubviewsFn)(id, SEL);
+static TKLayoutSubviewsFn TKOriginalLayoutSubviews;
+static BOOL TKAdjustingTerminalFrame;
+
+static void TKTerminalLayoutSubviewsReplacement(id self, SEL command) {
+    if (TKOriginalLayoutSubviews) {
+        TKOriginalLayoutSubviews(self, command);
+    }
+    if (TKAdjustingTerminalFrame) {
+        return;
+    }
+    TKAdjustingTerminalFrame = YES;
+    TKEnsureStatusBarClear((UIView *)self);
+    TKAdjustingTerminalFrame = NO;
+}
+
 typedef UIView *(*TKInputAccessoryGetter)(id, SEL);
 static TKInputAccessoryGetter TKOriginalInputAccessoryGetter;
 static char TKCombinedAccessoryKey;
@@ -762,6 +783,12 @@ static BOOL TKInstallIGhostAccessoryHook(void) {
     TKDebugLog(@"installed hook class=%@", NSStringFromClass(terminalClass));
     TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(method);
     method_setImplementation(method, (IMP)TKInputAccessoryViewReplacement);
+    Method layoutMethod = class_getInstanceMethod(terminalClass, @selector(layoutSubviews));
+    if (layoutMethod) {
+        TKOriginalLayoutSubviews = (TKLayoutSubviewsFn)method_getImplementation(layoutMethod);
+        method_setImplementation(layoutMethod, (IMP)TKTerminalLayoutSubviewsReplacement);
+        TKDebugLog(@"installed layout hook class=%@", NSStringFromClass(terminalClass));
+    }
     return YES;
 }
 
