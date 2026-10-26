@@ -13,6 +13,7 @@
 #import <objc/runtime.h>
 #include <dlfcn.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
