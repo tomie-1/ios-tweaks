@@ -12,6 +12,7 @@
 | [tfdevices](tweaks/tfdevices/README.md) | `com.tomie.tfdevices` | TestFlight 设备伪装 | 实验性，已停用 |
 | [tfinstallbypass](tweaks/tfinstallbypass/README.md) | `com.tomie.tfinstallbypass` | installd 兼容性放行 | 实验性，已停用 |
 | [loonbatch](tweaks/loonbatch/README.md) | `com.tomie.loonbatch` | Loon 插件/规则/节点批量管理 | 自用 |
+| [termkeys](tweaks/termkeys/README.md) | `com.tomie.termkeys` | 终端类 App 悬浮键盘条：Shift、F1–F12、Tab/Esc/方向键 | 自用 |
 
 功能、入口和已知问题见各插件目录下的 `README.md`。
 

@@ -1,0 +1,12 @@
+{
+    Filter = {
+        Bundles = (
+            "com.jump.ShellBoxKit",
+            "com.blink.sh",
+            "app.ish.iSH",
+            "com.termius.ios",
+            "com.panic.Prompt",
+            "com.lifesecret.SecureShellFish"
+        );
+    };
+}
