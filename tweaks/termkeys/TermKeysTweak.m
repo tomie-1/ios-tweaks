@@ -346,7 +346,8 @@ static Class TKFindIGhostTerminalClass(void) {
     if (count <= 0) {
         return Nil;
     }
-    Class *classes = calloc((size_t)count, sizeof(Class));
+    Class __unsafe_unretained *classes =
+        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
     if (!classes) {
         return Nil;
     }
@@ -393,7 +394,7 @@ static BOOL TKInstallIGhostAccessoryHook(void) {
 }
 
 @interface TKKeyboardBarController : NSObject
-@property(nonatomic, weak) TKBarView *bar;
+@property(nonatomic, strong) TKBarView *bar;
 @property(nonatomic, weak) UIWindow *hostWindow;
 @end
 
