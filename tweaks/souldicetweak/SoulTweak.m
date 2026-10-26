@@ -2008,6 +2008,23 @@ static void SoulApplyRecallBadge(UIView *cell, id layout, BOOL blocked) {
     SoulMsgTimeRelayout(cell);
 }
 
+/* 聊天列表、会话行等也会暴露 msgId；只对真正的消息 cell 做撤回角标，
+   否则列表行会被塞进角标和附加行高，看起来像被拉变形。 */
+static BOOL SoulIsMessageCell(UIView *c) {
+    if (!c) return NO;
+    Class layoutCls = objc_getClass("SODCMsgLayout");
+    id ly = SoulCellLayout(c);
+    if (ly) {
+        if (!layoutCls || [ly isKindOfClass:layoutCls]) return YES;
+        return NO;
+    }
+    NSString *cn = NSStringFromClass([c class]);
+    if ([cn containsString:@"List"] || [cn containsString:@"Cell"]) {
+        return [cn containsString:@"Message"] && ![cn containsString:@"List"];
+    }
+    return NO;
+}
+
 /* 立刻扫描当前可见 cell 贴角标（撤回到达时消息已在屏上） */
 static void SoulRefreshRecallBadges(void) {
     UIWindow *win = SoulKeyWindow();
@@ -2016,11 +2033,15 @@ static void SoulRefreshRecallBadges(void) {
     while (stack.count) {
         UIView *v = [stack lastObject]; [stack removeLastObject];
         if ([v isKindOfClass:[UITableView class]]) {
-            for (UITableViewCell *c in ((UITableView *)v).visibleCells)
+            for (UITableViewCell *c in ((UITableView *)v).visibleCells) {
+                if (!SoulIsMessageCell(c)) continue;
                 SoulApplyRecallBadge(c, SoulCellLayout(c), SoulRecallIsBlocked(c));
+            }
         } else if ([v isKindOfClass:[UICollectionView class]]) {
-            for (UICollectionViewCell *c in ((UICollectionView *)v).visibleCells)
+            for (UICollectionViewCell *c in ((UICollectionView *)v).visibleCells) {
+                if (!SoulIsMessageCell(c)) continue;
                 SoulApplyRecallBadge(c, SoulCellLayout(c), SoulRecallIsBlocked(c));
+            }
         }
         for (UIView *s in v.subviews) [stack addObject:s];
     }
@@ -2121,16 +2142,33 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     CGFloat cellH = cellView.bounds.size.height;
     CGFloat top = content.frame.origin.y;
     CGFloat maxH = cellH - kSoulMsgTimeReserve - top - 4.0;
-    if (maxH < 20.0 || content.bounds.size.height <= maxH + 1.0) return;
-    content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    CGRect cf = content.frame;
-    cf.size.height = maxH;
-    content.frame = cf;
+    if (maxH < 20.0) maxH = 20.0;
+    /* 卡片会被附加行高一起撑大。布局对象里的 bubbleSize 是卡片原生尺寸，
+       优先按它收回，避免“开了时间卡片就变大”。 */
+    CGFloat nativeH = 0.0;
+    id layout = SoulCellLayout(cellView);
+    if (layout) {
+        SEL bsSel = NSSelectorFromString(@"bubbleSize");
+        @try {
+            if ([layout respondsToSelector:bsSel]) {
+                CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
+                if (bs.height > 20.0 && bs.height < 600.0) nativeH = bs.height;
+            }
+        } @catch (__unused NSException *e) {}
+    }
+    CGFloat targetH = maxH;
+    if (nativeH > 20.0 && nativeH < targetH) targetH = nativeH;
     static int shrinkLog = 0;
-    if (shrinkLog < 6) {
+    if (content.bounds.size.height > targetH + 1.0) {
+        content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        CGRect cf = content.frame;
+        cf.size.height = targetH;
+        content.frame = cf;
+    }
+    if (shrinkLog < 8) {
         shrinkLog++;
-        SoulLog(@"msg-time: share-card clamp cellH=%.1f top=%.1f card=%.1f->%.1f",
-                cellH, top, content.bounds.size.height, maxH);
+        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f bubble=%.1f target=%.1f",
+                cellH, top, content.bounds.size.height, nativeH, targetH);
     }
 }
 static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
@@ -3492,7 +3530,13 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (!haveContent) {
         BOOL mineFallback = showTime && time.tag == 1;
         contentLeft = mineFallback ? width - 14.0 : 14.0;
-        contentRight = contentLeft;
+        /* 撤回后原气泡可能已经隐藏：这时跟着角标的位置走，别把时间甩到最左边。 */
+        if (showBadge && badge.frame.size.width > 0.0) {
+            contentLeft = badge.frame.origin.x;
+            contentRight = CGRectGetMaxX(badge.frame);
+        } else {
+            contentRight = contentLeft;
+        }
         contentBottom = MAX(0.0, height - kSoulMsgTimeReserve);
     }
     if (contentBottom > height - kSoulMsgTimeReserve)
@@ -3599,9 +3643,21 @@ static BOOL SoulTimestampLooksValid(long long ms) {
     return ms <= now + 86400000LL;
 }
 
+/* 系统提示（“你撤回了一条消息”“xx 加入了聊天”）、时间分隔这类不是真正的
+   消息，给它们挂时间只会把行撑高并把文字挤到最左边。 */
+static BOOL SoulCellWantsMsgTime(id cell) {
+    NSString *cn = NSStringFromClass([cell class]);
+    if (!cn.length) return NO;
+    if ([cn containsString:@"SystemHint"]) return NO;
+    if ([cn containsString:@"TimeTableViewCell"]) return NO;
+    if ([cn containsString:@"List"]) return NO;
+    return YES;
+}
+
 static void SoulApplyMsgTime(id cell, id layout) {
     UILabel *label = objc_getAssociatedObject(cell, kSoulMsgTimeLabelKey);
-    if (!SoulDef(kFxMsgTime)) {
+    if (!SoulDef(kFxMsgTime) || ![cell isKindOfClass:[UIView class]] ||
+        !SoulCellWantsMsgTime(cell)) {
         label.hidden = YES;
         SoulMsgTimeRelayout(cell);
         return;
@@ -3648,6 +3704,18 @@ static void SoulApplyMsgTime(id cell, id layout) {
     @try {
         if ([msg respondsToSelector:fm]) mine = ((BOOL (*)(id, SEL))objc_msgSend)(msg, fm);
     } @catch (__unused NSException *e) {}
+    if (!mine) {
+        SEL sels[3] = { NSSelectorFromString(@"isSender"), NSSelectorFromString(@"isMine"),
+                        NSSelectorFromString(@"mine") };
+        for (int i = 0; i < 3; i++) {
+            @try {
+                if ([msg respondsToSelector:sels[i]]) {
+                    mine = ((BOOL (*)(id, SEL))objc_msgSend)(msg, sels[i]);
+                    if (mine) break;
+                }
+            } @catch (__unused NSException *e) {}
+        }
+    }
     label.tag = mine ? 1 : 0;
     label.text = SoulMsgTimeText(ms);
     label.hidden = NO;
@@ -4014,7 +4082,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v44. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v45. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
