@@ -10,6 +10,9 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const CGFloat TKBarHeight = 48.0;
 static const CGFloat TKButtonSize = 34.0;
@@ -28,10 +31,18 @@ static UIResponder *TKFindFirstResponder(UIView *view) {
     return nil;
 }
 
+static BOOL TKIsKeyboardWindow(UIWindow *window) {
+    NSString *name = NSStringFromClass(window.class);
+    return [name containsString:@"Keyboard"] || [name containsString:@"TextEffects"];
+}
+
 static UIWindow *TKHostWindow(void) {
     UIWindow *firstVisible = nil;
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        if (window.isKeyWindow) {
+        if (TKIsKeyboardWindow(window)) {
+            continue;
+        }
+        if (window.isKeyWindow && window.rootViewController) {
             return window;
         }
         if (!firstVisible && !window.hidden && window.rootViewController) {
@@ -263,6 +274,124 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 
 @end
 
+@interface TKCombinedAccessoryView : UIView
+@property(nonatomic, strong) TKBarView *termKeysBar;
+@property(nonatomic, strong) UIView *originalAccessory;
+- (instancetype)initWithOriginalAccessory:(UIView *)originalAccessory;
+@end
+
+@implementation TKCombinedAccessoryView
+
+@synthesize originalAccessory = _originalAccessory;
+
+- (instancetype)initWithOriginalAccessory:(UIView *)originalAccessory {
+    self = [super initWithFrame:CGRectZero];
+    if (!self) {
+        return nil;
+    }
+    self.backgroundColor = UIColor.clearColor;
+    self.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    self.termKeysBar = [[TKBarView alloc] initWithFrame:CGRectZero];
+    [self addSubview:self.termKeysBar];
+    self.originalAccessory = originalAccessory;
+    return self;
+}
+
+- (void)setOriginalAccessory:(UIView *)originalAccessory {
+    if (_originalAccessory == originalAccessory) {
+        return;
+    }
+    [_originalAccessory removeFromSuperview];
+    _originalAccessory = originalAccessory;
+    if (originalAccessory) {
+        originalAccessory.translatesAutoresizingMaskIntoConstraints = YES;
+        originalAccessory.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [self addSubview:originalAccessory];
+    }
+    [self invalidateIntrinsicContentSize];
+    [self setNeedsLayout];
+}
+
+- (CGSize)intrinsicContentSize {
+    CGFloat originalHeight = self.originalAccessory
+        ? MAX(self.originalAccessory.intrinsicContentSize.height, 44.0)
+        : 0.0;
+    return CGSizeMake(UIViewNoIntrinsicMetric, TKBarHeight + originalHeight);
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width = CGRectGetWidth(self.bounds);
+    self.termKeysBar.frame = CGRectMake(0, 0, width, TKBarHeight);
+    CGFloat originalHeight = MAX(0, CGRectGetHeight(self.bounds) - TKBarHeight);
+    self.originalAccessory.frame = CGRectMake(0, TKBarHeight, width, originalHeight);
+}
+
+@end
+
+typedef UIView *(*TKInputAccessoryGetter)(id, SEL);
+static TKInputAccessoryGetter TKOriginalInputAccessoryGetter;
+static char TKCombinedAccessoryKey;
+
+static Class TKFindIGhostTerminalClass(void) {
+    Class direct = NSClassFromString(@"GhosttyTerminal.UITerminalView");
+    if (!direct) {
+        direct = NSClassFromString(@"UITerminalView");
+    }
+    if (direct) {
+        return direct;
+    }
+
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) {
+        return Nil;
+    }
+    Class *classes = calloc((size_t)count, sizeof(Class));
+    if (!classes) {
+        return Nil;
+    }
+    count = objc_getClassList(classes, count);
+    Class found = Nil;
+    for (int index = 0; index < count; index++) {
+        const char *name = class_getName(classes[index]);
+        if (name && strstr(name, "UITerminalView")) {
+            found = classes[index];
+            break;
+        }
+    }
+    free(classes);
+    return found;
+}
+
+static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
+    UIView *original = TKOriginalInputAccessoryGetter
+        ? TKOriginalInputAccessoryGetter(self, command)
+        : nil;
+    TKCombinedAccessoryView *combined =
+        objc_getAssociatedObject(self, &TKCombinedAccessoryKey);
+    if (!combined) {
+        combined = [[TKCombinedAccessoryView alloc] initWithOriginalAccessory:original];
+        objc_setAssociatedObject(self, &TKCombinedAccessoryKey, combined, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        combined.originalAccessory = original;
+    }
+    return combined;
+}
+
+static BOOL TKInstallIGhostAccessoryHook(void) {
+    Class terminalClass = TKFindIGhostTerminalClass();
+    if (!terminalClass) {
+        return NO;
+    }
+    Method method = class_getInstanceMethod(terminalClass, @selector(inputAccessoryView));
+    if (!method) {
+        return NO;
+    }
+    TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(method);
+    method_setImplementation(method, (IMP)TKInputAccessoryViewReplacement);
+    return YES;
+}
+
 @interface TKKeyboardBarController : NSObject
 @property(nonatomic, weak) TKBarView *bar;
 @property(nonatomic, weak) UIWindow *hostWindow;
@@ -288,6 +417,14 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     [center addObserver:self
                selector:@selector(keyboardWillChangeFrame:)
                    name:UIKeyboardWillChangeFrameNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(keyboardWillChangeFrame:)
+                   name:UIKeyboardDidChangeFrameNotification
+                 object:nil];
+    [center addObserver:self
+               selector:@selector(keyboardWillChangeFrame:)
+                   name:UIKeyboardDidShowNotification
                  object:nil];
     [center addObserver:self
                selector:@selector(keyboardWillHide:)
@@ -337,6 +474,10 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 __attribute__((constructor))
 static void TermKeysInit(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+        if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"] && TKInstallIGhostAccessoryHook()) {
+            return;
+        }
         (void)[TKKeyboardBarController shared];
     });
 }
