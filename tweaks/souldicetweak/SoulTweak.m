@@ -3727,6 +3727,22 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
     return YES;
 }
 
+static BOOL SoulLayoutNeedsFooterRow(id layout) {
+    if (SoulDef(kFxMsgTime)) {
+        SEL msgSel = NSSelectorFromString(@"message");
+        id msg = nil;
+        @try {
+            if ([layout respondsToSelector:msgSel])
+                msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
+        } @catch (__unused NSException *e) {}
+        long long t = msg ? SoulMsgTimestamp(msg) : 0;
+        if (!SoulTimestampLooksValid(t)) t = SoulMsgTimestamp(layout);
+        if (SoulTimestampLooksValid(t)) return YES;
+    }
+    if (SoulDef(kFxAntiRecall) && SoulRecallIsBlocked(layout)) return YES;
+    return NO;
+}
+
 static double (*gOrigMsgCellHeight)(id, SEL);
 static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
@@ -3738,7 +3754,9 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
         h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
         objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return h;
+    /* 只有真的要画时间行/撤回角标的消息才加预留行；开关全关时行高保持原生，
+       防撤回开着也不会把每条普通消息都撑高。 */
+    if (!SoulLayoutNeedsFooterRow(self)) return h;
     /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
     return h + kSoulMsgTimeReserve;
 }
@@ -3996,7 +4014,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v43. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v44. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
