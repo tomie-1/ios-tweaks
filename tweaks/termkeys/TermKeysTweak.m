@@ -285,13 +285,22 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 @synthesize originalAccessory = _originalAccessory;
 
 - (instancetype)initWithOriginalAccessory:(UIView *)originalAccessory {
-    self = [super initWithFrame:CGRectZero];
+    CGFloat originalHeight = originalAccessory
+        ? MAX(originalAccessory.intrinsicContentSize.height, 44.0)
+        : 0.0;
+    CGRect initialFrame = CGRectMake(
+        0,
+        0,
+        UIScreen.mainScreen.bounds.size.width,
+        TKBarHeight + originalHeight
+    );
+    self = [super initWithFrame:initialFrame];
     if (!self) {
         return nil;
     }
     self.backgroundColor = UIColor.clearColor;
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    self.termKeysBar = [[TKBarView alloc] initWithFrame:CGRectZero];
+    self.termKeysBar = [[TKBarView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(initialFrame), TKBarHeight)];
     [self addSubview:self.termKeysBar];
     self.originalAccessory = originalAccessory;
     return self;
@@ -308,6 +317,15 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
         originalAccessory.autoresizingMask = UIViewAutoresizingFlexibleWidth;
         [self addSubview:originalAccessory];
     }
+    CGFloat originalHeight = originalAccessory
+        ? MAX(originalAccessory.intrinsicContentSize.height, 44.0)
+        : 0.0;
+    CGRect frame = self.frame;
+    if (CGRectGetWidth(frame) <= 0) {
+        frame.size.width = UIScreen.mainScreen.bounds.size.width;
+    }
+    frame.size.height = TKBarHeight + originalHeight;
+    self.frame = frame;
     [self invalidateIntrinsicContentSize];
     [self setNeedsLayout];
 }
@@ -316,7 +334,7 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
     CGFloat originalHeight = self.originalAccessory
         ? MAX(self.originalAccessory.intrinsicContentSize.height, 44.0)
         : 0.0;
-    return CGSizeMake(UIViewNoIntrinsicMetric, TKBarHeight + originalHeight);
+    return CGSizeMake(UIScreen.mainScreen.bounds.size.width, TKBarHeight + originalHeight);
 }
 
 - (void)layoutSubviews {
