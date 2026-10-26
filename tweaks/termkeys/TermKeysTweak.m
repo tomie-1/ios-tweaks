@@ -163,7 +163,18 @@ static void TKUpdateStatusBarMask(UIView *terminal) {
     if (mask.superview != terminal) {
         [terminal addSubview:mask];
     }
-    mask.backgroundColor = UIColor.systemBackgroundColor;
+    BOOL dark = terminal.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+    NSString *themeName = [NSUserDefaults.standardUserDefaults stringForKey:(dark ? @"Theme.dark" : @"Theme.light")];
+    BOOL defaultTheme = !themeName.length ||
+        [themeName isEqualToString:@"Apple System Colors"] ||
+        [themeName isEqualToString:@"Apple System Colors Light"];
+    if (defaultTheme) {
+        mask.backgroundColor = dark
+            ? [UIColor colorWithRed:0x1e / 255.0 green:0x1e / 255.0 blue:0x1e / 255.0 alpha:1.0]
+            : [UIColor colorWithRed:0xfe / 255.0 green:0xff / 255.0 blue:0xff / 255.0 alpha:1.0];
+    } else {
+        mask.backgroundColor = UIColor.systemBackgroundColor;
+    }
     mask.frame = CGRectMake(0, 0, CGRectGetWidth(terminal.bounds),
                             MIN(overlap, CGRectGetHeight(terminal.bounds)));
     mask.hidden = NO;
