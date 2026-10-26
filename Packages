@@ -32,7 +32,7 @@ SHA512: 5b2a022c6066e6aa8a7c0a665f90754027074a8adec9ff4aa1fd039926604936dab4323f
 
 Package: com.tomie.termkeys
 Name: TermKeys
-Version: 1.0.15
+Version: 1.0.16
 Architecture: iphoneos-arm
 Description: 终端类 App 两行键盘条：Shift、NL、方向键与 F1–F12
 Maintainer: tomie
@@ -40,11 +40,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.termkeys_iphoneos-arm.deb
-Size: 15516
-MD5sum: c162c8f8e5d96dc7c26471820ccb9aee
-SHA1: b1195d384c6b2566aed0a6da830b9a581a383c54
-SHA256: 9bdcf5970d6d4b966c0a6044cc82156824e42a01b5646892929f9f519a479bd1
-SHA512: cd0d1c88422be051b89c48aa0a00e0a5994b55df3898bed3b8f42d818e66f7738d86c30cfe79ba250247288233890331d36f54b9745d819dede35cbc38b27fee
+Size: 13472
+MD5sum: 1cb2971c321e8c9d787ad7255eef5e2c
+SHA1: 7b994fc9d3e226f4516e5b35a2d180a7f613b945
+SHA256: abce3b3538ac55ab632c17bed928b3b7708fe18ae39f10db591fd2e213b54cec
+SHA512: 76fa449f8aa1994622004fe6c83c8a46735d14fd290e8420fb3a13055f796b27fe73cbdaa95871dac8e9761f1d867c34704b3f5b3698ebdf0cb9bb56412289c9
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -144,7 +144,7 @@ SHA512: 1741b72174ef8dc21133760cc3b5e811dfd60f73d0353abbd51534faf6e9312b9d62b36e
 
 Package: com.tomie.termkeys
 Name: TermKeys
-Version: 1.0.15
+Version: 1.0.16
 Architecture: iphoneos-arm64
 Description: 终端类 App 两行键盘条：Shift、NL、方向键与 F1–F12
 Maintainer: tomie
@@ -152,11 +152,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.termkeys_iphoneos-arm64.deb
-Size: 15552
-MD5sum: 1ca45bbfa50a7b998e064224e1c14c08
-SHA1: 32fb521ab08b9c1f27fa591dc80aa865781566df
-SHA256: 711038800fc7d0683fb3689ee483eb5ba8fa9befc52e83acd15e7a5cd01f9b28
-SHA512: f724653c23d5f60377980539dbfd4785a0f1b5c3297052f3bba4be2c4ce3c12f4ea6345f5e384300fbf473ed815d21eca319a4a91542628041484e542e03dea6
+Size: 13508
+MD5sum: 50b59ee558329339d2279cd0b2fcd1c4
+SHA1: e9f90dc2e7539bb0e2e69fa812be3f89fdedfb4b
+SHA256: c7ce8b1b5f614b3179f4b4640b54560cc32b99670f462e54cfacdd7febdf2aca
+SHA512: 108492bdde6a622886047b9519e77b6012e623c6d71e6501741d31ba863651a7db1df1619508bde3e469475286e2a3625fb04c5f832b02b624a0c715b50fb4a7
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -256,7 +256,7 @@ SHA512: 6cb61424c26c944f857e77ad1c86cb40cd869efadcad46ddbd89f8a11d700489750dd21b
 
 Package: com.tomie.termkeys
 Name: TermKeys
-Version: 1.0.15
+Version: 1.0.16
 Architecture: iphoneos-arm64e
 Description: 终端类 App 两行键盘条：Shift、NL、方向键与 F1–F12
 Maintainer: tomie
@@ -264,11 +264,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.termkeys_iphoneos-arm64e.deb
-Size: 15520
-MD5sum: 215cf13de44da67bf4633646e920ff0a
-SHA1: 40fd2ba005fe5d883aa3a4ace0eef001ad8ee134
-SHA256: 0743eaef32ca7e128b1262442cd1e0da4878947f3963c6e86b3eff9d3edd5b53
-SHA512: 47281552ecdc140d070b9d8fb9d9d406ad02aa6d174a0f8aa6822a006daf96e43647564855de41dc2b404b1d0cbfafd298bbb6346ebc6d78c45867347c5ce359
+Size: 13476
+MD5sum: 32de0e28233865ad47d7106b6033b15f
+SHA1: 9c1ad7e3879cbc8924e7c5da83c4af4b0b568a73
+SHA256: d771485779578e6bdbc644145afa372e0701aebde2761ef259e690f5c0ce5867
+SHA512: 9714ab8a1bf8de3de7185b2eb28bfed9d43a5643f893093a309461af927424a52005eb23759ecc4ab2c4bae15158a4fa16cfe4b757e0d069cef1a9d2501ead27
 
 Package: com.tomie.tfdevices
 Name: TFDevices
