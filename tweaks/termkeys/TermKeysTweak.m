@@ -191,30 +191,41 @@ static void TKEnsureStatusBarClear(UIView *terminal) {
     if (!window) {
         return;
     }
-    UIViewController *root = window.rootViewController;
-    if (!root) {
-        return;
-    }
     CGFloat statusBottom = TKStatusBarBottomInWindow(window);
     CGRect terminalInWindow = [terminal convertRect:terminal.bounds toView:window];
-    UIEdgeInsets insets = root.additionalSafeAreaInsets;
-    TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f rootSafeTop=%.1f terminalY=%.1f terminalH=%.1f addTop=%.1f",
-               statusBottom, window.safeAreaInsets.top, root.view.safeAreaInsets.top,
-               CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow), insets.top);
-    if (statusBottom <= 0 || CGRectGetMinY(terminalInWindow) >= statusBottom - 1.0) {
+    TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f terminalY=%.1f terminalH=%.1f frame=%@",
+               statusBottom, window.safeAreaInsets.top,
+               CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow),
+               NSStringFromCGRect(terminal.frame));
+    if (statusBottom <= 0 || CGRectGetMinY(terminalInWindow) >= statusBottom - 0.5) {
         return;
     }
-    if (insets.top >= statusBottom - 1.0) {
-        return;
+
+    // Keyboard avoidance moves the terminal whole view upward while keeping
+    // its bottom pinned to the accessory bar. Raising the root safe area
+    // does not undo that scroll: in the field the terminal stayed at 25.7pt
+    // under a 47pt status bar. Move the view down and take the same amount
+    // off its height so its bottom edge stays where the keyboard expects it.
+    CGFloat overlap = statusBottom - CGRectGetMinY(terminalInWindow);
+    CGRect frame = terminal.frame;
+    frame.origin.y += overlap;
+    frame.size.height = MAX(0, frame.size.height - overlap);
+    terminal.frame = frame;
+    TKDebugLog(@"frame-fix overlap=%.1f frame=%@", overlap, NSStringFromCGRect(frame));
+}
+
+static void TKScheduleTerminalTopFixes(void) {
+    static const double delays[] = {0.35, 0.75, 1.20, 1.80};
+    for (size_t index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[index] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            UIResponder *input = TKCurrentInput();
+            UIView *terminal = TKIsTerminalView(input) ? (UIView *)input : nil;
+            if (!terminal) {
+                terminal = TKFindTerminalView(TKHostWindow());
+            }
+            TKEnsureStatusBarClear(terminal);
+        });
     }
-    CGFloat extra = statusBottom - CGRectGetMinY(terminalInWindow);
-    root.additionalSafeAreaInsets = UIEdgeInsetsMake(insets.top + extra, insets.left, insets.bottom, insets.right);
-    TKDebugLog(@"apply addTop=%.1f extra=%.1f", root.additionalSafeAreaInsets.top, extra);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        CGRect after = [terminal convertRect:terminal.bounds toView:window];
-        TKDebugLog(@"geom-after terminalY=%.1f terminalH=%.1f rootSafeTop=%.1f",
-                   CGRectGetMinY(after), CGRectGetHeight(after), root.view.safeAreaInsets.top);
-    });
 }
 
 static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
@@ -728,13 +739,7 @@ static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
     } else {
         combined.originalAccessory = original;
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIView *terminal = TKFindTerminalView(self);
-        if (!terminal) {
-            terminal = TKFindTerminalView(TKHostWindow());
-        }
-        TKEnsureStatusBarClear(terminal);
-    });
+    TKScheduleTerminalTopFixes();
     return combined;
 }
 
@@ -838,6 +843,12 @@ static void TermKeysInit(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
         if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"] && TKInstallIGhostAccessoryHook()) {
+            NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+            for (NSString *name in @[UIKeyboardDidShowNotification, UIKeyboardDidChangeFrameNotification]) {
+                [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+                    TKScheduleTerminalTopFixes();
+                }];
+            }
             return;
         }
         (void)[TKKeyboardBarController shared];
