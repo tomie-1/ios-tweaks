@@ -109,6 +109,87 @@ static BOOL TKIsTerminalView(UIResponder *responder) {
         [responder isKindOfClass:TKIGhostTerminalClass];
 }
 
+static char TKStatusBarMaskKey;
+
+static CGFloat TKStatusBarBottomInWindow(UIWindow *window) {
+    if (!window) {
+        return 0;
+    }
+    CGFloat bottom = 0;
+    if (@available(iOS 13.0, *)) {
+        UIStatusBarManager *manager = window.windowScene.statusBarManager;
+        if (manager) {
+            bottom = CGRectGetMaxY([window convertRect:manager.statusBarFrame fromWindow:nil]);
+        }
+    }
+    return bottom > 0 ? bottom : window.safeAreaInsets.top;
+}
+
+static UIView *TKFindTerminalView(UIView *view) {
+    if (!view) {
+        return nil;
+    }
+    if (TKIsTerminalView((UIResponder *)view)) {
+        return view;
+    }
+    for (UIView *subview in view.subviews) {
+        UIView *found = TKFindTerminalView(subview);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void TKUpdateStatusBarMask(UIView *terminal) {
+    if (!terminal || !terminal.window) {
+        return;
+    }
+    CGFloat statusBottom = TKStatusBarBottomInWindow(terminal.window);
+    CGRect terminalInWindow = [terminal convertRect:terminal.bounds toView:terminal.window];
+    CGFloat overlap = statusBottom - CGRectGetMinY(terminalInWindow);
+    UIView *mask = objc_getAssociatedObject(terminal, &TKStatusBarMaskKey);
+    if (overlap <= 0.5) {
+        mask.hidden = YES;
+        return;
+    }
+    if (!mask) {
+        mask = [[UIView alloc] initWithFrame:CGRectZero];
+        mask.userInteractionEnabled = NO;
+        mask.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        mask.isAccessibilityElement = NO;
+        objc_setAssociatedObject(terminal, &TKStatusBarMaskKey, mask, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (mask.superview != terminal) {
+        [terminal addSubview:mask];
+    }
+    mask.backgroundColor = UIColor.systemBackgroundColor;
+    mask.frame = CGRectMake(0, 0, CGRectGetWidth(terminal.bounds),
+                            MIN(overlap, CGRectGetHeight(terminal.bounds)));
+    mask.hidden = NO;
+    [terminal bringSubviewToFront:mask];
+}
+
+static void TKScheduleStatusBarMaskUpdates(void) {
+    static NSTimeInterval lastSchedule;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now - lastSchedule < 0.35) {
+        return;
+    }
+    lastSchedule = now;
+    static const double delays[] = {0.10, 0.35, 0.75, 1.20};
+    for (size_t index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[index] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            UIResponder *input = TKCurrentInput();
+            UIView *terminal = TKIsTerminalView(input) ? (UIView *)input : nil;
+            if (!terminal) {
+                terminal = TKFindTerminalView(TKHostWindow());
+            }
+            TKUpdateStatusBarMask(terminal);
+        });
+    }
+}
+
 static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
     UIResponder *input = TKCurrentInput();
     if (!TKIsTerminalView(input)) {
@@ -589,6 +670,7 @@ static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
     } else {
         combined.originalAccessory = original;
     }
+    TKScheduleStatusBarMaskUpdates();
     return combined;
 }
 
@@ -691,6 +773,12 @@ static void TermKeysInit(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
         if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"] && TKInstallIGhostAccessoryHook()) {
+            NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+            for (NSString *name in @[UIKeyboardDidShowNotification, UIKeyboardDidChangeFrameNotification, UIKeyboardWillHideNotification]) {
+                [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+                    TKScheduleStatusBarMaskUpdates();
+                }];
+            }
             return;
         }
         (void)[TKKeyboardBarController shared];
