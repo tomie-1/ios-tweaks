@@ -2128,47 +2128,63 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
     if ([cn rangeOfString:@"shareusercard"].location == NSNotFound) return;
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
-    if (!content && [cellView isKindOfClass:[UITableViewCell class]]) {
-        UIView *cv = ((UITableViewCell *)cellView).contentView;
-        CGFloat bestArea = 0;
-        for (UIView *sv in cv.subviews) {
+
+    UIView *root = cellView;
+    if ([cellView isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)cellView).contentView;
+    else if ([cellView isKindOfClass:[UICollectionViewCell class]]) root = ((UICollectionViewCell *)cellView).contentView;
+    UIView *card = content;
+    /* SoulMessageContentView 在这个 cell 上偶尔只返回一个 6pt 的小标签，
+       这里改取内容区里面积最大的视图，确保拿到真正的卡片。 */
+    if (!card || card.bounds.size.height < 40.0 || card.bounds.size.width < 40.0) {
+        CGFloat bestArea = 0.0;
+        for (UIView *sv in root.subviews) {
             if (sv.hidden || sv.alpha < 0.02) continue;
             if (SoulFooterChromeView(sv)) continue;
-            CGFloat area = sv.bounds.size.width * sv.bounds.size.height;
-            if (area > bestArea) { bestArea = area; content = sv; }
+            CGRect r = sv.frame;
+            if (r.size.width < 40.0 || r.size.height < 20.0) continue;
+            CGFloat area = r.size.width * r.size.height;
+            if (area > bestArea) { bestArea = area; card = sv; }
         }
     }
-    if (!content) return;
+    if (!card) return;
+
     CGFloat cellH = cellView.bounds.size.height;
-    CGFloat top = content.frame.origin.y;
-    CGFloat maxH = cellH - kSoulMsgTimeReserve - top - 4.0;
-    if (maxH < 20.0) maxH = 20.0;
-    /* 卡片会被附加行高一起撑大。布局对象里的 bubbleSize 是卡片原生尺寸，
-       优先按它收回，避免“开了时间卡片就变大”。 */
-    CGFloat nativeH = 0.0;
+    CGFloat top = card.frame.origin.y;
     id layout = SoulCellLayout(cellView);
+    CGFloat insetBottom = -1.0;
+    CGFloat nativeH = 0.0;
     if (layout) {
-        SEL bsSel = NSSelectorFromString(@"bubbleSize");
         @try {
+            SEL insSel = NSSelectorFromString(@"cellInset");
+            if ([layout respondsToSelector:insSel]) {
+                UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
+                if (isfinite(ins.bottom) && ins.bottom >= 0.0 && ins.bottom < cellH) insetBottom = ins.bottom;
+            }
+        } @catch (__unused NSException *e) {}
+        @try {
+            SEL bsSel = NSSelectorFromString(@"bubbleSize");
             if ([layout respondsToSelector:bsSel]) {
                 CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
                 if (bs.height > 20.0 && bs.height < 600.0) nativeH = bs.height;
             }
         } @catch (__unused NSException *e) {}
     }
+    CGFloat maxH = cellH - top - (insetBottom >= 0.0 ? insetBottom : 8.0);
+    if (maxH < 20.0) maxH = 20.0;
     CGFloat targetH = maxH;
     if (nativeH > 20.0 && nativeH < targetH) targetH = nativeH;
-    static int shrinkLog = 0;
-    if (content.bounds.size.height > targetH + 1.0) {
-        content.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        CGRect cf = content.frame;
+    CGFloat before = card.bounds.size.height;
+    if (before > targetH + 1.0) {
+        card.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        CGRect cf = card.frame;
         cf.size.height = targetH;
-        content.frame = cf;
+        card.frame = cf;
     }
-    if (shrinkLog < 8) {
+    static int shrinkLog = 0;
+    if (shrinkLog < 10) {
         shrinkLog++;
-        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f bubble=%.1f target=%.1f",
-                cellH, top, content.bounds.size.height, nativeH, targetH);
+        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f bubble=%.1f inset=%.1f target=%.1f",
+                cellH, top, before, nativeH, insetBottom, targetH);
     }
 }
 static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
@@ -3811,6 +3827,32 @@ static BOOL SoulLayoutNeedsFooterRow(id layout) {
     return NO;
 }
 
+/* 时间行只有 12pt 高。消息布局本身通常会在气泡下方留出底部内边距，
+   能塞进这段留白就不用额外加行高；只有留白不足时才补差额。
+   否则每条消息都多 14pt，聊天看起来会明显变松，分享卡也会被一起撑大。 */
+static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
+    CGFloat reserve = kSoulMsgTimeReserve;
+    if (!layout || baseH < 20.0) return reserve;
+    SEL insSel = NSSelectorFromString(@"cellInset");
+    SEL bsSel = NSSelectorFromString(@"bubbleSize");
+    if (![layout respondsToSelector:insSel] || ![layout respondsToSelector:bsSel]) return reserve;
+    @try {
+        UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
+        CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
+        if (!isfinite(ins.top) || !isfinite(ins.bottom)) return reserve;
+        if (ins.bottom < 0.0 || ins.bottom > baseH) return reserve;
+        if (bs.height > 1.0) {
+            CGFloat expect = ins.top + bs.height + ins.bottom;
+            if (fabs(expect - baseH) > 3.0) return reserve;   /* 布局自洽才采信 */
+        }
+        CGFloat need = (2.0 + 12.0 + 1.0) - ins.bottom;
+        if (need < 0.0) need = 0.0;
+        if (need > kSoulMsgTimeReserve) need = kSoulMsgTimeReserve;
+        reserve = need;
+    } @catch (__unused NSException *e) {}
+    return reserve;
+}
+
 static double (*gOrigMsgCellHeight)(id, SEL);
 static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
@@ -3826,7 +3868,7 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
        防撤回开着也不会把每条普通消息都撑高。 */
     if (!SoulLayoutNeedsFooterRow(self)) return h;
     /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
-    return h + kSoulMsgTimeReserve;
+    return h + SoulFooterReserveForLayout(self, h);
 }
 
 static void (*gOrigSetCellHeight)(id, SEL, double);
@@ -4082,7 +4124,7 @@ static void SoulTweakInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ SoulSyncLoveBellPatch(); });
     SoulLog(@"skip=%d", (int)(SoulSkipText().length > 0));
-    SoulLog(@"loaded v45. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
+    SoulLog(@"loaded v46. dice=%d snapUnlock=%d msgTime=%d teenOff=%d adsOff=%d",
             (int)SoulDiceOn(), (int)SoulDef(kFxSnapUnlock),
             (int)SoulDef(kFxMsgTime), (int)SoulDef(kFxNoTeenPopup),
             (int)SoulDef(kFxNoAds));
