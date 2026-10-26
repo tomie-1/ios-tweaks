@@ -12,6 +12,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,12 +101,120 @@ static TKSwiftSendKeyFn TKSwiftSendKeyFunction(void) {
     return function;
 }
 
+static Class TKIGhostTerminalClass;
+
+static void TKDebugLog(NSString *format, ...) {
+    static dispatch_once_t onceToken;
+    static NSString *logPath;
+    dispatch_once(&onceToken, ^{
+        logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"TermKeys.debug.log"];
+    });
+    va_list arguments;
+    va_start(arguments, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:arguments];
+    va_end(arguments);
+    NSString *line = [NSString stringWithFormat:@"[TKDBG-a4f2] %@ %@\n", NSDate.date, message];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) {
+        return;
+    }
+    NSFileManager *manager = NSFileManager.defaultManager;
+    if (![manager fileExistsAtPath:logPath]) {
+        [data writeToFile:logPath atomically:YES];
+        return;
+    }
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    if (!handle) {
+        return;
+    }
+    @try {
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+    } @catch (__unused NSException *exception) {
+    }
+    [handle closeFile];
+}
+
 static BOOL TKIsTerminalView(UIResponder *responder) {
     if (!responder) {
         return NO;
     }
+    // iGhostVT uses LockableTerminalView, a Swift subclass of
+    // GhosttyTerminal.UITerminalView. Checking the class name alone missed it
+    // and sent every function key down the text fallback path.
+    if (TKIGhostTerminalClass && [responder isKindOfClass:TKIGhostTerminalClass]) {
+        return YES;
+    }
     const char *name = class_getName(object_getClass(responder));
-    return name && strstr(name, "UITerminalView") != NULL;
+    return name && strstr(name, "TerminalView") != NULL;
+}
+
+static CGFloat TKStatusBarBottomInWindow(UIWindow *window) {
+    if (!window) {
+        return 0;
+    }
+    CGFloat bottom = 0;
+    if (@available(iOS 13.0, *)) {
+        UIStatusBarManager *manager = window.windowScene.statusBarManager;
+        if (manager) {
+            CGRect frame = [window convertRect:manager.statusBarFrame fromWindow:nil];
+            bottom = CGRectGetMaxY(frame);
+        }
+    }
+    if (bottom <= 0) {
+        bottom = window.safeAreaInsets.top;
+    }
+    return bottom;
+}
+
+static UIView *TKFindTerminalView(UIView *view) {
+    if (!view) {
+        return nil;
+    }
+    if (TKIsTerminalView((UIResponder *)view)) {
+        return view;
+    }
+    for (UIView *subview in view.subviews) {
+        UIView *found = TKFindTerminalView(subview);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+static void TKEnsureStatusBarClear(UIView *terminal) {
+    if (!terminal) {
+        return;
+    }
+    UIWindow *window = terminal.window;
+    if (!window) {
+        return;
+    }
+    UIViewController *root = window.rootViewController;
+    if (!root) {
+        return;
+    }
+    CGFloat statusBottom = TKStatusBarBottomInWindow(window);
+    CGRect terminalInWindow = [terminal convertRect:terminal.bounds toView:window];
+    UIEdgeInsets insets = root.additionalSafeAreaInsets;
+    TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f rootSafeTop=%.1f terminalY=%.1f terminalH=%.1f addTop=%.1f",
+               statusBottom, window.safeAreaInsets.top, root.view.safeAreaInsets.top,
+               CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow), insets.top);
+    if (statusBottom <= 0 || CGRectGetMinY(terminalInWindow) >= statusBottom - 1.0) {
+        return;
+    }
+    if (insets.top >= statusBottom - 1.0) {
+        return;
+    }
+    CGFloat extra = statusBottom - CGRectGetMinY(terminalInWindow);
+    root.additionalSafeAreaInsets = UIEdgeInsetsMake(insets.top + extra, insets.left, insets.bottom, insets.right);
+    TKDebugLog(@"apply addTop=%.1f extra=%.1f", root.additionalSafeAreaInsets.top, extra);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        CGRect after = [terminal convertRect:terminal.bounds toView:window];
+        TKDebugLog(@"geom-after terminalY=%.1f terminalH=%.1f rootSafeTop=%.1f",
+                   CGRectGetMinY(after), CGRectGetHeight(after), root.view.safeAreaInsets.top);
+    });
 }
 
 static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
@@ -115,9 +224,13 @@ static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
     }
     TKSwiftSendKeyFn function = TKSwiftSendKeyFunction();
     if (!function) {
+        TKDebugLog(@"native key unavailable class=%@ key=%u", NSStringFromClass(object_getClass(input)), key);
         return NO;
     }
-    return TKCallSwiftSendKey(input, key, modifiers, function) ? YES : NO;
+    BOOL sent = TKCallSwiftSendKey(input, key, modifiers, function) ? YES : NO;
+    TKDebugLog(@"native key class=%@ key=%u mods=%u sent=%d",
+               NSStringFromClass(object_getClass(input)), key, modifiers, sent);
+    return sent;
 }
 
 static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
@@ -615,6 +728,13 @@ static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
     } else {
         combined.originalAccessory = original;
     }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIView *terminal = TKFindTerminalView(self);
+        if (!terminal) {
+            terminal = TKFindTerminalView(TKHostWindow());
+        }
+        TKEnsureStatusBarClear(terminal);
+    });
     return combined;
 }
 
@@ -627,6 +747,8 @@ static BOOL TKInstallIGhostAccessoryHook(void) {
     if (!method) {
         return NO;
     }
+    TKIGhostTerminalClass = terminalClass;
+    TKDebugLog(@"installed hook class=%@", NSStringFromClass(terminalClass));
     TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(method);
     method_setImplementation(method, (IMP)TKInputAccessoryViewReplacement);
     return YES;
