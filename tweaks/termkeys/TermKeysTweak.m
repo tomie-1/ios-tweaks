@@ -92,7 +92,23 @@ static void TKUpdateStatusBarCover(UIWindow *window) {
     [window bringSubviewToFront:cover];
 }
 
-typedef bool (*TKSwiftSendKeyFn)(id, uint8_t, uint32_t);
+typedef bool (*TKSwiftSendKeyFn)(void);
+
+__attribute__((naked))
+static bool TKCallSwiftSendKey(id view, uint8_t key, uint32_t modifiers, TKSwiftSendKeyFn function) {
+    __asm__ volatile(
+        "stp x29, x30, [sp, #-16]!\n"
+        "stp x19, x20, [sp, #-16]!\n"
+        "mov x19, x3\n"
+        "mov x20, x0\n"
+        "mov w0, w1\n"
+        "mov w1, w2\n"
+        "blr x19\n"
+        "ldp x19, x20, [sp], #16\n"
+        "ldp x29, x30, [sp], #16\n"
+        "ret\n"
+    );
+}
 
 static TKSwiftSendKeyFn TKSwiftSendKeyFunction(void) {
     static TKSwiftSendKeyFn function;
@@ -127,7 +143,7 @@ static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
     if (!function) {
         return NO;
     }
-    return function(input, key, modifiers) ? YES : NO;
+    return TKCallSwiftSendKey(input, key, modifiers, function) ? YES : NO;
 }
 
 static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
