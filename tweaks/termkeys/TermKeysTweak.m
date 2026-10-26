@@ -215,6 +215,12 @@ static void TKEnsureStatusBarClear(UIView *terminal) {
 }
 
 static void TKScheduleTerminalTopFixes(void) {
+    static NSTimeInterval lastSchedule;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (now - lastSchedule < 0.40) {
+        return;
+    }
+    lastSchedule = now;
     static const double delays[] = {0.35, 0.75, 1.20, 1.80};
     for (size_t index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[index] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
