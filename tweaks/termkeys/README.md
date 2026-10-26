@@ -12,8 +12,8 @@
 ## 使用
 
 - TrollFools：把构建产物 `TermKeys.dylib` 注入目标 App。注入后可随 App 启动。
-- 越狱安装：deb 中的 filter 默认包含 CareServer、Blink、iSH、Termius、Prompt、Secure ShellFish。其他 App 可改 `TermKeysTweak.plist` 后重新打包。
-- `wiki.qaq.iGhostVT` 已有带原生 Shift/F 键的自定义构建，不需要重复注入。
+- 越狱安装：deb 中的 filter 默认包含 iGhostVT、CareServer、Blink、iSH、Termius、Prompt、Secure ShellFish。其他 App 可改 `TermKeysTweak.plist` 后重新打包。
+- iGhostVT 使用官方安装包即可；插件会在同一个 bundle ID 的新版本中继续生效，App 更新后重新打开一次即可。
 
 ## 限制
 

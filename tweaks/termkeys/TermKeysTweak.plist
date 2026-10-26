@@ -1,6 +1,7 @@
 {
     Filter = {
         Bundles = (
+            "wiki.qaq.iGhostVT",
             "com.jump.ShellBoxKit",
             "com.blink.sh",
             "app.ish.iSH",
