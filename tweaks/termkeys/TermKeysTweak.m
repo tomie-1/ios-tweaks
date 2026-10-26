@@ -66,32 +66,6 @@ static UIResponder *TKCurrentInput(void) {
     return nil;
 }
 
-static char TKStatusBarCoverKey;
-
-static void TKUpdateStatusBarCover(UIWindow *window) {
-    if (!window || TKIsKeyboardWindow(window)) {
-        return;
-    }
-    UIView *cover = objc_getAssociatedObject(window, &TKStatusBarCoverKey);
-    if (!cover) {
-        cover = [[UIView alloc] initWithFrame:CGRectZero];
-        cover.userInteractionEnabled = NO;
-        cover.backgroundColor = UIColor.systemBackgroundColor;
-        cover.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-        objc_setAssociatedObject(window, &TKStatusBarCoverKey, cover, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [window addSubview:cover];
-    }
-    CGFloat top = window.safeAreaInsets.top;
-    if (top <= 0 && window.windowScene.statusBarManager) {
-        top = window.windowScene.statusBarManager.statusBarFrame.size.height;
-    }
-    if (top <= 0) {
-        top = 44.0;
-    }
-    cover.frame = CGRectMake(0, 0, CGRectGetWidth(window.bounds), top);
-    [window bringSubviewToFront:cover];
-}
-
 typedef bool (*TKSwiftSendKeyFn)(void);
 
 __attribute__((naked))
@@ -392,16 +366,6 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     [self.arrowRepeatTimer invalidate];
     self.arrowRepeatTimer = nil;
     self.arrowRepeatButton = nil;
-}
-
-- (void)didMoveToWindow {
-    [super didMoveToWindow];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = TKHostWindow();
-        if (window) {
-            TKUpdateStatusBarCover(window);
-        }
-    });
 }
 
 - (void)dealloc {
