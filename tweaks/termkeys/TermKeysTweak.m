@@ -12,7 +12,6 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,140 +102,11 @@ static TKSwiftSendKeyFn TKSwiftSendKeyFunction(void) {
 
 static Class TKIGhostTerminalClass;
 
-static void TKDebugLog(NSString *format, ...) {
-    static dispatch_once_t onceToken;
-    static NSString *logPath;
-    dispatch_once(&onceToken, ^{
-        logPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"TermKeys.debug.log"];
-    });
-    va_list arguments;
-    va_start(arguments, format);
-    NSString *message = [[NSString alloc] initWithFormat:format arguments:arguments];
-    va_end(arguments);
-    NSString *line = [NSString stringWithFormat:@"[TKDBG-a4f2] %@ %@\n", NSDate.date, message];
-    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data) {
-        return;
-    }
-    NSFileManager *manager = NSFileManager.defaultManager;
-    if (![manager fileExistsAtPath:logPath]) {
-        [data writeToFile:logPath atomically:YES];
-        return;
-    }
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-    if (!handle) {
-        return;
-    }
-    @try {
-        [handle seekToEndOfFile];
-        [handle writeData:data];
-    } @catch (__unused NSException *exception) {
-    }
-    [handle closeFile];
-}
-
 static BOOL TKIsTerminalView(UIResponder *responder) {
-    if (!responder) {
-        return NO;
-    }
-    // iGhostVT uses LockableTerminalView, a Swift subclass of
-    // GhosttyTerminal.UITerminalView. Checking the class name alone missed it
-    // and sent every function key down the text fallback path.
-    if (TKIGhostTerminalClass && [responder isKindOfClass:TKIGhostTerminalClass]) {
-        return YES;
-    }
-    const char *name = class_getName(object_getClass(responder));
-    return name && strstr(name, "TerminalView") != NULL;
-}
-
-static CGFloat TKStatusBarBottomInWindow(UIWindow *window) {
-    if (!window) {
-        return 0;
-    }
-    CGFloat bottom = 0;
-    if (@available(iOS 13.0, *)) {
-        UIStatusBarManager *manager = window.windowScene.statusBarManager;
-        if (manager) {
-            CGRect frame = [window convertRect:manager.statusBarFrame fromWindow:nil];
-            bottom = CGRectGetMaxY(frame);
-        }
-    }
-    if (bottom <= 0) {
-        bottom = window.safeAreaInsets.top;
-    }
-    return bottom;
-}
-
-static UIView *TKFindTerminalView(UIView *view) {
-    if (!view) {
-        return nil;
-    }
-    if (TKIsTerminalView((UIResponder *)view)) {
-        return view;
-    }
-    for (UIView *subview in view.subviews) {
-        UIView *found = TKFindTerminalView(subview);
-        if (found) {
-            return found;
-        }
-    }
-    return nil;
-}
-
-static void TKEnsureStatusBarClear(UIView *terminal) {
-    if (!terminal) {
-        return;
-    }
-    UIWindow *window = terminal.window;
-    if (!window) {
-        return;
-    }
-    CGFloat statusBottom = TKStatusBarBottomInWindow(window);
-    CGRect terminalInWindow = [terminal convertRect:terminal.bounds toView:window];
-    static NSTimeInterval lastGeometryLog;
-    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    if (now - lastGeometryLog >= 0.20) {
-        lastGeometryLog = now;
-        TKDebugLog(@"geom statusBottom=%.1f windowSafeTop=%.1f terminalY=%.1f terminalH=%.1f frame=%@",
-                   statusBottom, window.safeAreaInsets.top,
-                   CGRectGetMinY(terminalInWindow), CGRectGetHeight(terminalInWindow),
-                   NSStringFromCGRect(terminal.frame));
-    }
-    if (statusBottom <= 0 || CGRectGetMinY(terminalInWindow) >= statusBottom - 0.5) {
-        return;
-    }
-
-    // Keyboard avoidance moves the terminal whole view upward while keeping
-    // its bottom pinned to the accessory bar. Raising the root safe area
-    // does not undo that scroll: in the field the terminal stayed at 25.7pt
-    // under a 47pt status bar. Move the view down and take the same amount
-    // off its height so its bottom edge stays where the keyboard expects it.
-    CGFloat overlap = statusBottom - CGRectGetMinY(terminalInWindow);
-    CGRect frame = terminal.frame;
-    frame.origin.y += overlap;
-    frame.size.height = MAX(0, frame.size.height - overlap);
-    terminal.frame = frame;
-    TKDebugLog(@"frame-fix overlap=%.1f frame=%@", overlap, NSStringFromCGRect(frame));
-}
-
-static void TKScheduleTerminalTopFixes(void) {
-    static NSTimeInterval lastSchedule;
-    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    if (now - lastSchedule < 0.40) {
-        return;
-    }
-    lastSchedule = now;
-    static const double delays[] = {0.35, 0.75, 1.20, 1.80};
-    for (size_t index = 0; index < sizeof(delays) / sizeof(delays[0]); index++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[index] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIResponder *input = TKCurrentInput();
-            UIView *terminal = TKIsTerminalView(input) ? (UIView *)input : nil;
-            if (!terminal) {
-                terminal = TKFindTerminalView(TKHostWindow());
-            }
-            TKEnsureStatusBarClear(terminal);
-        });
-    }
+    // iGhostVT focuses its LockableTerminalView subclass, not UITerminalView
+    // itself. Match by inheritance so native arrow/function keys are used.
+    return responder && TKIGhostTerminalClass &&
+        [responder isKindOfClass:TKIGhostTerminalClass];
 }
 
 static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
@@ -246,13 +116,9 @@ static BOOL TKTryNativeKey(uint8_t key, uint32_t modifiers) {
     }
     TKSwiftSendKeyFn function = TKSwiftSendKeyFunction();
     if (!function) {
-        TKDebugLog(@"native key unavailable class=%@ key=%u", NSStringFromClass(object_getClass(input)), key);
         return NO;
     }
-    BOOL sent = TKCallSwiftSendKey(input, key, modifiers, function) ? YES : NO;
-    TKDebugLog(@"native key class=%@ key=%u mods=%u sent=%d",
-               NSStringFromClass(object_getClass(input)), key, modifiers, sent);
-    return sent;
+    return TKCallSwiftSendKey(input, key, modifiers, function) ? YES : NO;
 }
 
 static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
@@ -703,55 +569,12 @@ static UIControl *TKFindButton(UIView *view, NSString *accessibilityLabel) {
 
 @end
 
-typedef void (*TKLayoutSubviewsFn)(id, SEL);
-static TKLayoutSubviewsFn TKOriginalLayoutSubviews;
-static BOOL TKAdjustingTerminalFrame;
-
-static void TKTerminalLayoutSubviewsReplacement(id self, SEL command) {
-    if (TKOriginalLayoutSubviews) {
-        TKOriginalLayoutSubviews(self, command);
-    }
-    if (TKAdjustingTerminalFrame) {
-        return;
-    }
-    TKAdjustingTerminalFrame = YES;
-    TKEnsureStatusBarClear((UIView *)self);
-    TKAdjustingTerminalFrame = NO;
-}
-
 typedef UIView *(*TKInputAccessoryGetter)(id, SEL);
 static TKInputAccessoryGetter TKOriginalInputAccessoryGetter;
 static char TKCombinedAccessoryKey;
 
 static Class TKFindIGhostTerminalClass(void) {
-    Class direct = NSClassFromString(@"GhosttyTerminal.UITerminalView");
-    if (!direct) {
-        direct = NSClassFromString(@"UITerminalView");
-    }
-    if (direct) {
-        return direct;
-    }
-
-    int count = objc_getClassList(NULL, 0);
-    if (count <= 0) {
-        return Nil;
-    }
-    Class __unsafe_unretained *classes =
-        (Class __unsafe_unretained *)calloc((size_t)count, sizeof(Class));
-    if (!classes) {
-        return Nil;
-    }
-    count = objc_getClassList(classes, count);
-    Class found = Nil;
-    for (int index = 0; index < count; index++) {
-        const char *name = class_getName(classes[index]);
-        if (name && strstr(name, "UITerminalView")) {
-            found = classes[index];
-            break;
-        }
-    }
-    free(classes);
-    return found;
+    return NSClassFromString(@"GhosttyTerminal.UITerminalView");
 }
 
 static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
@@ -766,7 +589,6 @@ static UIView *TKInputAccessoryViewReplacement(id self, SEL command) {
     } else {
         combined.originalAccessory = original;
     }
-    TKScheduleTerminalTopFixes();
     return combined;
 }
 
@@ -780,15 +602,8 @@ static BOOL TKInstallIGhostAccessoryHook(void) {
         return NO;
     }
     TKIGhostTerminalClass = terminalClass;
-    TKDebugLog(@"installed hook class=%@", NSStringFromClass(terminalClass));
     TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(method);
     method_setImplementation(method, (IMP)TKInputAccessoryViewReplacement);
-    Method layoutMethod = class_getInstanceMethod(terminalClass, @selector(layoutSubviews));
-    if (layoutMethod) {
-        TKOriginalLayoutSubviews = (TKLayoutSubviewsFn)method_getImplementation(layoutMethod);
-        method_setImplementation(layoutMethod, (IMP)TKTerminalLayoutSubviewsReplacement);
-        TKDebugLog(@"installed layout hook class=%@", NSStringFromClass(terminalClass));
-    }
     return YES;
 }
 
@@ -876,12 +691,6 @@ static void TermKeysInit(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
         if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"] && TKInstallIGhostAccessoryHook()) {
-            NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-            for (NSString *name in @[UIKeyboardDidShowNotification, UIKeyboardDidChangeFrameNotification]) {
-                [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
-                    TKScheduleTerminalTopFixes();
-                }];
-            }
             return;
         }
         (void)[TKKeyboardBarController shared];
