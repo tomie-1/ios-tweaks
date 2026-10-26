@@ -13,7 +13,7 @@
 
 - TrollFools：把构建产物 `TermKeys.dylib` 注入目标 App。注入后可随 App 启动。
 - 越狱安装：deb 中的 filter 默认包含 iGhostVT、CareServer、Blink、iSH、Termius、Prompt、Secure ShellFish。其他 App 可改 `TermKeysTweak.plist` 后重新打包。
-- iGhostVT 使用官方安装包即可；插件会在同一个 bundle ID 的新版本中继续生效，App 更新后重新打开一次即可。
+- iGhostVT 使用官方安装包即可；插件会挂接它的 `inputAccessoryView`，在原有 Ctrl/Alt/Cmd 栏上方增加第二行，App 更新后重新打开一次即可。
 
 ## 限制
 
