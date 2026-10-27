@@ -141,8 +141,23 @@ static UIControl *TKFindControl(UIView *view, NSString *accessibilityLabel) {
 
 #pragma mark - Ghostty 原生按键入口
 //
-// UITerminalView 的 `sendKey(_:modifiers:)` 是 Swift 方法：self 在 x20，
-// 按键码在 x0，修饰键在 x1。走原生入口，F 键才不会被拆成 ESC。
+// UITerminalView 的 `sendKey(_:modifiers:)` 接的是 Swift 的 `TerminalKey`
+// 枚举，不是 HID 用法码，所以要传 `TerminalKey` 的 case 序号——也就是
+// libghostty-spm `TerminalKey.swift` 里 case 的声明顺序。下面的值按该文件
+// 的声明顺序算出（175 个 case，第 0 个是 backquote）。
+//
+// 传错的后果很隐蔽：方向键会变成别的按键，F 键更会被拆成 ESC。
+
+enum {
+    TKKeyJ = 28,        // a…z 之后的第 28 项
+    TKKeyTab = 63,
+    TKKeyDown = 74,
+    TKKeyLeft = 75,
+    TKKeyRight = 76,
+    TKKeyUp = 77,
+    TKKeyEscape = 119,
+    TKKeyF1 = 120,      // F 键连续排列，F12 = 131
+};
 
 typedef bool (*TKSwiftSendKeyFn)(void);
 
@@ -243,7 +258,8 @@ static NSString *TKFunctionKey(NSInteger number, BOOL shift) {
 
 #pragma mark - Shift 粘滞状态
 //
-// 单击一次生效，0.35 秒内再点一次锁定，再点解除。
+// 单击一次生效，0.3 秒内再点一次锁定，再点解除（与自带栏的 Ctrl/Alt/Cmd
+// 同一节奏）。
 
 typedef NS_ENUM(NSInteger, TKShiftState) {
     TKShiftStateInactive,
@@ -278,7 +294,7 @@ typedef NS_ENUM(NSInteger, TKShiftState) {
     if (self.state == TKShiftStateInactive) {
         self.state = TKShiftStateArmed;
     } else if (self.state == TKShiftStateArmed &&
-               now - self.lastTapDate.timeIntervalSince1970 < 0.35) {
+               now - self.lastTapDate.timeIntervalSince1970 < 0.3) {
         self.state = TKShiftStateLocked;
     } else {
         self.state = TKShiftStateInactive;
@@ -319,10 +335,10 @@ static void TKSendArrow(unichar final) {
     BOOL shift = [TKShiftController.shared consume];
     uint8_t nativeKey = 0;
     switch (final) {
-        case 'A': nativeKey = 77; break; // TerminalKey.arrowUp
-        case 'B': nativeKey = 74; break; // TerminalKey.arrowDown
-        case 'C': nativeKey = 76; break; // TerminalKey.arrowRight
-        case 'D': nativeKey = 75; break; // TerminalKey.arrowLeft
+        case 'A': nativeKey = TKKeyUp; break;
+        case 'B': nativeKey = TKKeyDown; break;
+        case 'C': nativeKey = TKKeyRight; break;
+        case 'D': nativeKey = TKKeyLeft; break;
         default: break;
     }
     if (nativeKey && TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
@@ -334,7 +350,7 @@ static void TKSendArrow(unichar final) {
 
 static void TKSendFunctionKey(NSInteger number) {
     BOOL shift = [TKShiftController.shared consume];
-    uint8_t nativeKey = (uint8_t)(119 + number); // F1 = 120 ... F12 = 131
+    uint8_t nativeKey = (uint8_t)(TKKeyF1 + number - 1);
     if (TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
         return;
     }
@@ -344,7 +360,7 @@ static void TKSendFunctionKey(NSInteger number) {
 // NL：终端层的换行。裸 LF 会被软件键盘路由成回车直接提交，所以走 Ctrl+J；
 // 拿不到原生入口时借用 App 自带键栏的 Ctrl 键，最后才用括号粘贴兜底。
 static void TKSendNewline(void) {
-    if (TKTryNativeKey(28, 2u)) { // TerminalKey.j + Ctrl
+    if (TKTryNativeKey(TKKeyJ, 2u)) { // Ctrl+J 就是终端里的换行
         return;
     }
     UIWindow *window = TKHostWindow();
@@ -523,6 +539,126 @@ static BOOL TKStackHasInjectedKeys(UIStackView *stack) {
     return NO;
 }
 
+#pragma mark - 让 Shift 也能修饰原生栏的按键
+//
+// libghostty 的粘滞修饰键只管 Ctrl/Alt/Cmd，它的 `Modifier` 枚举里没有
+// Shift；原生栏的 Tab/Esc/方向键读的是它自己的状态机，与插件的 Shift 毫无
+// 关系。所以 Shift 亮着时，得在原生按钮把动作发出去之前截住，改由插件发
+// 带 Shift 的原生按键。
+//
+// 做法：往栏上加一个手势识别器，设成 cancelsTouchesInView。触摸刚落在一个
+// 可修饰的键上、且 Shift 亮着时，识别器立即成功——按钮因此收不到这一串
+// 触摸，原本的动作不会触发——抬起时再由插件发键。其余情况识别器直接失败，
+// 原生栏照旧。
+
+static char TKShiftTapKey;
+
+typedef NS_ENUM(NSUInteger, TKShiftTarget) {
+    TKShiftTargetNone,
+    TKShiftTargetTab,
+    TKShiftTargetEscape,
+    TKShiftTargetLeft,
+    TKShiftTargetRight,
+    TKShiftTargetUp,
+    TKShiftTargetDown,
+};
+
+// 原生栏的 Tab/Esc/方向键标签来自 TerminalInputAccessoryItem.title。
+static TKShiftTarget TKShiftTargetForLabel(NSString *label) {
+    static NSDictionary<NSString *, NSNumber *> *table;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        table = @{
+            @"Tab": @(TKShiftTargetTab),
+            @"Escape": @(TKShiftTargetEscape),
+            @"Left Arrow": @(TKShiftTargetLeft),
+            @"Right Arrow": @(TKShiftTargetRight),
+            @"Up Arrow": @(TKShiftTargetUp),
+            @"Down Arrow": @(TKShiftTargetDown),
+        };
+    });
+    NSNumber *value = label ? table[label] : nil;
+    return value ? (TKShiftTarget)value.unsignedIntegerValue : TKShiftTargetNone;
+}
+
+static BOOL TKSendShiftedTarget(TKShiftTarget target) {
+    uint8_t key = 0;
+    switch (target) {
+        case TKShiftTargetTab: key = TKKeyTab; break;
+        case TKShiftTargetEscape: key = TKKeyEscape; break;
+        case TKShiftTargetLeft: key = TKKeyLeft; break;
+        case TKShiftTargetRight: key = TKKeyRight; break;
+        case TKShiftTargetUp: key = TKKeyUp; break;
+        case TKShiftTargetDown: key = TKKeyDown; break;
+        case TKShiftTargetNone: return NO;
+    }
+    return TKTryNativeKey(key, 1u); // 1 = TerminalInputModifiers.shift
+}
+
+@interface TKShiftTapRecognizer : UIGestureRecognizer
+@property(nonatomic, assign) TKShiftTarget target;
+@end
+
+@implementation TKShiftTapRecognizer
+
+- (TKShiftTarget)targetAt:(UITouch *)touch event:(UIEvent *)event {
+    if (!TKShiftController.shared.isActive) {
+        return TKShiftTargetNone;
+    }
+    UIView *hit = [self.view hitTest:[touch locationInView:self.view] withEvent:event];
+    while (hit && hit != self.view) {
+        if ([hit isKindOfClass:UIControl.class]) {
+            return TKShiftTargetForLabel(hit.accessibilityLabel);
+        }
+        hit = hit.superview;
+    }
+    return TKShiftTargetNone;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = touches.anyObject;
+    TKShiftTarget target = touch ? [self targetAt:touch event:event] : TKShiftTargetNone;
+    if (target == TKShiftTargetNone) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    self.target = target;
+    // 认下这一串触摸：cancelsTouchesInView 会把它们从原生按钮上撤走。
+    self.state = UIGestureRecognizerStateBegan;
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    TKShiftTarget target = self.target;
+    self.target = TKShiftTargetNone;
+    BOOL armed = TKShiftController.shared.isActive;
+    self.state = UIGestureRecognizerStateEnded;
+    if (target == TKShiftTargetNone || !armed) {
+        return;
+    }
+    [TKShiftController.shared consume];
+    BOOL sent = TKSendShiftedTarget(target);
+    TKDiag(@"shift+bar target=%lu sent=%d", (unsigned long)target, sent);
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    self.target = TKShiftTargetNone;
+    self.state = UIGestureRecognizerStateCancelled;
+}
+
+@end
+
+static void TKInstallShiftPassthrough(UIView *accessory) {
+    if (objc_getAssociatedObject(accessory, &TKShiftTapKey)) {
+        return;
+    }
+    TKShiftTapRecognizer *recognizer = [[TKShiftTapRecognizer alloc] init];
+    recognizer.cancelsTouchesInView = YES;
+    recognizer.delaysTouchesEnded = NO;
+    [accessory addGestureRecognizer:recognizer];
+    objc_setAssociatedObject(accessory, &TKShiftTapKey, recognizer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+
 static void TKInjectIntoAccessory(UIView *accessory, NSString *reason) {
     if (!accessory) {
         return;
@@ -535,6 +671,7 @@ static void TKInjectIntoAccessory(UIView *accessory, NSString *reason) {
     if (TKStackHasInjectedKeys(stack)) {
         return;
     }
+    TKInstallShiftPassthrough(accessory);
 
     TKKeyButton *shift = TKMakeShiftButton(38.0);
     objc_setAssociatedObject(shift, &TKInjectedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
