@@ -625,10 +625,15 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
                                             constant:TKBarPadding],
         [topScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
 
+        // 两边都锚在内容区、宽度显式等于可视宽度：整排作为内容一起被拖动，
+        // 拖动时所有键同步移动。右边若锚 frame，右侧方向键会被钉在屏幕上
+        // 不动，只有左边跟着弹——那就成了「只有前两个键在弹」。
         [topStack.leadingAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.leadingAnchor
                                                constant:8.0],
-        [topStack.trailingAnchor constraintEqualToAnchor:topScroll.frameLayoutGuide.trailingAnchor
+        [topStack.trailingAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.trailingAnchor
                                                 constant:-8.0],
+        [topStack.widthAnchor constraintEqualToAnchor:topScroll.frameLayoutGuide.widthAnchor
+                                             constant:-16.0],
         [topStack.topAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.topAnchor],
         [topStack.bottomAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.bottomAnchor],
         [topStack.heightAnchor constraintEqualToAnchor:topScroll.frameLayoutGuide.heightAnchor],
