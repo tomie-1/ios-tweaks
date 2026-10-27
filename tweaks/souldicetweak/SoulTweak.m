@@ -3578,22 +3578,25 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         totalW = badgeW;
     }
 
-    /* 时间贴着气泡左边缘放，不做右对齐：右侧是宿主的已读回执/状态标记
-       区域（截图里那几个青色块），右对齐会直接压上去。 */
+    /* 时间以气泡左边缘为起点，但右侧要避开头像列。
+       头像列宽约 60pt，这里把可用宽度限制到 width - 70。 */
     BOOL alignTrailing = NO;
+    CGFloat safeRight = width - 70.0;
     CGFloat x = contentLeft > 0.0 ? contentLeft : 14.0;
+    if (x + timeW > safeRight) x = safeRight - timeW;
     if (x < 6.0) x = 6.0;
     if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     if (x < 6.0) x = 6.0;
 
-    /* 时间叠在内容下方，不参与行高。宿主在气泡下方本来就留有 6~8pt，
-       把标签塞进这段留白；放不下时贴住 cell 下沿，绝不溢出到相邻消息。 */
-    CGFloat y = contentBottom + 1.0;
+    /* 时间叠在内容下方，不参与行高。宿主的消息 cell 底部留白约 14pt，
+       正好够「2pt 间隙 + 12pt 字高」。留白更少时这一轮不画，
+       避免看起来像压在气泡上。 */
+    const CGFloat minGap = 2.0;
+    CGFloat y = contentBottom + minGap;
     CGFloat maxY = height - rowH;
-    if (y > maxY) y = maxY;
-    if (y < contentBottom) {
-        /* 连 1pt 间距都挤不出：藏起来，下一轮布局完成后再画。 */
+    if (y > maxY + 0.5) {
         if (showTime) { time.hidden = YES; showTime = NO; }
+        y = maxY;
     }
     if (y < 0.0) y = 0.0;
 
