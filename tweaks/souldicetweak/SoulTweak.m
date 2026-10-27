@@ -455,6 +455,19 @@ static BOOL SoulClassImplements(Class c, SEL sel) {
     return found;
 }
 
+/* 沿继承链取一个视图属性，并确认它确实长在这个 cell 里。
+   硬编码的选择器名一旦在宿主改版后消失，逐个 respondTo 只会一路静默失败。 */
+static UIView *SoulViewRespondingTo(id obj, NSString *selName, UIView *limitRoot) {
+    if (!obj || !selName.length) return nil;
+    SEL sel = NSSelectorFromString(selName);
+    if (![obj respondsToSelector:sel]) return nil;
+    id v = ((id (*)(id, SEL))objc_msgSend)(obj, sel);
+    if (![v isKindOfClass:[UIView class]]) return nil;
+    UIView *view = (UIView *)v;
+    if (!limitRoot) return view;
+    return [view isDescendantOfView:limitRoot] ? view : nil;
+}
+
 #pragma mark - 选择面板（竖向 / 跟随深浅色）
 
 typedef NS_ENUM(NSInteger, SoulGameMode) {
@@ -1822,6 +1835,9 @@ static BOOL SoulRecallIsBlocked(id obj) {
 
 static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
 static const CGFloat kSoulMsgTimeReserve = 14.0;
+/* 上一次实际排版量到的内容底边（相对 cell 顶部）。分享卡这类布局不给
+   bubbleSize，靠它反推气泡下方还剩多少空间，决定要不要真的加高。 */
+static const void *kSoulLayoutContentBottomKey = &kSoulLayoutContentBottomKey;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulApplyMsgTime(id cell, id layout);
 
@@ -1922,16 +1938,18 @@ static CGRect SoulUnionBubbleRect(UIView *cell, int *countOut) {
 
 static UIView *SoulMessageContentView(UIView *cell) {
     if (!cell) return nil;
-    NSArray<NSString *> *sels = @[@"bubbleView", @"shareCardView", @"homePageShareCardView",
-                                  @"homepageShareCardView", @"userCardView", @"cardView",
-                                  @"messageContentView", @"contentCardView"];
+    /* 顺序按「离内容最近」排。SOPrivateShareUserCardCell 这条链上真实存在的是
+       containerView / embedView / bottomView（都在 SOPrivateActionLinkBaseCell），
+       而 bubbleView / shareCardView / cardView 这些名字在整条链上都不存在，
+       留着只会一路返回 nil 再掉进面积启发式。 */
+    NSArray<NSString *> *sels = @[@"bubbleView", @"containerView", @"embedView",
+                                  @"messageContentView", @"bottomView",
+                                  @"leftBubbleViewNewUI", @"rightBubbleViewNewUI"];
     for (NSString *name in sels) {
-        SEL sel = NSSelectorFromString(name);
-        if (![cell respondsToSelector:sel]) continue;
-        id v = ((id (*)(id, SEL))objc_msgSend)(cell, sel);
-        if (![v isKindOfClass:[UIView class]]) continue;
-        CGRect r = [(UIView *)v convertRect:((UIView *)v).bounds toView:cell];
-        if (SoulUsableContentRect(r, cell)) return (UIView *)v;
+        UIView *v = SoulViewRespondingTo(cell, name, cell);
+        if (!v) continue;
+        CGRect r = [v convertRect:v.bounds toView:cell];
+        if (SoulUsableContentRect(r, cell)) return v;
     }
     UIView *root = cell;
     if ([cell isKindOfClass:[UITableViewCell class]]) root = ((UITableViewCell *)cell).contentView;
@@ -2009,9 +2027,18 @@ static void SoulApplyRecallBadge(UIView *cell, id layout, BOOL blocked) {
 }
 
 /* 聊天列表、会话行等也会暴露 msgId；只对真正的消息 cell 做撤回角标，
-   否则列表行会被塞进角标和附加行高，看起来像被拉变形。 */
+   否则列表行会被塞进角标和附加行高，看起来像被拉变形。
+   判断依据是本机二进制里核对过的继承链：消息 cell 都是 SODCMsgCell 的子孙
+   （SOChatTextMessageTableViewCell / SOPrivateShareUserCardCell /
+   SOChatSystemHintMessageTableViewCell 均如此），列表行不是。 */
 static BOOL SoulIsMessageCell(UIView *c) {
     if (!c) return NO;
+    Class msgBase = objc_getClass("SODCMsgCell");
+    if (msgBase && [c isKindOfClass:msgBase]) {
+        /* 系统提示行（“你撤回了一条消息”）不承载可撤回的内容 */
+        NSString *cn = NSStringFromClass([c class]);
+        return ![cn containsString:@"SystemHint"];
+    }
     Class layoutCls = objc_getClass("SODCMsgLayout");
     id ly = SoulCellLayout(c);
     if (ly) {
@@ -2119,7 +2146,6 @@ static void SoulInstallRecallCellLayoutHook(void) {
 static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
-static IMP gOrigShareCardSetter = NULL;
 
 /* 分享卡片的容器会跟随 cell 行高自动拉伸。这里只把超出“时间行以上”
    的部分收回，卡片原生高度保持不变，避免被我们压小或拉大。 */
@@ -2187,14 +2213,6 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
                 cellH, top, before, nativeH, insetBottom, targetH);
     }
 }
-static void SoulHookShareCardViewSet(id self, SEL _cmd, id cardView) {
-    if (gOrigShareCardSetter) ((void (*)(id, SEL, id))gOrigShareCardSetter)(self, _cmd, cardView);
-    if (cardView && [self isKindOfClass:[UIView class]]) {
-        SoulLog(@"msg-time: share-card view set cls=%@ card=%@",
-                NSStringFromClass([self class]), NSStringFromClass([cardView class]));
-        dispatch_async(dispatch_get_main_queue(), ^{ SoulMsgTimeRelayout(self); });
-    }
-}
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
     if (gOrigShareCardLayout) {
         ((void (*)(id, SEL))gOrigShareCardLayout)(self, _cmd);
@@ -2210,7 +2228,12 @@ static void SoulHookShareCardLayout(id self, SEL _cmd) {
     SoulMsgTimeRelayout(self);
 }
 
-/* 分享主页的气泡在 willDisplay 时还是 0×0，等它自己布局完再贴时间。 */
+/* 分享主页的气泡在 willDisplay 时还是 0×0，等它自己布局完再贴时间。
+   SOPrivateShareUserCardCell 自身和它的祖先（SOPrivateActionLinkBaseCell /
+   SOPrivateChatTableViewCell / SODCMsgCell）都没有实现 layoutSubviews，
+   所以这里必须 class_addMethod 给本类加一个，hook 里显式走父类实现。
+   setShareCardView: 属于 SOBaseShareView / SoulShareView，不在 cell 上，
+   挂不上是正常的，不再拿它当安装成功的判据。 */
 static void SoulInstallShareCardLayoutHook(void) {
     if (gShareCardLayoutHooked) return;
     Class c = objc_getClass("SOPrivateShareUserCardCell");
@@ -2219,18 +2242,12 @@ static void SoulInstallShareCardLayoutHook(void) {
     BOOL own = SoulClassImplements(c, sel);
     if (own) {
         SoulInstallMethodHook(c, sel, (IMP)SoulHookShareCardLayout, (IMP *)&gOrigShareCardLayout);
-        if (!gOrigShareCardLayout) return;
-    } else {
-        if (!class_addMethod(c, sel, (IMP)SoulHookShareCardLayout, "v@:")) return;
-        gOrigShareCardLayout = NULL;
+    } else if (!class_addMethod(c, sel, (IMP)SoulHookShareCardLayout, "v@:")) {
+        return;
     }
     gShareCardLayoutClass = c;
     gShareCardLayoutHooked = YES;
-    SEL setSel = NSSelectorFromString(@"setShareCardView:");
-    if (class_getInstanceMethod(c, setSel)) {
-        SoulInstallMethodHook(c, setSel, (IMP)SoulHookShareCardViewSet, (IMP *)&gOrigShareCardSetter);
-    }
-    SoulLog(@"msg-time: share-card layout hook installed own=%d setter=%d", own, gOrigShareCardSetter != NULL);
+    SoulLog(@"msg-time: share-card layout hook installed own=%d", own);
 }
 
 static void SoulInstallRecallBadgeHook(void) {
@@ -3372,7 +3389,6 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
 // —— I. 每条消息显示时间（按 cell 类分别 hook）——
 static const void *kSoulMsgTimeLabelKey = &kSoulMsgTimeLabelKey;
 static const void *kSoulMsgTimeRetryKey = &kSoulMsgTimeRetryKey;
-
 static NSString *SoulMsgTimePattern(void) {
     NSString *fmt = SoulCfgString(kFxMsgTimeFmt);
     return fmt.length ? fmt : @"HH:mm";
@@ -3544,20 +3560,32 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         }
     }
     if (!haveContent) {
+        /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。
+           两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
+           走，否则 alignTrailing 会退化成 (width - totalW) 把时间甩到最右边。 */
         BOOL mineFallback = showTime && time.tag == 1;
-        contentLeft = mineFallback ? width - 14.0 : 14.0;
-        /* 撤回后原气泡可能已经隐藏：这时跟着角标的位置走，别把时间甩到最左边。 */
         if (showBadge && badge.frame.size.width > 0.0) {
             contentLeft = badge.frame.origin.x;
             contentRight = CGRectGetMaxX(badge.frame);
+        } else if (mineFallback) {
+            contentLeft = width - 14.0;
+            contentRight = width - 14.0;
         } else {
-            contentRight = contentLeft;
+            contentLeft = 14.0;
+            contentRight = 14.0;
         }
         contentBottom = MAX(0.0, height - kSoulMsgTimeReserve);
     }
     if (contentBottom > height - kSoulMsgTimeReserve)
         contentBottom = height - kSoulMsgTimeReserve;
     if (contentBottom < 0.0) contentBottom = 0.0;
+    /* 记下真实内容底边，供 SoulFooterReserveForLayout 反推剩余留白。
+       只在扫到内容时更新，避免回退值把真实测量覆盖掉。 */
+    id layoutObj = SoulCellLayout(view);
+    if (layoutObj && haveContent) {
+        objc_setAssociatedObject(layoutObj, kSoulLayoutContentBottomKey,
+                                 @(contentBottom), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     BOOL mine = showTime && time.tag == 1;
     if (!showTime && contentRight > contentLeft) mine = contentLeft > width * 0.45;
 
@@ -3575,17 +3603,25 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     }
     CGFloat totalW = timeW + badgeW + ((showTime && showBadge) ? gap : 0.0);
 
+    /* 撤回后原气泡已经不在版面里：这行只剩「已拦截撤回」角标该出现，
+       时间已经失去可依附的气泡，再画出来只会被推到行尾。 */
+    if (showBadge && !haveContent) {
+        showTime = NO;
+        timeW = 0.0;
+        totalW = badgeW;
+    }
+
     BOOL alignTrailing = mine;
     CGFloat x;
     if (alignTrailing) {
-        x = contentRight - totalW;
-        if (x < 6.0) x = 6.0;
-        if (x + totalW > width - 6.0) x = width - totalW - 6.0;
+        /* 锚点必须是消息右沿；contentRight 为 0 时不能退化成整行宽度。 */
+        CGFloat anchor = contentRight > 0.0 ? contentRight : width - 14.0;
+        x = anchor - totalW;
     } else {
-        x = contentLeft;
-        if (x < 6.0) x = 6.0;
-        if (x + totalW > width - 6.0) x = width - totalW - 6.0;
+        x = contentLeft > 0.0 ? contentLeft : 14.0;
     }
+    if (x < 6.0) x = 6.0;
+    if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     if (x < 6.0) x = 6.0;
 
     /* 时间统一放在整条消息（含引用条、分享卡）下方，不再回到气泡上方。 */
@@ -3599,6 +3635,10 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         CGFloat tx = alignTrailing ? (x + badgeW + (showBadge ? gap : 0.0)) : x;
         time.frame = CGRectMake(tx, y, timeW, rowH);
         time.textAlignment = alignTrailing ? NSTextAlignmentRight : NSTextAlignmentLeft;
+    } else if (time) {
+        /* showTime 可能在上面的「无内容 + 有角标」分支里被关掉，
+           这时标签本身必须隐藏，否则会停在上一轮的位置上不消失。 */
+        time.hidden = YES;
     }
     if (showBadge) {
         CGFloat bx = alignTrailing ? x : (x + timeW + (showTime ? gap : 0.0));
@@ -3660,7 +3700,9 @@ static BOOL SoulTimestampLooksValid(long long ms) {
 }
 
 /* 系统提示（“你撤回了一条消息”“xx 加入了聊天”）、时间分隔这类不是真正的
-   消息，给它们挂时间只会把行撑高并把文字挤到最左边。 */
+   消息，给它们挂时间只会把行撑高并把文字挤到最左边。
+   注意 SystemHint 是 SODCMsgCell 的子类（经 PrivateHimViewCell），
+   所以不能只靠继承链判断，必须按类名单独排除。 */
 static BOOL SoulCellWantsMsgTime(id cell) {
     NSString *cn = NSStringFromClass([cell class]);
     if (!cn.length) return NO;
@@ -3829,28 +3871,41 @@ static BOOL SoulLayoutNeedsFooterRow(id layout) {
 
 /* 时间行只有 12pt 高。消息布局本身通常会在气泡下方留出底部内边距，
    能塞进这段留白就不用额外加行高；只有留白不足时才补差额。
-   否则每条消息都多 14pt，聊天看起来会明显变松，分享卡也会被一起撑大。 */
+   否则每条消息都多 14pt，聊天看起来会明显变松，分享卡也会被一起撑大。
+
+   两条取数路径：
+   1. bubbleSize 有效且与 cellInset 自洽 —— 直接用 ins.bottom，最准；
+   2. 否则（分享卡这类布局不给 bubbleSize）—— 用上一次实际排版量到的
+      内容底边，remaining = baseH - contentBottom。两样都拿不到时不加高：
+      宁可让时间叠在原生留白里，也不要把整行撑开。 */
 static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
-    CGFloat reserve = kSoulMsgTimeReserve;
-    if (!layout || baseH < 20.0) return reserve;
+    if (!layout || baseH < 20.0) return 0.0;
+    const CGFloat needForRow = 2.0 + 12.0 + 1.0;
     SEL insSel = NSSelectorFromString(@"cellInset");
     SEL bsSel = NSSelectorFromString(@"bubbleSize");
-    if (![layout respondsToSelector:insSel] || ![layout respondsToSelector:bsSel]) return reserve;
-    @try {
-        UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
-        CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
-        if (!isfinite(ins.top) || !isfinite(ins.bottom)) return reserve;
-        if (ins.bottom < 0.0 || ins.bottom > baseH) return reserve;
-        if (bs.height > 1.0) {
-            CGFloat expect = ins.top + bs.height + ins.bottom;
-            if (fabs(expect - baseH) > 3.0) return reserve;   /* 布局自洽才采信 */
+    if ([layout respondsToSelector:insSel] && [layout respondsToSelector:bsSel]) {
+        @try {
+            UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
+            CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
+            if (isfinite(ins.top) && isfinite(ins.bottom) &&
+                ins.bottom >= 0.0 && ins.bottom < baseH && bs.height > 1.0) {
+                CGFloat expect = ins.top + bs.height + ins.bottom;
+                if (fabs(expect - baseH) <= 3.0) {          /* 布局自洽才采信 */
+                    CGFloat need = needForRow - ins.bottom;
+                    return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
+                }
+            }
+        } @catch (__unused NSException *e) {}
+    }
+    NSNumber *measured = objc_getAssociatedObject(layout, kSoulLayoutContentBottomKey);
+    if (measured) {
+        CGFloat remaining = baseH - [measured doubleValue];
+        if (remaining >= 0.0 && remaining < baseH) {
+            CGFloat need = needForRow - remaining;
+            return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
         }
-        CGFloat need = (2.0 + 12.0 + 1.0) - ins.bottom;
-        if (need < 0.0) need = 0.0;
-        if (need > kSoulMsgTimeReserve) need = kSoulMsgTimeReserve;
-        reserve = need;
-    } @catch (__unused NSException *e) {}
-    return reserve;
+    }
+    return 0.0;
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
