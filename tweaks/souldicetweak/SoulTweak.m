@@ -2192,7 +2192,6 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
 
     CGRect cf = card.frame;
     cf.size.height = targetH;
-    card.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     card.frame = cf;
     /* 卡片刚被收缩，cell 内的几何已经变了。这里清掉按旧几何记下的
        内容底边，让下一轮重新测量，否则时间会按收缩前的卡片底边定位。 */
