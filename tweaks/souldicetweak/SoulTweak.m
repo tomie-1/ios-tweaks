@@ -3944,7 +3944,7 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
-    if ([cls containsString:@"Message"] && baseH > 100.0) {
+    if ([cls containsString:@"Message"] && h > 100.0) {
         static int hLog = 0;
         if (hLog < 6) {
             hLog++;
@@ -3956,7 +3956,7 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
             if (uc && [uc respondsToSelector:NSSelectorFromString(@"usercardHeight")])
                 cardH = ((double (*)(id, SEL))objc_msgSend)(uc, NSSelectorFromString(@"usercardHeight"));
             SoulLog(@"msg-time: hgt cls=%@ base=%.1f reserve=%.1f -> %.1f usercard=%@ cardH=%.1f",
-                    cls, baseH, reserve, baseH + reserve,
+                    cls, h, reserve, h + reserve,
                     uc ? NSStringFromClass([uc class]) : @"nil", cardH);
         }
     }
