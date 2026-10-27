@@ -3930,23 +3930,23 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
 }
 
-/* 分享卡判定。layout 上没有可靠的类型标量（usercardModel 恒为 nil、
-   bubbleSize 恒为 0），只能靠宿主给的类名——SODCMsgLayout 的 message
-   对象在名片消息上就是带 Usercard/UserCard 字样的模型类。 */
+/* 分享卡判定。layout 上没有可靠的类型标量：usercardModel 实测恒为 nil、
+   bubbleSize 恒为 0。真正稳定的信号是「bubbleSize 为 0 且这个 cell 很高」
+   —— 普通气泡消息一定给出非零 bubbleSize，而分享卡/卡片类消息不给。 */
 static BOOL SoulLayoutIsShareCard(id layout) {
     if (!layout) return NO;
-    SEL msgSel = NSSelectorFromString(@"message");
-    if ([layout respondsToSelector:msgSel]) {
-        @try {
-            id msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
-            if (msg) {
-                NSString *mc = NSStringFromClass([msg class]).lowercaseString;
-                if ([mc rangeOfString:@"usercard"].location != NSNotFound) return YES;
-                if ([mc rangeOfString:@"userinfo"].location != NSNotFound) return YES;
-            }
-        } @catch (__unused NSException *e) {}
-    }
-    return NO;
+    SEL bsSel = NSSelectorFromString(@"bubbleSize");
+    if (![layout respondsToSelector:bsSel]) return NO;
+    @try {
+        CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
+        if (bs.height > 1.0) return NO;
+    } @catch (__unused NSException *e) { return NO; }
+    SEL chSel = NSSelectorFromString(@"cellHeight");
+    if (![layout respondsToSelector:chSel]) return NO;
+    @try {
+        double h = ((double (*)(id, SEL))objc_msgSend)(layout, chSel);
+        return h > 100.0;
+    } @catch (__unused NSException *e) { return NO; }
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
@@ -3974,8 +3974,7 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
         /* 分享卡走专用路径：usercardModel 实测常为 nil，bubbleSize 也是 0，
            通用公式算不出可信留白，直接给完整一行。 */
         if (SoulLayoutIsShareCard(self)) reserve = 2.0 + 12.0 + 1.0;
-        else reserve = SoulFooterReserveForLayout(self, h);
-    }
+        else reserve = SoulFooterReserveForLayout(self, h);    }
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
