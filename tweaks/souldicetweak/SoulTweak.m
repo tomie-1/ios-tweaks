@@ -3520,21 +3520,6 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
             haveContent = YES;
         }
     }
-    /* 分享卡用 bottomView（卡片底部那行「个人主页」）作为锚点：
-       扫描到的内容底边常停在卡片容器外框上，会压住这条小字。 */
-    NSString *cellCNTop = NSStringFromClass([view class]).lowercaseString;
-    if ([cellCNTop rangeOfString:@"shareusercard"].location != NSNotFound) {
-        UIView *bv = SoulViewRespondingTo(view, @"bottomView", view);
-        if (bv) {
-            CGRect br = [bv convertRect:bv.bounds toView:view];
-            if (SoulUsableContentRect(br, view) && CGRectGetMaxY(br) >= contentBottom) {
-                contentBottom = CGRectGetMaxY(br);
-                contentLeft = CGRectGetMinX(br);
-                contentRight = CGRectGetMaxX(br);
-                haveContent = YES;
-            }
-        }
-    }
     if (!haveContent) {
         /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。
            两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
@@ -3688,13 +3673,18 @@ static BOOL SoulTimestampLooksValid(long long ms) {
 /* 系统提示（“你撤回了一条消息”“xx 加入了聊天”）、时间分隔这类不是真正的
    消息，给它们挂时间只会把行撑高并把文字挤到最左边。
    注意 SystemHint 是 SODCMsgCell 的子类（经 PrivateHimViewCell），
-   所以不能只靠继承链判断，必须按类名单独排除。 */
+   所以不能只靠继承链判断，必须按类名单独排除。
+
+   分享卡（SOPrivateShareUserCardCell）也排除：卡片原生高度已经把内容占满
+   （顶部 6 + 卡片 108 + 底部 8），那 8pt 放不下 12pt 的时间行，
+   硬塞会压住卡片底部那行「个人主页」。 */
 static BOOL SoulCellWantsMsgTime(id cell) {
     NSString *cn = NSStringFromClass([cell class]);
     if (!cn.length) return NO;
     if ([cn containsString:@"SystemHint"]) return NO;
     if ([cn containsString:@"TimeTableViewCell"]) return NO;
     if ([cn containsString:@"List"]) return NO;
+    if ([cn containsString:@"ShareUserCard"]) return NO;
     return YES;
 }
 
