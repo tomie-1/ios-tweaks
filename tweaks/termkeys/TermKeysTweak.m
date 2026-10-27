@@ -888,7 +888,12 @@ static BOOL TKInstallIGhostHooks(void) {
 @interface TKKeyboardBarController : NSObject
 @property(nonatomic, strong) TKBarView *bar;
 @property(nonatomic, weak) UIWindow *hostWindow;
-@property(nonatomic, weak) UIViewController *rootController;
+/// 上一次写入安全区的根控制器。换根时基线要重新取，否则新根永远拿不到
+/// 键栏高度。
+@property(nonatomic, weak) UIViewController *reservedController;
+/// 该根控制器原有的底部安全区，写入时作为基准加在键栏高度之前。
+@property(nonatomic, assign) CGFloat baselineBottomInset;
+/// 当前已经写进去的高度，用于避免重复写入。
 @property(nonatomic, assign) CGFloat reservedHeight;
 @end
 
@@ -928,23 +933,31 @@ static BOOL TKInstallIGhostHooks(void) {
 }
 
 // 让终端为键栏腾出底部空间。用根视图的 additionalSafeAreaInsets 而不是改
-// 任何视图的 frame：后者会在布局过程里再次触发布局，形成死循环。同一个值
-// 只写一次，键盘反复回调也不会抖动。
+// 任何视图的 frame：后者会在布局过程中再次触发布局，形成死循环。同一值只
+// 写一次，键盘反复回调也不会抖动。
+//
+// 写入的高度 = 该根控制器原有的底部安全区 + 键栏高度。把原有值算进去，
+// 宿主自己声明的底部安全区才不会被挤掉。换根控制器时重新读基线。
 - (void)updateReservationForWindow:(UIWindow *)window visible:(BOOL)visible {
     UIViewController *root = window.rootViewController;
     if (!root) {
         return;
     }
     CGFloat wanted = visible ? TKBarHeight : 0;
-    self.rootController = root;
-    if (fabs(self.reservedHeight - wanted) < 0.5) {
+    BOOL newRoot = self.reservedController != root;
+    if (!newRoot && fabs(self.reservedHeight - wanted) < 0.5) {
         return;
+    }
+    if (newRoot) {
+        // 新根的当前底部安全区就是基线。
+        self.reservedController = root;
+        self.baselineBottomInset = root.additionalSafeAreaInsets.bottom;
     }
     self.reservedHeight = wanted;
     UIEdgeInsets insets = root.additionalSafeAreaInsets;
-    insets.bottom = wanted;
+    insets.bottom = self.baselineBottomInset + wanted;
     root.additionalSafeAreaInsets = insets;
-    TKDiag(@"reserve %.1f", wanted);
+    TKDiag(@"reserve %.1f (base %.1f)", wanted, self.baselineBottomInset);
 }
 
 - (void)keyboardWillChangeFrame:(NSNotification *)notification {
