@@ -2149,62 +2149,32 @@ static void SoulInstallRecallCellLayoutHook(void) {
 static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
-/* 分享卡钉住后的目标高度。每 cell 只算一次，避免反复收缩。 */
-static const void *kSoulShareCardPinnedKey = &kSoulShareCardPinnedKey;
 
-/* 分享卡的卡片视图会跟着 cell 高度一起长：cell 从 122 涨到 128 时，
-   卡片也从 108 涨到 114，底部留白恒为 8pt，15pt 的时间行永远塞不进去。
+/* 分享卡的卡片视图会跟着 cell 高度一起长，所以不能靠压卡片来腾位置
+   ——那会把卡片本身压变形。
 
-   所以在 cell 第一次布局时按「cell 高 - 顶部 - 15」定一个目标值并把卡片
-   收到这个高度，多出来的空间就留在卡片下方给时间行。每个 cell 只算一次
-   并记住目标值，避免拿收缩后的高度反复推算把卡片压到 0。 */
+   正确关系（原生实测）：
+       cell 122 = 顶部 6 + 卡片 108 + 底部留白 8
+   其中 cellHeight 返回 114（= 6 + 108），底部 8 由 tableview 另算。
+   加时间行后只需要让 cellHeight 返回 114 + 15 = 129，卡片仍然按 108
+   渲染在顶部，多出来的 15pt 自然落在卡片下方。
+
+   这里只负责在 cell 太高时把它收回原样，不做任何压缩。 */
 static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     if (!cellView) return;
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
     if ([cn rangeOfString:@"shareusercard"].location == NSNotFound) return;
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
 
-    UIView *card = content;
-    if (!card || card.bounds.size.height < 20.0 || card.bounds.size.width < 20.0) return;
-
-    /* 卡片原生高度不靠 hook 顺序取：直接用卡片与 cell 的几何关系。
-       原生状态下卡片底边距 cell 底固定 8pt，而时间行要 15pt，差 7pt。
-       这里把卡片高度定为 cell 高 - 顶部偏移 - 15，差额让给时间行；
-       cell 高度本身由 cellHeight hook 保证（原生值 + 预留）。
-       只在卡片确实比目标高时才收，避免把矮卡压得更矮。 */
-    CGFloat cellH = cellView.bounds.size.height;
-    CGFloat top = card.frame.origin.y;
-    if (cellH < 40.0 || top < 0.0 || top > 20.0) return;
-    CGFloat nativeH = cellH - top - 15.0;
-    if (nativeH < 20.0) return;
-
-    /* 只收不放，并且每个 cell 只钉一次：钉完记下目标值，后续布局不再
-       用「已经收缩过的 cellH」重新推算，否则卡片会被一步步压到 0。 */
-    NSNumber *pinned = objc_getAssociatedObject(cellView, kSoulShareCardPinnedKey);
-    CGFloat targetH = pinned ? [pinned doubleValue] : nativeH;
-    if (!pinned) {
-        objc_setAssociatedObject(cellView, kSoulShareCardPinnedKey, @(targetH),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    CGFloat current = card.bounds.size.height;
-    if (current <= targetH + 0.5) return;
-
-    CGRect cf = card.frame;
-    cf.size.height = targetH;
-    card.frame = cf;
-    /* 卡片刚被收缩，cell 内的几何已经变了。这里清掉按旧几何记下的
-       内容底边，让下一轮重新测量，否则时间会按收缩前的卡片底边定位。 */
-    id layoutObj = SoulCellLayout(cellView);
-    if (layoutObj) {
-        objc_setAssociatedObject(layoutObj, kSoulLayoutContentBottomKey, nil,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    /* 卡片高度交给宿主，我们不碰。只记录一次用于排查。 */
     static int shrinkLog = 0;
-    if (shrinkLog < 8) {
+    if (shrinkLog < 6) {
         shrinkLog++;
-        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f -> %.1f (pinned)",
-                cellH, top, current, targetH);
+        UIView *card = content;
+        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f (untouched)",
+                cellView.bounds.size.height,
+                card ? card.frame.origin.y : -1.0,
+                card ? card.bounds.size.height : -1.0);
     }
 }
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
@@ -3912,9 +3882,8 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     SEL bsSel = NSSelectorFromString(@"bubbleSize");
     CGFloat remaining = -1.0;
 
-    /* 1. 分享卡：cellInset.top + 卡片高 = 内容底边。
-       分享卡的 bubbleSize 恒为 0，但 cellInset.top 和 usercardHeight
-       都是宿主真实使用的值。 */
+    /* 1. 分享卡：layout 是 SOChatMessageModel 且 usercardModel 有值时才走
+       细算；usercardModel 为 nil 的情况（实测常见）由调用方按类名兜底。 */
     SEL ucSel = NSSelectorFromString(@"usercardModel");
     if ([layout respondsToSelector:ucSel]) {
         @try {
@@ -3922,14 +3891,11 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
             SEL chSel = NSSelectorFromString(@"usercardHeight");
             if (uc && [uc respondsToSelector:chSel]) {
                 CGFloat cardH = ((double (*)(id, SEL))objc_msgSend)(uc, chSel);
-                CGFloat cardTop = 6.0;
-                if ([layout respondsToSelector:insSel]) {
-                    UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
-                    if (isfinite(ins.top) && ins.top >= 0.0 && ins.top < baseH) cardTop = ins.top;
-                }
                 if (isfinite(cardH) && cardH > 20.0 && cardH < baseH) {
-                    CGFloat r = baseH - (cardTop + cardH);
-                    if (r >= 0.0 && r < baseH) remaining = r;
+                    /* 卡片高度由宿主决定、我们不压它，底部原生留白也不够
+                       放时间行。固定要求完整一行的高度，cell 变成
+                       「原生 + 15」，多出的空间落在卡片下方。 */
+                    return needForRow;
                 }
             }
         } @catch (__unused NSException *e) {}
@@ -3964,6 +3930,25 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
 }
 
+/* 分享卡判定。layout 上没有可靠的类型标量（usercardModel 恒为 nil、
+   bubbleSize 恒为 0），只能靠宿主给的类名——SODCMsgLayout 的 message
+   对象在名片消息上就是带 Usercard/UserCard 字样的模型类。 */
+static BOOL SoulLayoutIsShareCard(id layout) {
+    if (!layout) return NO;
+    SEL msgSel = NSSelectorFromString(@"message");
+    if ([layout respondsToSelector:msgSel]) {
+        @try {
+            id msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
+            if (msg) {
+                NSString *mc = NSStringFromClass([msg class]).lowercaseString;
+                if ([mc rangeOfString:@"usercard"].location != NSNotFound) return YES;
+                if ([mc rangeOfString:@"userinfo"].location != NSNotFound) return YES;
+            }
+        } @catch (__unused NSException *e) {}
+    }
+    return NO;
+}
+
 static double (*gOrigMsgCellHeight)(id, SEL);
 /* 上一次真正加进去的预留行高。setCellHeight: 的回声判断必须用它而不是
    固定常量：留白够时预留是 0，不够时可能是 1~14 之间的任意值。 */
@@ -3985,7 +3970,12 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
 
     /* 只有真的要画时间行/撤回角标的消息才预留空间。 */
     CGFloat reserve = 0.0;
-    if (SoulLayoutNeedsFooterRow(self)) reserve = SoulFooterReserveForLayout(self, h);
+    if (SoulLayoutNeedsFooterRow(self)) {
+        /* 分享卡走专用路径：usercardModel 实测常为 nil，bubbleSize 也是 0，
+           通用公式算不出可信留白，直接给完整一行。 */
+        if (SoulLayoutIsShareCard(self)) reserve = 2.0 + 12.0 + 1.0;
+        else reserve = SoulFooterReserveForLayout(self, h);
+    }
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
