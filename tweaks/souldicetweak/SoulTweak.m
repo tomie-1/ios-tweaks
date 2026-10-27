@@ -3540,8 +3540,6 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (contentBottom > height - kSoulMsgTimeReserve)
         contentBottom = height - kSoulMsgTimeReserve;
     if (contentBottom < 0.0) contentBottom = 0.0;
-    BOOL mine = showTime && time.tag == 1;
-    if (!showTime && contentRight > contentLeft) mine = contentLeft > width * 0.45;
 
     /* 扫描不到任何内容，说明 cell 还没完成布局（气泡尺寸为 0），
        这时没有可信的锚点。宁可这一轮不画、排一次重试，也不要
@@ -3580,15 +3578,10 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
         totalW = badgeW;
     }
 
-    BOOL alignTrailing = mine;
-    CGFloat x;
-    if (alignTrailing) {
-        /* 锚点必须是消息右沿；contentRight 为 0 时不能退化成整行宽度。 */
-        CGFloat anchor = contentRight > 0.0 ? contentRight : width - 14.0;
-        x = anchor - totalW;
-    } else {
-        x = contentLeft > 0.0 ? contentLeft : 14.0;
-    }
+    /* 时间贴着气泡左边缘放，不做右对齐：右侧是宿主的已读回执/状态标记
+       区域（截图里那几个青色块），右对齐会直接压上去。 */
+    BOOL alignTrailing = NO;
+    CGFloat x = contentLeft > 0.0 ? contentLeft : 14.0;
     if (x < 6.0) x = 6.0;
     if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     if (x < 6.0) x = 6.0;
@@ -3596,9 +3589,10 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     /* 时间叠在内容下方，不参与行高。宿主在气泡下方本来就留有 6~8pt，
        把标签塞进这段留白；放不下时贴住 cell 下沿，绝不溢出到相邻消息。 */
     CGFloat y = contentBottom + 1.0;
-    if (y + rowH > height - 1.0) y = height - rowH - 1.0;
-    if (y < contentBottom - rowH + 2.0) {
-        /* 连半个标签都放不下：这一轮不画，避免压住气泡。 */
+    CGFloat maxY = height - rowH;
+    if (y > maxY) y = maxY;
+    if (y < contentBottom) {
+        /* 连 1pt 间距都挤不出：藏起来，下一轮布局完成后再画。 */
         if (showTime) { time.hidden = YES; showTime = NO; }
     }
     if (y < 0.0) y = 0.0;
