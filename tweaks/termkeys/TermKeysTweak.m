@@ -5,13 +5,13 @@
 //  入口（拿不到时退回 xterm 序列）。插件由 TrollFools 或 MobileSubstrate
 //  注入宿主进程。
 //
-//  iGhostVT：按键直接加进它自带的键盘附件栏（libghostty 的
-//  TerminalInputAccessoryView），键栏高度不变，键盘高度也就与官方版一致，
-//  终端布局完全不受影响。另加一层键栏会把键盘撑高，iOS 15 的键盘避让随后
-//  把整窗内容上顶，终端首行压到状态栏下面——那是之前一直修不好的根因。
+//  布局：一条两行键栏浮在系统键盘（含 App 自带的那条附件栏）之上。键栏
+//  **不并入 inputAccessoryView**——键盘高度只要比原生多出一点，iOS 15 的
+//  键盘避让就会把整窗内容上顶，终端首行钻到状态栏下面，那是之前一直修不好
+//  的根因。改由根视图 additionalSafeAreaInsets 让终端腾出键栏高度：一次
+//  按键事件设一次，不在任何 layout 回调里改 frame，也就不会重排死循环。
 //
-//  其他终端 App：仍浮一条两行键栏在键盘上方（它们没有 iGhostVT 那种
-//  自带键栏可加）。
+//  App 自带的附件栏一个按键都不改，只挂一层「只接管点按」的 Shift 拦截。
 //
 //  运行时开关（`defaults write <bundle-id> <key> ...`）：
 //    TermKeys.diag -bool NO   关掉 Documents/termkeys-diag.log 诊断日志
@@ -23,13 +23,16 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static const CGFloat TKBarHeight = 88.0;
 static const CGFloat TKRowHeight = 40.0;
+static const CGFloat TKRowGap = 4.0;
+static const CGFloat TKBarPadding = 4.0;
+static const CGFloat TKBarHeight = TKRowHeight * 2 + TKRowGap + TKBarPadding * 2;
 static const CGFloat TKButtonSize = 34.0;
 static const CGFloat TKButtonSpacing = 7.0;
 
@@ -144,19 +147,25 @@ static UIControl *TKFindControl(UIView *view, NSString *accessibilityLabel) {
 // UITerminalView 的 `sendKey(_:modifiers:)` 接的是 Swift 的 `TerminalKey`
 // 枚举，不是 HID 用法码，所以要传 `TerminalKey` 的 case 序号——也就是
 // libghostty-spm `TerminalKey.swift` 里 case 的声明顺序。下面的值按该文件
-// 的声明顺序算出（175 个 case，第 0 个是 backquote）。
+// 的声明顺序算出。传错的后果很隐蔽：方向键会变成别的按键，F 键更会被拆成
+// ESC。
 //
-// 传错的后果很隐蔽：方向键会变成别的按键，F 键更会被拆成 ESC。
+// 调用约定：self 在 x20，按键码在 x0，修饰键在 x1。
 
 enum {
-    TKKeyJ = 28,        // a…z 之后的第 28 项
+    TKKeyJ = 28,
     TKKeyTab = 63,
     TKKeyDown = 74,
     TKKeyLeft = 75,
     TKKeyRight = 76,
     TKKeyUp = 77,
     TKKeyEscape = 119,
-    TKKeyF1 = 120,      // F 键连续排列，F12 = 131
+    TKKeyF1 = 120, // F 键连续排列，F12 = 131
+};
+
+enum {
+    TKModifierShift = 1u << 0,
+    TKModifierCtrl = 1u << 1,
 };
 
 typedef bool (*TKSwiftSendKeyFn)(void);
@@ -341,7 +350,7 @@ static void TKSendArrow(unichar final) {
         case 'D': nativeKey = TKKeyLeft; break;
         default: break;
     }
-    if (nativeKey && TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
+    if (nativeKey && TKTryNativeKey(nativeKey, shift ? TKModifierShift : 0u)) {
         return;
     }
     TKInsertText(shift ? [NSString stringWithFormat:@"\x1b[1;2%C", final]
@@ -351,7 +360,7 @@ static void TKSendArrow(unichar final) {
 static void TKSendFunctionKey(NSInteger number) {
     BOOL shift = [TKShiftController.shared consume];
     uint8_t nativeKey = (uint8_t)(TKKeyF1 + number - 1);
-    if (TKTryNativeKey(nativeKey, shift ? 1u : 0u)) {
+    if (TKTryNativeKey(nativeKey, shift ? TKModifierShift : 0u)) {
         return;
     }
     TKInsertText(TKFunctionKey(number, shift));
@@ -360,7 +369,7 @@ static void TKSendFunctionKey(NSInteger number) {
 // NL：终端层的换行。裸 LF 会被软件键盘路由成回车直接提交，所以走 Ctrl+J；
 // 拿不到原生入口时借用 App 自带键栏的 Ctrl 键，最后才用括号粘贴兜底。
 static void TKSendNewline(void) {
-    if (TKTryNativeKey(TKKeyJ, 2u)) { // Ctrl+J 就是终端里的换行
+    if (TKTryNativeKey(TKKeyJ, TKModifierCtrl)) {
         return;
     }
     UIWindow *window = TKHostWindow();
@@ -504,253 +513,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     return shift;
 }
 
-#pragma mark - 注入 iGhostVT 自带键栏
-//
-// 自带键栏是 libghostty 的 TerminalInputAccessoryView：模糊视图里套横向
-// UIScrollView，滚动区里是与栏同高的横向 UIStackView。把按键加进那个
-// stack 即可，栏高度不变。栏已经自带方向键、Esc、Tab、Ctrl/Alt/Cmd，
-// 这里只补 Shift、NL 和 F1–F12。
-
-static char TKInjectedKey;
-
-static UIStackView *TKAccessoryStackView(UIView *view) {
-    if ([view isKindOfClass:UIStackView.class]) {
-        UIStackView *stack = (UIStackView *)view;
-        if (stack.axis == UILayoutConstraintAxisHorizontal &&
-            [stack.superview isKindOfClass:UIScrollView.class]) {
-            return stack;
-        }
-    }
-    for (UIView *subview in view.subviews) {
-        UIStackView *found = TKAccessoryStackView(subview);
-        if (found) {
-            return found;
-        }
-    }
-    return nil;
-}
-
-static BOOL TKStackHasInjectedKeys(UIStackView *stack) {
-    for (UIView *view in stack.arrangedSubviews) {
-        if (objc_getAssociatedObject(view, &TKInjectedKey)) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
-#pragma mark - 让 Shift 也能修饰原生栏的按键
-//
-// libghostty 的粘滞修饰键只管 Ctrl/Alt/Cmd，它的 `Modifier` 枚举里没有
-// Shift；原生栏的 Tab/Esc/方向键读的是它自己的状态机，与插件的 Shift 毫无
-// 关系。所以 Shift 亮着时，得在原生按钮把动作发出去之前截住，改由插件发
-// 带 Shift 的原生按键。
-//
-// 做法：往栏上加一个手势识别器，设成 cancelsTouchesInView。触摸刚落在一个
-// 可修饰的键上、且 Shift 亮着时，识别器立即成功——按钮因此收不到这一串
-// 触摸，原本的动作不会触发——抬起时再由插件发键。其余情况识别器直接失败，
-// 原生栏照旧。
-
-static char TKShiftTapKey;
-
-typedef NS_ENUM(NSUInteger, TKShiftTarget) {
-    TKShiftTargetNone,
-    TKShiftTargetTab,
-    TKShiftTargetEscape,
-    TKShiftTargetLeft,
-    TKShiftTargetRight,
-    TKShiftTargetUp,
-    TKShiftTargetDown,
-};
-
-// 原生栏的 Tab/Esc/方向键标签来自 TerminalInputAccessoryItem.title。
-static TKShiftTarget TKShiftTargetForLabel(NSString *label) {
-    static NSDictionary<NSString *, NSNumber *> *table;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        table = @{
-            @"Tab": @(TKShiftTargetTab),
-            @"Escape": @(TKShiftTargetEscape),
-            @"Left Arrow": @(TKShiftTargetLeft),
-            @"Right Arrow": @(TKShiftTargetRight),
-            @"Up Arrow": @(TKShiftTargetUp),
-            @"Down Arrow": @(TKShiftTargetDown),
-        };
-    });
-    NSNumber *value = label ? table[label] : nil;
-    return value ? (TKShiftTarget)value.unsignedIntegerValue : TKShiftTargetNone;
-}
-
-static BOOL TKSendShiftedTarget(TKShiftTarget target) {
-    uint8_t key = 0;
-    switch (target) {
-        case TKShiftTargetTab: key = TKKeyTab; break;
-        case TKShiftTargetEscape: key = TKKeyEscape; break;
-        case TKShiftTargetLeft: key = TKKeyLeft; break;
-        case TKShiftTargetRight: key = TKKeyRight; break;
-        case TKShiftTargetUp: key = TKKeyUp; break;
-        case TKShiftTargetDown: key = TKKeyDown; break;
-        case TKShiftTargetNone: return NO;
-    }
-    return TKTryNativeKey(key, 1u); // 1 = TerminalInputModifiers.shift
-}
-
-@interface TKShiftTapRecognizer : UIGestureRecognizer
-@property(nonatomic, assign) TKShiftTarget target;
-@end
-
-@implementation TKShiftTapRecognizer
-
-- (TKShiftTarget)targetAt:(UITouch *)touch event:(UIEvent *)event {
-    if (!TKShiftController.shared.isActive) {
-        return TKShiftTargetNone;
-    }
-    UIView *hit = [self.view hitTest:[touch locationInView:self.view] withEvent:event];
-    while (hit && hit != self.view) {
-        if ([hit isKindOfClass:UIControl.class]) {
-            return TKShiftTargetForLabel(hit.accessibilityLabel);
-        }
-        hit = hit.superview;
-    }
-    return TKShiftTargetNone;
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = touches.anyObject;
-    TKShiftTarget target = touch ? [self targetAt:touch event:event] : TKShiftTargetNone;
-    if (target == TKShiftTargetNone) {
-        self.state = UIGestureRecognizerStateFailed;
-        return;
-    }
-    self.target = target;
-    // 认下这一串触摸：cancelsTouchesInView 会把它们从原生按钮上撤走。
-    self.state = UIGestureRecognizerStateBegan;
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    TKShiftTarget target = self.target;
-    self.target = TKShiftTargetNone;
-    BOOL armed = TKShiftController.shared.isActive;
-    self.state = UIGestureRecognizerStateEnded;
-    if (target == TKShiftTargetNone || !armed) {
-        return;
-    }
-    [TKShiftController.shared consume];
-    BOOL sent = TKSendShiftedTarget(target);
-    TKDiag(@"shift+bar target=%lu sent=%d", (unsigned long)target, sent);
-}
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    self.target = TKShiftTargetNone;
-    self.state = UIGestureRecognizerStateCancelled;
-}
-
-@end
-
-static void TKInstallShiftPassthrough(UIView *accessory) {
-    if (objc_getAssociatedObject(accessory, &TKShiftTapKey)) {
-        return;
-    }
-    TKShiftTapRecognizer *recognizer = [[TKShiftTapRecognizer alloc] init];
-    recognizer.cancelsTouchesInView = YES;
-    recognizer.delaysTouchesEnded = NO;
-    [accessory addGestureRecognizer:recognizer];
-    objc_setAssociatedObject(accessory, &TKShiftTapKey, recognizer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-
-static void TKInjectIntoAccessory(UIView *accessory, NSString *reason) {
-    if (!accessory) {
-        return;
-    }
-    UIStackView *stack = TKAccessoryStackView(accessory);
-    if (!stack) {
-        TKDiag(@"inject %@: no stack in %@", reason, NSStringFromClass(accessory.class));
-        return;
-    }
-    if (TKStackHasInjectedKeys(stack)) {
-        return;
-    }
-    TKInstallShiftPassthrough(accessory);
-
-    TKKeyButton *shift = TKMakeShiftButton(38.0);
-    objc_setAssociatedObject(shift, &TKInjectedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [stack insertArrangedSubview:shift atIndex:0];
-
-    TKKeyButton *newline = TKMakeButton(@"NL", 40.0, TKKeyFont());
-    newline.accessibilityLabel = @"NL";
-    newline.onTap = ^{
-        TKSendNewline();
-    };
-    objc_setAssociatedObject(newline, &TKInjectedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [stack insertArrangedSubview:newline atIndex:1];
-
-    for (NSInteger number = 1; number <= 12; number++) {
-        TKKeyButton *button = TKMakeButton([NSString stringWithFormat:@"F%ld", (long)number], 40.0,
-                                           TKKeyFont());
-        button.onTap = ^{
-            TKSendFunctionKey(number);
-        };
-        objc_setAssociatedObject(button, &TKInjectedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [stack addArrangedSubview:button];
-    }
-
-    TKDiag(@"inject %@: %@ now %lu keys, h=%.1f", reason, NSStringFromClass(accessory.class),
-           (unsigned long)stack.arrangedSubviews.count, CGRectGetHeight(accessory.bounds));
-}
-
-typedef UIView *(*TKInputAccessoryGetter)(id, SEL);
-static TKInputAccessoryGetter TKOriginalInputAccessoryGetter;
-
-static UIView *TKInputAccessoryViewPassthrough(id self, SEL command) {
-    UIView *original = TKOriginalInputAccessoryGetter
-        ? TKOriginalInputAccessoryGetter(self, command)
-        : nil;
-    // 原样返回，键盘高度与官方版一致；按键只是加进它自己的滚动栏。
-    TKInjectIntoAccessory(original, @"inputAccessoryView");
-    return original;
-}
-
-// libghostty 在键位设置变化时会重建栏内按键（rebuildContent 清空 stack），
-// 重建后再补一次。
-typedef void (*TKRebuildContentFn)(id, SEL);
-static TKRebuildContentFn TKOriginalRebuildContent;
-
-static void TKAccessoryRebuildContent(id self, SEL command) {
-    if (TKOriginalRebuildContent) {
-        TKOriginalRebuildContent(self, command);
-    }
-    TKInjectIntoAccessory((UIView *)self, @"rebuildContent");
-}
-
-static BOOL TKInstallIGhostHooks(void) {
-    Class terminalClass = TKTerminalClass();
-    if (!terminalClass) {
-        TKDiag(@"hook: terminal class missing");
-        return NO;
-    }
-    Method accessoryMethod = class_getInstanceMethod(terminalClass, @selector(inputAccessoryView));
-    if (!accessoryMethod) {
-        TKDiag(@"hook: inputAccessoryView missing");
-        return NO;
-    }
-    TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(accessoryMethod);
-    method_setImplementation(accessoryMethod, (IMP)TKInputAccessoryViewPassthrough);
-
-    Class accessoryClass = NSClassFromString(@"GhosttyTerminal.TerminalInputAccessoryView");
-    Method rebuildMethod = accessoryClass
-        ? class_getInstanceMethod(accessoryClass, NSSelectorFromString(@"rebuildContent"))
-        : NULL;
-    if (rebuildMethod) {
-        TKOriginalRebuildContent = (TKRebuildContentFn)method_getImplementation(rebuildMethod);
-        method_setImplementation(rebuildMethod, (IMP)TKAccessoryRebuildContent);
-    }
-    TKDiag(@"hooks: terminal=%@ accessory=%@ rebuild=%d", NSStringFromClass(terminalClass),
-           NSStringFromClass(accessoryClass), rebuildMethod != NULL);
-    return YES;
-}
-
-#pragma mark - 其他终端 App：浮动键栏
+#pragma mark - 键栏
 
 @interface TKBarView : UIView
 @end
@@ -779,6 +542,7 @@ static BOOL TKInstallIGhostHooks(void) {
     backdrop.clipsToBounds = YES;
     [self addSubview:backdrop];
 
+    // 第一行固定不滚动：Shift、NL 靠左，方向键靠右。
     UIScrollView *topScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     topScroll.translatesAutoresizingMaskIntoConstraints = NO;
     topScroll.showsHorizontalScrollIndicator = NO;
@@ -793,6 +557,7 @@ static BOOL TKInstallIGhostHooks(void) {
     topStack.spacing = TKButtonSpacing;
     [topScroll addSubview:topStack];
 
+    // 第二行只放 F1–F12，可横向滑动。
     UIScrollView *functionScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     functionScroll.translatesAutoresizingMaskIntoConstraints = NO;
     functionScroll.showsHorizontalScrollIndicator = NO;
@@ -815,7 +580,8 @@ static BOOL TKInstallIGhostHooks(void) {
 
         [topScroll.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [topScroll.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        [topScroll.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor],
+        [topScroll.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor
+                                            constant:TKBarPadding],
         [topScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
 
         [topStack.leadingAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.leadingAnchor
@@ -828,10 +594,9 @@ static BOOL TKInstallIGhostHooks(void) {
 
         [functionScroll.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [functionScroll.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        [functionScroll.topAnchor constraintEqualToAnchor:topScroll.bottomAnchor constant:4.0],
+        [functionScroll.topAnchor constraintEqualToAnchor:topScroll.bottomAnchor
+                                                  constant:TKRowGap],
         [functionScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
-        [functionScroll.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor
-                                                    constant:-4.0],
 
         [functionStack.leadingAnchor constraintEqualToAnchor:functionScroll.contentLayoutGuide.leadingAnchor
                                                     constant:8.0],
@@ -885,9 +650,187 @@ static BOOL TKInstallIGhostHooks(void) {
 
 @end
 
+#pragma mark - 让 Shift 也能修饰 App 自带栏的按键
+//
+// libghostty 的粘滞修饰键只管 Ctrl/Alt/Cmd，它的 `Modifier` 枚举里没有
+// Shift；自带栏的 Tab/Esc/方向键读的是它自己的状态机，与插件的 Shift 毫无
+// 关系。所以 Shift 亮着时得在按钮把动作发出去之前截住，改由插件发带 Shift
+// 的原生按键。
+//
+// 两处小心：一是不在 touchesBegan 就认下触摸（那会连横向滑动一起吞掉），
+// 而是等手抬起、确认是点按且落在可修饰的键上才认；二是打开
+// delaysTouchesEnded，让按钮的 touchUpInside 晚于本识别器一步，才有机会
+// 取消它。手指移动超过阈值即判定为滑动，本识别器立刻失败，滚动照常。
+
+static char TKShiftTapKey;
+
+typedef NS_ENUM(NSUInteger, TKShiftTarget) {
+    TKShiftTargetNone,
+    TKShiftTargetTab,
+    TKShiftTargetEscape,
+    TKShiftTargetLeft,
+    TKShiftTargetRight,
+    TKShiftTargetUp,
+    TKShiftTargetDown,
+};
+
+// 自带栏的标签来自 TerminalInputAccessoryItem.title。
+static TKShiftTarget TKShiftTargetForLabel(NSString *label) {
+    static NSDictionary<NSString *, NSNumber *> *table;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        table = @{
+            @"Tab": @(TKShiftTargetTab),
+            @"Escape": @(TKShiftTargetEscape),
+            @"Left Arrow": @(TKShiftTargetLeft),
+            @"Right Arrow": @(TKShiftTargetRight),
+            @"Up Arrow": @(TKShiftTargetUp),
+            @"Down Arrow": @(TKShiftTargetDown),
+        };
+    });
+    NSNumber *value = label ? table[label] : nil;
+    return value ? (TKShiftTarget)value.unsignedIntegerValue : TKShiftTargetNone;
+}
+
+static BOOL TKSendShiftedTarget(TKShiftTarget target) {
+    uint8_t key = 0;
+    switch (target) {
+        case TKShiftTargetTab: key = TKKeyTab; break;
+        case TKShiftTargetEscape: key = TKKeyEscape; break;
+        case TKShiftTargetLeft: key = TKKeyLeft; break;
+        case TKShiftTargetRight: key = TKKeyRight; break;
+        case TKShiftTargetUp: key = TKKeyUp; break;
+        case TKShiftTargetDown: key = TKKeyDown; break;
+        case TKShiftTargetNone: return NO;
+    }
+    return TKTryNativeKey(key, TKModifierShift);
+}
+
+@interface TKShiftTapRecognizer : UIGestureRecognizer
+@property(nonatomic, assign) TKShiftTarget target;
+@property(nonatomic, assign) CGPoint startPoint;
+@property(nonatomic, assign) BOOL tracking;
+@end
+
+@implementation TKShiftTapRecognizer
+
+- (TKShiftTarget)targetAt:(UITouch *)touch event:(UIEvent *)event {
+    UIView *hit = [self.view hitTest:[touch locationInView:self.view] withEvent:event];
+    while (hit && hit != self.view) {
+        if ([hit isKindOfClass:UIControl.class]) {
+            return TKShiftTargetForLabel(hit.accessibilityLabel);
+        }
+        hit = hit.superview;
+    }
+    return TKShiftTargetNone;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // 只在 Shift 亮着、且落点是可修饰的键时才开始跟踪；其余一律放手，
+    // 滚动和别的按键都不受影响。
+    UITouch *touch = touches.anyObject;
+    TKShiftTarget target = TKShiftTargetNone;
+    if (touch && TKShiftController.shared.isActive) {
+        target = [self targetAt:touch event:event];
+    }
+    if (target == TKShiftTargetNone) {
+        self.tracking = NO;
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    self.tracking = YES;
+    self.target = target;
+    self.startPoint = touch ? [touch locationInView:self.view] : CGPointZero;
+    self.state = UIGestureRecognizerStatePossible;
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (!self.tracking) {
+        return;
+    }
+    UITouch *touch = touches.anyObject;
+    CGPoint point = touch ? [touch locationInView:self.view] : CGPointZero;
+    // 移动了就当成滑动，把这串触摸还给 UIScrollView。
+    if (hypot(point.x - self.startPoint.x, point.y - self.startPoint.y) > 10.0) {
+        self.tracking = NO;
+        self.target = TKShiftTargetNone;
+        self.state = UIGestureRecognizerStateFailed;
+    }
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    TKShiftTarget target = self.target;
+    BOOL armed = self.tracking && TKShiftController.shared.isActive;
+    self.tracking = NO;
+    self.target = TKShiftTargetNone;
+    if (!armed || target == TKShiftTargetNone) {
+        self.state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    // 认下这一下点按：cancelsTouchesInView 会把按钮的 touchUpInside 撤掉。
+    self.state = UIGestureRecognizerStateEnded;
+    [TKShiftController.shared consume];
+    BOOL sent = TKSendShiftedTarget(target);
+    TKDiag(@"shift+bar target=%lu sent=%d", (unsigned long)target, sent);
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    self.tracking = NO;
+    self.target = TKShiftTargetNone;
+    self.state = UIGestureRecognizerStateFailed;
+}
+
+@end
+
+static void TKInstallShiftPassthrough(UIView *accessory) {
+    if (!accessory || objc_getAssociatedObject(accessory, &TKShiftTapKey)) {
+        return;
+    }
+    TKShiftTapRecognizer *recognizer = [[TKShiftTapRecognizer alloc] init];
+    recognizer.cancelsTouchesInView = YES;
+    recognizer.delaysTouchesEnded = YES;
+    recognizer.delaysTouchesBegan = NO;
+    [accessory addGestureRecognizer:recognizer];
+    objc_setAssociatedObject(accessory, &TKShiftTapKey, recognizer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+typedef UIView *(*TKInputAccessoryGetter)(id, SEL);
+static TKInputAccessoryGetter TKOriginalInputAccessoryGetter;
+
+static UIView *TKInputAccessoryViewPassthrough(id self, SEL command) {
+    UIView *original = TKOriginalInputAccessoryGetter
+        ? TKOriginalInputAccessoryGetter(self, command)
+        : nil;
+    // 原样返回：键盘高度与官方版一致，布局不因插件而变；这里只挂 Shift
+    // 拦截，不改栏里的任何按键。
+    TKInstallShiftPassthrough(original);
+    return original;
+}
+
+static BOOL TKInstallIGhostHooks(void) {
+    Class terminalClass = TKTerminalClass();
+    if (!terminalClass) {
+        TKDiag(@"hook: terminal class missing");
+        return NO;
+    }
+    Method accessoryMethod = class_getInstanceMethod(terminalClass, @selector(inputAccessoryView));
+    if (!accessoryMethod) {
+        TKDiag(@"hook: inputAccessoryView missing");
+        return NO;
+    }
+    TKOriginalInputAccessoryGetter = (TKInputAccessoryGetter)method_getImplementation(accessoryMethod);
+    method_setImplementation(accessoryMethod, (IMP)TKInputAccessoryViewPassthrough);
+    TKDiag(@"hook installed on %@", NSStringFromClass(terminalClass));
+    return YES;
+}
+
+#pragma mark - 键栏控制
+
 @interface TKKeyboardBarController : NSObject
 @property(nonatomic, strong) TKBarView *bar;
 @property(nonatomic, weak) UIWindow *hostWindow;
+@property(nonatomic, weak) UIViewController *rootController;
+@property(nonatomic, assign) CGFloat reservedHeight;
 @end
 
 @implementation TKKeyboardBarController
@@ -914,6 +857,30 @@ static BOOL TKInstallIGhostHooks(void) {
     return self;
 }
 
+// 硬件键盘只弹出附件栏时高度不够，不该给终端留下一条空白。
+- (BOOL)keyboardIsOnScreen:(CGRect)frame {
+    return frame.size.height > 100.0;
+}
+
+// 让终端腾出键栏高度。同一个值只设一次，不在 layout 回调里反复改 frame，
+// 也就不会出现之前那种重排死循环。
+- (void)updateReservationForWindow:(UIWindow *)window visible:(BOOL)visible {
+    UIViewController *root = window.rootViewController;
+    if (!root) {
+        return;
+    }
+    CGFloat wanted = visible ? TKBarHeight : 0;
+    self.rootController = root;
+    if (fabs(self.reservedHeight - wanted) < 0.5) {
+        return;
+    }
+    self.reservedHeight = wanted;
+    UIEdgeInsets insets = root.additionalSafeAreaInsets;
+    insets.bottom = wanted;
+    root.additionalSafeAreaInsets = insets;
+    TKDiag(@"reserve %.1f", wanted);
+}
+
 - (void)keyboardWillChangeFrame:(NSNotification *)notification {
     CGRect endFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
     NSTimeInterval duration =
@@ -933,9 +900,11 @@ static BOOL TKInstallIGhostHooks(void) {
             self.hostWindow = window;
         }
 
+        // 键盘 frame 已含 App 自带附件栏，键栏就叠在它上面。
         CGRect keyboardInWindow = [window convertRect:endFrame fromWindow:nil];
         CGFloat barY = CGRectGetMinY(keyboardInWindow) - TKBarHeight;
-        self.bar.hidden = NO;
+        BOOL visible = [self keyboardIsOnScreen:endFrame];
+        self.bar.hidden = !visible;
         [UIView animateWithDuration:(duration > 0 ? duration : 0.22)
                               delay:0
                             options:(UIViewAnimationOptions)(curve << 16)
@@ -945,12 +914,18 @@ static BOOL TKInstallIGhostHooks(void) {
                          }
                          completion:nil];
         [window bringSubviewToFront:self.bar];
+
+        [self updateReservationForWindow:window visible:visible];
     });
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification {
     dispatch_async(dispatch_get_main_queue(), ^{
         self.bar.hidden = YES;
+        UIWindow *window = TKHostWindow();
+        if (window) {
+            [self updateReservationForWindow:window visible:NO];
+        }
     });
 }
 
@@ -964,8 +939,9 @@ static void TermKeysInit(void) {
         NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
         TKDiag(@"init %@ terminal=%@ sendKey=%p", bundleID, NSStringFromClass(TKTerminalClass()),
                (void *)TKSwiftSendKeyFunction());
-        if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"] && TKInstallIGhostHooks()) {
-            return;
+        if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"]) {
+            // 自带栏原样保留，只加 Shift 拦截；键栏另浮一层。
+            TKInstallIGhostHooks();
         }
         (void)[TKKeyboardBarController shared];
     });
