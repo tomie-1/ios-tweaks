@@ -384,15 +384,39 @@ static void TKSendNewline(void) {
 
 #pragma mark - 按键外观
 
-static UIImage *TKSymbolImage(NSString *name) {
-    UIImageConfiguration *configuration =
-        [UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold];
-    return [UIImage systemImageNamed:name withConfiguration:configuration];
-}
+// 所有按键共用的尺寸规则。按钮一律等宽等高，字形一律等点高——这是从实测
+// 数据定的，不是凭感觉：44/42/38/40 四种宽度会让整排的圆圈起点错位，
+// 字号相同也不等于墨迹同大。
+static const CGFloat TKKeyWidth = 40.0;
+static const CGFloat TKGlyphHeight = 16.0;
 
-// 五种按键的字形大小统一按「视觉等重」调过：SF Symbol 的笔画比同号文字细，
-// 所以图标 15pt、文字 12pt 看上去才一样大。方向键原先用文字字符 ←↑↓→，
-// 字形本身比 SF Symbol 细，圈里就显得小一号；改用同一套符号就一致了。
+// SF Symbol 的每个符号有自己的边界框，同一个字号下墨迹大小差很多：实测
+// `shift` 是 19.0×16.7，`arrow.left` 只有 18.3×14.3，而 `arrow.up` 是
+// 15.7×16.7。按字号配必然大小不一，改成按**固定点高**渲染，再让宽度按
+// 各自比例走——所有图标就同高了，横向箭头只是更宽，这也是它本来的形状。
+static UIImage *TKSymbolImage(NSString *name) {
+    UIImageConfiguration *configuration = [UIImageSymbolConfiguration
+        configurationWithPointSize:TKGlyphHeight
+                            weight:UIImageSymbolWeightSemibold];
+    UIImage *image = [UIImage systemImageNamed:name withConfiguration:configuration];
+    if (!image) {
+        return nil;
+    }
+    // 统一缩放到同一高度；宽度按原比例，不做裁剪。
+    CGFloat scale = TKGlyphHeight / MAX(image.size.height, 1.0);
+    if (fabs(scale - 1.0) < 0.01) {
+        return image;
+    }
+    CGSize target = CGSizeMake(image.size.width * scale, TKGlyphHeight);
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
+    format.opaque = NO;
+    format.scale = 0;
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:target format:format];
+    UIImage *scaled = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [image drawInRect:CGRectMake(0, 0, target.width, target.height)];
+    }];
+    return [scaled imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
 static UIImage *TKShiftImage(void) {
     UIImage *image = TKSymbolImage(@"shift");
     return image ?: TKSymbolImage(@"shift.fill");
@@ -619,9 +643,9 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [functionStack.heightAnchor constraintEqualToAnchor:functionScroll.frameLayoutGuide.heightAnchor],
     ]];
 
-    [topStack addArrangedSubview:TKMakeShiftButton(44.0)];
+    [topStack addArrangedSubview:TKMakeShiftButton(TKKeyWidth)];
 
-    TKKeyButton *newline = TKMakeButton(@"NL", 42.0, TKKeyFont());
+    TKKeyButton *newline = TKMakeButton(@"NL", TKKeyWidth, TKKeyFont());
     newline.accessibilityLabel = @"NL";
     newline.onTap = ^{
         TKSendNewline();
@@ -639,7 +663,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     static const unichar arrowFinals[] = {'D', 'A', 'B', 'C'};
     for (NSInteger index = 0; index < 4; index++) {
         unichar final = arrowFinals[index];
-        TKKeyButton *arrow = TKMakeButton(@"", 38.0, TKArrowFont());
+        TKKeyButton *arrow = TKMakeButton(@"", TKKeyWidth, TKArrowFont());
         UIImage *symbol = TKSymbolImage(arrowSymbols[index]);
         if (symbol) {
             [arrow setImage:symbol forState:UIControlStateNormal];
@@ -657,7 +681,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 
     for (NSInteger number = 1; number <= 12; number++) {
         TKKeyButton *button =
-            TKMakeButton([NSString stringWithFormat:@"F%ld", (long)number], 40.0, TKKeyFont());
+            TKMakeButton([NSString stringWithFormat:@"F%ld", (long)number], TKKeyWidth, TKKeyFont());
         button.onTap = ^{
             TKSendFunctionKey(number);
         };
