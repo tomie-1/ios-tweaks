@@ -3853,20 +3853,48 @@ static BOOL SoulLayoutNeedsFooterRow(id layout) {
 }
 
 /* 时间行 12pt 高，加 2pt 间距、1pt 余量，一共需要 15pt。
-   消息布局通常在气泡下方留有底部内边距：能塞进去就不加高（行高完全不变），
-   塞不进就只补差额。关键是两种情况下「气泡底边到行底的距离」都等于 15pt，
-   这样每条消息的视觉间距一致，不会出现有的紧有的松。
+   目标是让「内容底边到 cell 底边」恒等于 15pt：够就完全不动行高，
+   不够只补差额，这样每条消息的视觉间距一致。
 
-   两条取数路径：
-   1. bubbleSize 有效且与 cellInset 自洽 —— 用 ins.bottom，最准；
-   2. 否则（分享卡这类布局不给 bubbleSize）—— 用实测的内容底边反推剩余。 */
+   取数优先级（越靠前越可信）：
+   1. 分享卡：从 usercardModel 读宿主自己算好的卡片高。分享卡的
+      bubbleSize 恒为 0，cellInset 也是 0，模型里唯一可靠的就是
+      SOUsercardModel.usercardHeight —— 这是宿主渲染这张卡实际用的值。
+   2. 普通消息：bubbleSize 与 cellInset 自洽时用 ins.bottom。
+   3. 兜底：上一次实际排版量到的内容底边。
+   全都没有时才按整行预留，下一轮收敛。 */
 static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     if (!layout || baseH < 20.0) return 0.0;
     const CGFloat needForRow = 2.0 + 12.0 + 1.0;
     SEL insSel = NSSelectorFromString(@"cellInset");
     SEL bsSel = NSSelectorFromString(@"bubbleSize");
     CGFloat remaining = -1.0;
-    if ([layout respondsToSelector:insSel] && [layout respondsToSelector:bsSel]) {
+
+    /* 1. 分享卡：cellInset.top + 卡片高 = 内容底边。
+       分享卡的 bubbleSize 恒为 0，但 cellInset.top 和 usercardHeight
+       都是宿主真实使用的值。 */
+    SEL ucSel = NSSelectorFromString(@"usercardModel");
+    if ([layout respondsToSelector:ucSel]) {
+        @try {
+            id uc = ((id (*)(id, SEL))objc_msgSend)(layout, ucSel);
+            SEL chSel = NSSelectorFromString(@"usercardHeight");
+            if (uc && [uc respondsToSelector:chSel]) {
+                CGFloat cardH = ((double (*)(id, SEL))objc_msgSend)(uc, chSel);
+                CGFloat cardTop = 6.0;
+                if ([layout respondsToSelector:insSel]) {
+                    UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
+                    if (isfinite(ins.top) && ins.top >= 0.0 && ins.top < baseH) cardTop = ins.top;
+                }
+                if (isfinite(cardH) && cardH > 20.0 && cardH < baseH) {
+                    CGFloat r = baseH - (cardTop + cardH);
+                    if (r >= 0.0 && r < baseH) remaining = r;
+                }
+            }
+        } @catch (__unused NSException *e) {}
+    }
+
+    /* 2. 普通气泡消息 */
+    if (remaining < 0.0 && [layout respondsToSelector:insSel] && [layout respondsToSelector:bsSel]) {
         @try {
             UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
             CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
@@ -3877,6 +3905,8 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
             }
         } @catch (__unused NSException *e) {}
     }
+
+    /* 3. 实测内容底边 */
     if (remaining < 0.0) {
         NSNumber *measured = objc_getAssociatedObject(layout, kSoulLayoutContentBottomKey);
         if (measured) {
@@ -3885,8 +3915,7 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
         }
     }
     if (remaining < 0.0) {
-        /* 还没有任何实测数据：先按整行需求预留，下一轮排版拿到真实
-           内容底边后会收敛到差额。 */
+        /* 还没有任何可信数据：先按整行预留，下一轮收敛。 */
         return kSoulMsgTimeReserve;
     }
     CGFloat need = needForRow - remaining;
@@ -3915,10 +3944,21 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
-    if ([cls containsString:@"ShareUserCard"]) {
-        SoulLog(@"msg-time: hgt share base=%.1f reserve=%.1f -> %.1f contentBottom=%@",
-                h, reserve, h + reserve,
-                objc_getAssociatedObject(self, kSoulLayoutContentBottomKey) ?: @"nil");
+    if ([cls containsString:@"Message"] && baseH > 100.0) {
+        static int hLog = 0;
+        if (hLog < 6) {
+            hLog++;
+            id uc = nil;
+            SEL ucSel = NSSelectorFromString(@"usercardModel");
+            @try { if ([self respondsToSelector:ucSel]) uc = ((id (*)(id, SEL))objc_msgSend)(self, ucSel); }
+            @catch (__unused NSException *e) {}
+            CGFloat cardH = -1.0;
+            if (uc && [uc respondsToSelector:NSSelectorFromString(@"usercardHeight")])
+                cardH = ((double (*)(id, SEL))objc_msgSend)(uc, NSSelectorFromString(@"usercardHeight"));
+            SoulLog(@"msg-time: hgt cls=%@ base=%.1f reserve=%.1f -> %.1f usercard=%@ cardH=%.1f",
+                    cls, baseH, reserve, baseH + reserve,
+                    uc ? NSStringFromClass([uc class]) : @"nil", cardH);
+        }
     }
     return h + reserve;
 }
