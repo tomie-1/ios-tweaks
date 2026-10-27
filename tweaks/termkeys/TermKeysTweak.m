@@ -513,18 +513,20 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     shift.accessibilityLabel = @"Shift";
     shift.accessibilityHint = @"单击一次生效，双击锁定";
 
+    // 锁定徽标。图标缩到 15pt 后，原来 6pt 的点显得偏大，跟着缩到 4pt，
+    // 并往角里再收一点，保持「一个小角标」的比例。
     UIView *dot = [[UIView alloc] initWithFrame:CGRectZero];
     dot.translatesAutoresizingMaskIntoConstraints = NO;
     dot.userInteractionEnabled = NO;
     dot.backgroundColor = UIColor.whiteColor;
-    dot.layer.cornerRadius = 3.0;
+    dot.layer.cornerRadius = 2.0;
     dot.hidden = YES;
     [shift addSubview:dot];
     [NSLayoutConstraint activateConstraints:@[
-        [dot.widthAnchor constraintEqualToConstant:6.0],
-        [dot.heightAnchor constraintEqualToConstant:6.0],
-        [dot.trailingAnchor constraintEqualToAnchor:shift.trailingAnchor constant:-6.0],
-        [dot.topAnchor constraintEqualToAnchor:shift.topAnchor constant:6.0],
+        [dot.widthAnchor constraintEqualToConstant:4.0],
+        [dot.heightAnchor constraintEqualToConstant:4.0],
+        [dot.trailingAnchor constraintEqualToAnchor:shift.trailingAnchor constant:-7.0],
+        [dot.topAnchor constraintEqualToAnchor:shift.topAnchor constant:7.0],
     ]];
 
     TKShiftController *controller = TKShiftController.shared;
@@ -552,10 +554,6 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 @interface TKBarView : UIView
 @end
 
-@interface TKBarView ()
-- (void)tk_scheduleGlyphMetricsDump:(UIStackView *)topStack functionStack:(UIStackView *)functionStack;
-@end
-
 @implementation TKBarView
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -580,11 +578,15 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     backdrop.clipsToBounds = YES;
     [self addSubview:backdrop];
 
-    // 第一行固定不滚动：Shift、NL 靠左，方向键靠右。
+    // 第一行布局固定：Shift、NL 靠左，方向键靠右。但仍开启横向拖动，
+    // 拖动时整排跟着走、松手回弹——只是手感，内容宽度等于可视宽度，不会
+    // 真的滚出屏幕外。
     UIScrollView *topScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     topScroll.translatesAutoresizingMaskIntoConstraints = NO;
     topScroll.showsHorizontalScrollIndicator = NO;
-    topScroll.scrollEnabled = NO;
+    topScroll.alwaysBounceHorizontal = YES;
+    topScroll.bounces = YES;
+    topScroll.scrollEnabled = YES;
     topScroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
     [backdrop.contentView addSubview:topScroll];
 
@@ -595,11 +597,12 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     topStack.spacing = TKButtonSpacing;
     [topScroll addSubview:topStack];
 
-    // 第二行只放 F1–F12，可横向滑动。
+    // 第二行只放 F1–F12，键多到放不下，真的可以横向滑动。
     UIScrollView *functionScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     functionScroll.translatesAutoresizingMaskIntoConstraints = NO;
     functionScroll.showsHorizontalScrollIndicator = NO;
     functionScroll.alwaysBounceHorizontal = YES;
+    functionScroll.bounces = YES;
     functionScroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
     [backdrop.contentView addSubview:functionScroll];
 
@@ -691,51 +694,11 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [functionStack addArrangedSubview:button];
     }
 
-    [self tk_scheduleGlyphMetricsDump:topStack functionStack:functionStack];
     return self;
 }
 
 // 把每个按键的字形尺寸、圆心和基线差异写进日志，用数据核对「看起来一样大」。
 // 看得出来的差异必须有数：字形高宽、按钮内偏移、两行基线。
-- (void)tk_scheduleGlyphMetricsDump:(UIStackView *)topStack functionStack:(UIStackView *)functionStack {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        if (!TKDiagEnabled()) {
-            return;
-        }
-        NSMutableString *report = [NSMutableString stringWithString:@"glyph-metrics"];
-        for (UIStackView *stack in @[ topStack, functionStack ]) {
-            [report appendFormat:@"\n  row axis=h count=%lu", (unsigned long)stack.arrangedSubviews.count];
-            for (UIView *view in stack.arrangedSubviews) {
-                if (![view isKindOfClass:UIButton.class]) {
-                    continue;
-                }
-                UIButton *button = (UIButton *)view;
-                CGRect frameInBar = [button convertRect:button.bounds toView:self];
-                NSString *label = button.accessibilityLabel ?: @"?";
-                // 文字按钮：看 titleLabel；图形按钮：看 imageView。
-                UIView *content = button.currentImage ? button.imageView : button.titleLabel;
-                if (!content) {
-                    continue;
-                }
-                CGSize glyph = content.isHidden ? CGSizeZero : content.bounds.size;
-                if (content == button.imageView) {
-                    glyph = button.currentImage.size;
-                }
-                CGRect contentFrame = [content convertRect:content.bounds toView:button];
-                CGFloat dx = CGRectGetMidX(contentFrame) - CGRectGetMidX(button.bounds);
-                CGFloat dy = CGRectGetMidY(contentFrame) - CGRectGetMidY(button.bounds);
-                [report appendFormat:
-                    @"\n    %@ btn=%.1fx%.1f glyph=%.1fx%.1f dx=%+.1f dy=%+.1f centerY=%.1f",
-                    label,
-                    CGRectGetWidth(button.bounds), CGRectGetHeight(button.bounds),
-                    glyph.width, glyph.height, dx, dy,
-                    CGRectGetMidY(frameInBar)];
-            }
-        }
-        TKDiag(@"%@", report);
-    });
-}
 
 @end
 
