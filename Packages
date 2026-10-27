@@ -16,7 +16,7 @@ SHA512: 80a9398379e7e16ca03a2532389c850bd4d1dfa21cfcb2519f5e63d70c8223c4779f24e2
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
-Version: 1.0.0
+Version: 1.0.1
 Architecture: iphoneos-arm
 Description: Loon 插件/规则/节点批量管理
 Maintainer: tomie
@@ -24,11 +24,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.loonbatch_iphoneos-arm.deb
-Size: 38748
-MD5sum: 261ddb48b474f694c18a90818e40dc11
-SHA1: 4f87ecc7e14a011910cc7f83449e7db24832c79c
-SHA256: f42ec326721716c9c25494bdc9c135d782cf25cd5c18ee3c60ed3f44c16fb7ec
-SHA512: 5b2a022c6066e6aa8a7c0a665f90754027074a8adec9ff4aa1fd039926604936dab4323fefe7a3ccbca9e24aafbc6ce4f8c738e3a38add0cf6d8f43c7eebffa5
+Size: 38916
+MD5sum: 8a5aa91390c52452b976c2ad486bbc5b
+SHA1: 5dbed18a260e567ecaae0330b76163061c6e87ba
+SHA256: c4e6b043a2afcbc0bc5ccfc8f72378e70a4a8bd103cd3eb3c4e3fa07576fef95
+SHA512: a8162605db9a515679bc0126877cea94811c438503d97d924a7a2cc88dd1489774ada5d155e76efcc6029856090b97a4ee0599e17bb6ffdb18ab569c37cf08ae
 
 Package: com.tomie.termkeys
 Name: TermKeys
@@ -128,7 +128,7 @@ SHA512: 7ae52a930ab2a0aa76feb9ae4afcaffdde3c55702566a4873b4a84d67aabaa0081af51ef
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
-Version: 1.0.0
+Version: 1.0.1
 Architecture: iphoneos-arm64
 Description: Loon 插件/规则/节点批量管理
 Maintainer: tomie
@@ -136,11 +136,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.loonbatch_iphoneos-arm64.deb
-Size: 38780
-MD5sum: 989527986788e8be3b097f9efdd3b1bb
-SHA1: 93aa1f56c2fb3449f560ab4edfcf3d92d05b777e
-SHA256: 5002d7d9eed26ff8c63b4352ae6723902f98b6b78146c96822df673aec3691d6
-SHA512: 1741b72174ef8dc21133760cc3b5e811dfd60f73d0353abbd51534faf6e9312b9d62b36e790558576560592450863058a8d207a3475dcb5297d9fa3de2814603
+Size: 38956
+MD5sum: b5ba97cc65865512c6d6ab345a382d1e
+SHA1: 6e11dbdce6c39429f7e80611d0acfb2ae192f9a7
+SHA256: 53e71d1df2b0604726767e8e901777f13e4e90ca594af1d7e7e014fbeeb13c74
+SHA512: d323506ecd56732ad9488fe484ceed4a8601d59fcf7996380d26fc8d0913a32408fec40ca972d45a1adc9d19edd754f845e8edbb6313689080d1f248781b95df
 
 Package: com.tomie.termkeys
 Name: TermKeys
@@ -240,7 +240,7 @@ SHA512: 10d3faf41a25a8a44d35cbbe5e94b247dd0ad4fdd6584966ff5ad0d65ef9d903b44408c6
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
-Version: 1.0.0
+Version: 1.0.1
 Architecture: iphoneos-arm64e
 Description: Loon 插件/规则/节点批量管理
 Maintainer: tomie
@@ -248,11 +248,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.loonbatch_iphoneos-arm64e.deb
-Size: 38752
-MD5sum: 7e343608d64471c0c77437c405ad5b55
-SHA1: 8d712cc0a76327604588242d9ff33a4bf160eecf
-SHA256: 99b6cee90e0ed650692cb8ad05522adbbc251ef007fc94fc7a2e4f708ee82231
-SHA512: 6cb61424c26c944f857e77ad1c86cb40cd869efadcad46ddbd89f8a11d700489750dd21b4839c4df64ecffb5ef7a34598672e4cfd0df7a1eeb885806eaccc2bb
+Size: 38920
+MD5sum: 61b427681ef3e3cf39242471980ec2dc
+SHA1: a6d380df019fc6001cdf5a503fb2e0c09680d8eb
+SHA256: 518b6512253fb7f3926f024fb16e77603007da3f44c032e0453bc91bcebfd932
+SHA512: 3260247dbd10eee1b0e0eacd7f2116173518d072eb33d34e37416a6308bc7ebe1cd24ca6e240fd78f863092a55685e3215fb8ffd3629022aaa24136727657856
 
 Package: com.tomie.termkeys
 Name: TermKeys
