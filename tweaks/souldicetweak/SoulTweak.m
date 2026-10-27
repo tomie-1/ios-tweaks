@@ -2148,10 +2148,11 @@ static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
 
-/* 分享卡的高度由宿主自己决定，这里一律不改它的 frame。
-   之前那版会按 cell 高把卡片收回去，而宿主随后又重新布局，两边来回拉锯
-   （日志里 136 ↔ 129 反复跳），进会话时就会闪一下。卡片不缩，时间行
-   的位置改由 cell 高度保证——多出来的空间在卡片下方。 */
+/* 分享卡的卡片视图会跟着 cell 高度一起长：cell 122→128 时卡片从 108
+   涨到 114，底部留白永远是 8pt，时间行（15pt）永远塞不进去——这是个闭环。
+
+   所以在第一次拿到卡片高度时就把它记住，之后一律钉死在这个原生值：
+   cell 变高腾出来的空间留在卡片下方，正好给时间行用。 */
 static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     if (!cellView) return;
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
@@ -2161,20 +2162,33 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     UIView *card = content;
     if (!card || card.bounds.size.height < 20.0 || card.bounds.size.width < 20.0) return;
 
-    /* 只记录几何，供排查用；不动卡片。 */
+    /* 卡片原生高度 = 布局给出的原生 cell 高度 - 顶部偏移 6。
+       布局对象上的原生 cellHeight 已经由 cellHeight hook 记录
+       （kSoulLayoutNativeHeightKey），它不随我们加的预留变化，
+       所以这个卡片高度是稳定的原生值。 */
+    id layout = SoulCellLayout(cellView);
+    NSNumber *layoutNative = layout
+        ? objc_getAssociatedObject(layout, kSoulLayoutNativeHeightKey) : nil;
+    CGFloat top = card.frame.origin.y;
+    CGFloat nativeH = -1.0;
+    if (layoutNative) {
+        CGFloat lh = [layoutNative doubleValue];
+        if (lh > 20.0) nativeH = lh - top;
+    }
+    if (nativeH < 20.0) return;
+
+    CGFloat current = card.bounds.size.height;
+    if (fabs(current - nativeH) < 0.5) return;
+
+    CGRect cf = card.frame;
+    cf.size.height = nativeH;
+    card.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    card.frame = cf;
     static int shrinkLog = 0;
-    if (shrinkLog < 10) {
+    if (shrinkLog < 8) {
         shrinkLog++;
-        id layout = SoulCellLayout(cellView);
-        CGSize bs = CGSizeZero;
-        SEL bsSel = NSSelectorFromString(@"bubbleSize");
-        if (layout && [layout respondsToSelector:bsSel]) {
-            @try { bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel); }
-            @catch (__unused NSException *e) {}
-        }
-        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f bubble=%.1f (not resized)",
-                cellView.bounds.size.height, card.frame.origin.y,
-                card.bounds.size.height, bs.height);
+        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f -> %.1f (pinned)",
+                cellView.bounds.size.height, top, current, nativeH);
     }
 }
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
