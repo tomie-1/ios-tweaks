@@ -2195,7 +2195,11 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
             }
         } @catch (__unused NSException *e) {}
     }
-    CGFloat maxH = cellH - top - (insetBottom >= 0.0 ? insetBottom : 8.0);
+    /* 卡片允许占用的高度上限：cell 高减去顶部偏移，再减去时间行需要的
+       15pt（2 间距 + 12 字高 + 1 余量）。insetBottom 对分享卡是 0，
+       拿它当依据等于把卡片顶到底边，时间就会压在卡片上。 */
+    const CGFloat footerNeed = 2.0 + 12.0 + 1.0;
+    CGFloat maxH = cellH - top - footerNeed;
     if (maxH < 20.0) maxH = 20.0;
     CGFloat targetH = maxH;
     if (nativeH > 20.0 && nativeH < targetH) targetH = nativeH;
@@ -3869,20 +3873,20 @@ static BOOL SoulLayoutNeedsFooterRow(id layout) {
     return NO;
 }
 
-/* 时间行只有 12pt 高。消息布局本身通常会在气泡下方留出底部内边距，
-   能塞进这段留白就不用额外加行高；只有留白不足时才补差额。
-   否则每条消息都多 14pt，聊天看起来会明显变松，分享卡也会被一起撑大。
+/* 时间行 12pt 高，加 2pt 间距、1pt 余量，一共需要 15pt。
+   消息布局通常在气泡下方留有底部内边距：能塞进去就不加高（行高完全不变），
+   塞不进就只补差额。关键是两种情况下「气泡底边到行底的距离」都等于 15pt，
+   这样每条消息的视觉间距一致，不会出现有的紧有的松。
 
    两条取数路径：
-   1. bubbleSize 有效且与 cellInset 自洽 —— 直接用 ins.bottom，最准；
-   2. 否则（分享卡这类布局不给 bubbleSize）—— 用上一次实际排版量到的
-      内容底边，remaining = baseH - contentBottom。两样都拿不到时不加高：
-      宁可让时间叠在原生留白里，也不要把整行撑开。 */
+   1. bubbleSize 有效且与 cellInset 自洽 —— 用 ins.bottom，最准；
+   2. 否则（分享卡这类布局不给 bubbleSize）—— 用实测的内容底边反推剩余。 */
 static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     if (!layout || baseH < 20.0) return 0.0;
     const CGFloat needForRow = 2.0 + 12.0 + 1.0;
     SEL insSel = NSSelectorFromString(@"cellInset");
     SEL bsSel = NSSelectorFromString(@"bubbleSize");
+    CGFloat remaining = -1.0;
     if ([layout respondsToSelector:insSel] && [layout respondsToSelector:bsSel]) {
         @try {
             UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
@@ -3890,26 +3894,31 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
             if (isfinite(ins.top) && isfinite(ins.bottom) &&
                 ins.bottom >= 0.0 && ins.bottom < baseH && bs.height > 1.0) {
                 CGFloat expect = ins.top + bs.height + ins.bottom;
-                if (fabs(expect - baseH) <= 3.0) {          /* 布局自洽才采信 */
-                    CGFloat need = needForRow - ins.bottom;
-                    return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
-                }
+                if (fabs(expect - baseH) <= 3.0) remaining = ins.bottom;  /* 自洽才采信 */
             }
         } @catch (__unused NSException *e) {}
     }
-    NSNumber *measured = objc_getAssociatedObject(layout, kSoulLayoutContentBottomKey);
-    if (measured) {
-        CGFloat remaining = baseH - [measured doubleValue];
-        if (remaining >= 0.0 && remaining < baseH) {
-            CGFloat need = needForRow - remaining;
-            return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
+    if (remaining < 0.0) {
+        NSNumber *measured = objc_getAssociatedObject(layout, kSoulLayoutContentBottomKey);
+        if (measured) {
+            CGFloat r = baseH - [measured doubleValue];
+            if (r >= 0.0 && r < baseH) remaining = r;
         }
     }
-    return 0.0;
+    if (remaining < 0.0) {
+        /* 还没有任何实测数据：先按整行需求预留，下一轮排版拿到真实
+           内容底边后会收敛到差额。 */
+        return kSoulMsgTimeReserve;
+    }
+    CGFloat need = needForRow - remaining;
+    return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
 static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
+/* 上一次真正加进去的预留行高。setCellHeight: 的回声判断必须用它而不是
+   固定常量：留白够时预留是 0，不够时可能是 1~14 之间的任意值。 */
+static const void *kSoulLayoutReserveKey = &kSoulLayoutReserveKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
     double h;
@@ -3921,18 +3930,26 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     }
     /* 只有真的要画时间行/撤回角标的消息才加预留行；开关全关时行高保持原生，
        防撤回开着也不会把每条普通消息都撑高。 */
-    if (!SoulLayoutNeedsFooterRow(self)) return h;
+    CGFloat reserve = 0.0;
+    if (SoulLayoutNeedsFooterRow(self)) reserve = SoulFooterReserveForLayout(self, h);
     /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
-    return h + SoulFooterReserveForLayout(self, h);
+    objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return h + reserve;
 }
 
 static void (*gOrigSetCellHeight)(id, SEL, double);
 static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
     NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
-    /* 宿主重新布局时会写入新高度。若写回的正是“基础高度 + 时间行”，说明
-       它读到了我们 hook 后的值，不能把它当成新的基础高度再累加一次。 */
-    double inflated = cached ? [cached doubleValue] + kSoulMsgTimeReserve : -1.0;
-    BOOL echoOfInflated = cached && fabs(h - inflated) <= 0.6;
+    NSNumber *reserveNum = objc_getAssociatedObject(self, kSoulLayoutReserveKey);
+    /* 宿主重新布局时会写入新高度。若写回的正是「基础高度 + 上一次的预留」，
+       说明它读到了我们 hook 后的值，不能当成新的基础高度再累加一次。
+       这里必须用实际预留值比较，用固定常量会在留白够（预留 0）时失效。 */
+    BOOL echoOfInflated = NO;
+    if (cached && reserveNum) {
+        double base = [cached doubleValue] + [reserveNum doubleValue];
+        echoOfInflated = fabs(h - base) <= 0.6;
+    }
     if (!echoOfInflated) {
         objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
