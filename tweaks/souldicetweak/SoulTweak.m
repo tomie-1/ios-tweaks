@@ -3520,6 +3520,21 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
             haveContent = YES;
         }
     }
+    /* 分享卡用 bottomView（卡片底部那行「个人主页」）作为锚点：
+       扫描到的内容底边常停在卡片容器外框上，会压住这条小字。 */
+    NSString *cellCNTop = NSStringFromClass([view class]).lowercaseString;
+    if ([cellCNTop rangeOfString:@"shareusercard"].location != NSNotFound) {
+        UIView *bv = SoulViewRespondingTo(view, @"bottomView", view);
+        if (bv) {
+            CGRect br = [bv convertRect:bv.bounds toView:view];
+            if (SoulUsableContentRect(br, view) && CGRectGetMaxY(br) >= contentBottom) {
+                contentBottom = CGRectGetMaxY(br);
+                contentLeft = CGRectGetMinX(br);
+                contentRight = CGRectGetMaxX(br);
+                haveContent = YES;
+            }
+        }
+    }
     if (!haveContent) {
         /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。
            两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
