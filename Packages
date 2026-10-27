@@ -8,11 +8,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.soulfx.souldicetweak_iphoneos-arm.deb
-Size: 51528
-MD5sum: a32bcb553e05daa0dbb896045cc1b7d5
-SHA1: a05d870da5fbfc689b252ce03495c04e592b84c0
-SHA256: a8289996987b4d171e7a315ee00545d3b0e9d51fc98971dadaddee758fda5287
-SHA512: 19f1e5b8bc7726b6bb70740c0d4753c9411a7266f965905d2dd15c9a95cf2a8d16285c47a1853a17fd11d0270bf690daae61f9567c92f4b47d5957d1600d836a
+Size: 51504
+MD5sum: 071f930603f47be864e45812ebdb82b8
+SHA1: c8b3f1bde634f6088b2ce158da030ee931c7b466
+SHA256: e77fe8e35985b61090b23363f5cd711f5c69a334ab4d70f4e75cd2c1987179f3
+SHA512: 9d8c4a4a46b326eed4375a5a252dec6f9448fd56a88d91ee9a495899d993e592fd958e119367615fc98676af8cbf9c21277c122d33f0db128a9d7975a12641dc
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
@@ -120,11 +120,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.soulfx.souldicetweak_iphoneos-arm64.deb
-Size: 51556
-MD5sum: f88a439d4e54278bb22c7c741c56164f
-SHA1: 2a4d24893c94ffa8604dd2547d300ea364c043ce
-SHA256: 0173ca54223960d9a44be3ad790534c7061b5a22370c555ae00f9db662ff3ed7
-SHA512: 5f50cdfdeb35fca42de2d01827f40baa215306fb6bd9cc274ba150d36aa0ea5db7368c438460d16bb4cf59c5ed46c534e42bd84d2453ff957f74da99cb106720
+Size: 51484
+MD5sum: 67456a98d32bf1bbc32b1f775f6b0a45
+SHA1: 02085eb4572752d85d438cce50f5b5f89f841907
+SHA256: 0c349dc2a1d34f05ef1bb67aaaab845b65a53e68c731281b28a1c4b12efbdd17
+SHA512: 1bae1b5098411ad6d69ae81b67938b03e0e037235c0920cb8bcee0acbc2d6f2542e3f66570e77ef57cc3de419658f5c8105316eb6555dd0c06a24a01d44a5d24
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
@@ -232,11 +232,11 @@ Author: soulfx
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.soulfx.souldicetweak_iphoneos-arm64e.deb
-Size: 51524
-MD5sum: 75cfb85db65b4cd8fd6c09ac55a59eea
-SHA1: 357dbb861ed1efbc00c62d0dcf01a92e31a03527
-SHA256: a463d1398775f2f3ee3c8a7222724f143eb4592e8f9c3cbff0a1b9ac1fc4f23a
-SHA512: 36cbc721f155ca1fecfcf0beac7374825a235fdefc243069628f103872ed7172b9a962cb3b4150dff5e34102c8791975e7d01a49c2989f6863a714e770af55f8
+Size: 51500
+MD5sum: 8270f79dd29c5dd15e4fc9921007e7e8
+SHA1: 1c8bfed3c845bff663cbf3c98db1742d6d9314eb
+SHA256: 262e9ad92020c4c54de5a7fa5a3ef279060ce0f2103c7d385c3d5a9537a3295a
+SHA512: 4d6a6a52cfe2d3b5559d579dc004c04add4998631fd32f8366292805a6c96934820d439d0b7ce013ef7a70d32fd10c64a20fe5bd0ec7669e923e1f0c41015d54
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
