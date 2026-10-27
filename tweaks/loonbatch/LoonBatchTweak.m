@@ -512,6 +512,28 @@ static BOOL repairPluginSection(NSString *path, NSSet *removedURLs, NSInteger *c
 
 static NSUInteger gPluginOrderGeneration;
 
+// 把旧行里的 enabled=... 改写为内存中的状态。
+//
+// 重排时如果直接搬旧文件的整行，Loon 刚由 saveConfigPlayload 写下的启用状态
+// 就会被旧值覆盖——表现就是禁用后重启又变回启用。所以除插件自带参数外，
+// enabled 一律以内存模型为准；旧行没有这个参数时补上。
+static NSString *lineWithEnabled(NSString *line, BOOL enabled) {
+    if (!line.length) return line;
+    NSString *want = enabled ? @"enabled=true" : @"enabled=false";
+    NSMutableArray<NSString *> *parts = [[line componentsSeparatedByString:@","] mutableCopy];
+    BOOL replaced = NO;
+    for (NSUInteger i = 0; i < parts.count; i++) {
+        NSString *item = trimmed(parts[i]);
+        if (![item.lowercaseString hasPrefix:@"enabled="]) continue;
+        // 保留原来的前导空白，只替换参数本身。
+        NSString *lead = [parts[i] substringToIndex:parts[i].length - item.length];
+        parts[i] = [lead stringByAppendingString:want];
+        replaced = YES;
+    }
+    if (!replaced) [parts addObject:want];
+    return [parts componentsJoinedByString:@","];
+}
+
 // saveConfigPlayload 不保证按内存数组写回插件顺序；按 config.plugins 重排 [Plugin] 段。
 static BOOL reorderPluginSection(NSString *path, NSArray *plugins) {
     if (!path.length) return NO;
@@ -554,7 +576,7 @@ static BOOL reorderPluginSection(NSString *path, NSArray *plugins) {
         }
         if (!line.length && url.length)
             line = [NSString stringWithFormat:@"%@, enabled=%@", url, itemEnabled(p) ? @"true" : @"false"];
-        if (line.length) [body addObject:line];
+        if (line.length) [body addObject:lineWithEnabled(line, itemEnabled(p))];
         if (url.length) [orderedURLs addObject:url];
     }
     for (NSString *url in byURL) {
