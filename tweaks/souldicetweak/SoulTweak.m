@@ -3952,12 +3952,20 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
             SEL ucSel = NSSelectorFromString(@"usercardModel");
             @try { if ([self respondsToSelector:ucSel]) uc = ((id (*)(id, SEL))objc_msgSend)(self, ucSel); }
             @catch (__unused NSException *e) {}
-            CGFloat cardH = -1.0;
-            if (uc && [uc respondsToSelector:NSSelectorFromString(@"usercardHeight")])
-                cardH = ((double (*)(id, SEL))objc_msgSend)(uc, NSSelectorFromString(@"usercardHeight"));
-            SoulLog(@"msg-time: hgt cls=%@ base=%.1f reserve=%.1f -> %.1f usercard=%@ cardH=%.1f",
-                    cls, h, reserve, h + reserve,
-                    uc ? NSStringFromClass([uc class]) : @"nil", cardH);
+            NSMutableString *probe = [NSMutableString string];
+            NSArray *probes = @[@"usercardHeight", @"usercardNoBottomCapHeight",
+                                @"shrinkCellHeight", @"newUICardHeight", @"cellHeight"];
+            for (NSString *pn in probes) {
+                CGFloat v = -1.0;
+                @try {
+                    SEL ps = NSSelectorFromString(pn);
+                    if (uc && [uc respondsToSelector:ps])
+                        v = ((double (*)(id, SEL))objc_msgSend)(uc, ps);
+                } @catch (__unused NSException *e) {}
+                [probe appendFormat:@" %@=%.1f", pn, v];
+            }
+            SoulLog(@"msg-time: hgt cls=%@ base=%.1f reserve=%.1f uc=%@%@",
+                    cls, h, reserve, uc ? NSStringFromClass([uc class]) : @"nil", probe);
         }
     }
     return h + reserve;
@@ -3978,6 +3986,18 @@ static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
     if (!echoOfInflated) {
         objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    NSString *cls2 = NSStringFromClass([self class]);
+    if ([cls2 containsString:@"Message"]) {
+        static int setLog = 0;
+        if (setLog < 12) {
+            setLog++;
+            SoulLog(@"msg-time: setCellH cls=%@ wrote=%.1f cached=%@ reserve=%@ echo=%d",
+                    cls2, h,
+                    cached ? [NSString stringWithFormat:@"%.1f", [cached doubleValue]] : @"nil",
+                    reserveNum ? [NSString stringWithFormat:@"%.1f", [reserveNum doubleValue]] : @"nil",
+                    echoOfInflated);
+        }
     }
     if (gOrigSetCellHeight) gOrigSetCellHeight(self, _cmd, h);
 }
