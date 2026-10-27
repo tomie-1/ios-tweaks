@@ -1838,6 +1838,8 @@ static const CGFloat kSoulMsgTimeReserve = 14.0;
 /* 上一次实际排版量到的内容底边（相对 cell 顶部）。分享卡这类布局不给
    bubbleSize，靠它反推气泡下方还剩多少空间，决定要不要真的加高。 */
 static const void *kSoulLayoutContentBottomKey = &kSoulLayoutContentBottomKey;
+/* 布局对象第一次给出的原生 cell 高度，由 cellHeight hook 写入。 */
+static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulScheduleMsgTimeRetry(UIView *view);
 static void SoulApplyMsgTime(id cell, id layout);
@@ -3944,7 +3946,6 @@ static const void *kSoulLayoutReserveKey = &kSoulLayoutReserveKey;
    （日志里 114 → 我们给 128 → 宿主写回 136 → 下一轮 150）。
    所以不能每次都在「当前值」上做加法，否则宿主每调整一次就再涨一次。
    这里记录第一次拿到的原生高度，之后一律以它为基准。 */
-static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
     if (!native) {
