@@ -1838,8 +1838,6 @@ static const CGFloat kSoulMsgTimeReserve = 14.0;
 /* 上一次实际排版量到的内容底边（相对 cell 顶部）。分享卡这类布局不给
    bubbleSize，靠它反推气泡下方还剩多少空间，决定要不要真的加高。 */
 static const void *kSoulLayoutContentBottomKey = &kSoulLayoutContentBottomKey;
-/* 布局对象第一次给出的原生 cell 高度，由 cellHeight hook 写入。 */
-static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulScheduleMsgTimeRetry(UIView *view);
 static void SoulApplyMsgTime(id cell, id layout);
@@ -2150,31 +2148,33 @@ static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
 
-/* 分享卡的卡片视图会跟着 cell 高度一起长，所以不能靠压卡片来腾位置
-   ——那会把卡片本身压变形。
-
-   正确关系（原生实测）：
-       cell 122 = 顶部 6 + 卡片 108 + 底部留白 8
-   其中 cellHeight 返回 114（= 6 + 108），底部 8 由 tableview 另算。
-   加时间行后只需要让 cellHeight 返回 114 + 15 = 129，卡片仍然按 108
-   渲染在顶部，多出来的 15pt 自然落在卡片下方。
-
-   这里只负责在 cell 太高时把它收回原样，不做任何压缩。 */
+/* 分享卡的高度由宿主自己决定，这里一律不改它的 frame。
+   之前那版会按 cell 高把卡片收回去，而宿主随后又重新布局，两边来回拉锯
+   （日志里 136 ↔ 129 反复跳），进会话时就会闪一下。卡片不缩，时间行
+   的位置改由 cell 高度保证——多出来的空间在卡片下方。 */
 static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     if (!cellView) return;
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
     if ([cn rangeOfString:@"shareusercard"].location == NSNotFound) return;
     if (!SoulDef(kFxMsgTime) && !SoulDef(kFxAntiRecall)) return;
 
-    /* 卡片高度交给宿主，我们不碰。只记录一次用于排查。 */
+    UIView *card = content;
+    if (!card || card.bounds.size.height < 20.0 || card.bounds.size.width < 20.0) return;
+
+    /* 只记录几何，供排查用；不动卡片。 */
     static int shrinkLog = 0;
-    if (shrinkLog < 6) {
+    if (shrinkLog < 10) {
         shrinkLog++;
-        UIView *card = content;
-        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f (untouched)",
-                cellView.bounds.size.height,
-                card ? card.frame.origin.y : -1.0,
-                card ? card.bounds.size.height : -1.0);
+        id layout = SoulCellLayout(cellView);
+        CGSize bs = CGSizeZero;
+        SEL bsSel = NSSelectorFromString(@"bubbleSize");
+        if (layout && [layout respondsToSelector:bsSel]) {
+            @try { bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel); }
+            @catch (__unused NSException *e) {}
+        }
+        SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f bubble=%.1f (not resized)",
+                cellView.bounds.size.height, card.frame.origin.y,
+                card.bounds.size.height, bs.height);
     }
 }
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
@@ -3523,21 +3523,9 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
             haveContent = YES;
         }
     }
-    /* 分享卡的卡片被我们钉过高度，扫描结果可能是收缩前的：以卡片
-       实际 frame 为准，否则时间会贴回卡片下沿。 */
-    NSString *cellCN0 = NSStringFromClass([view class]).lowercaseString;
-    if ([cellCN0 rangeOfString:@"shareusercard"].location != NSNotFound && content) {
-        CGRect cr = [content convertRect:content.bounds toView:view];
-        if (SoulUsableContentRect(cr, view)) {
-            contentBottom = CGRectGetMaxY(cr);
-            contentLeft = CGRectGetMinX(cr);
-            contentRight = CGRectGetMaxX(cr);
-            haveContent = YES;
-        }
-    }
-
     if (!haveContent) {
-        /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。           两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
+        /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。
+           两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
            走，否则 alignTrailing 会退化成 (width - totalW) 把时间甩到最右边。 */
         BOOL mineFallback = showTime && time.tag == 1;
         if (showBadge && badge.frame.size.width > 0.0) {
@@ -3882,8 +3870,9 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     SEL bsSel = NSSelectorFromString(@"bubbleSize");
     CGFloat remaining = -1.0;
 
-    /* 1. 分享卡：layout 是 SOChatMessageModel 且 usercardModel 有值时才走
-       细算；usercardModel 为 nil 的情况（实测常见）由调用方按类名兜底。 */
+    /* 1. 分享卡：cellInset.top + 卡片高 = 内容底边。
+       分享卡的 bubbleSize 恒为 0，但 cellInset.top 和 usercardHeight
+       都是宿主真实使用的值。 */
     SEL ucSel = NSSelectorFromString(@"usercardModel");
     if ([layout respondsToSelector:ucSel]) {
         @try {
@@ -3891,11 +3880,14 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
             SEL chSel = NSSelectorFromString(@"usercardHeight");
             if (uc && [uc respondsToSelector:chSel]) {
                 CGFloat cardH = ((double (*)(id, SEL))objc_msgSend)(uc, chSel);
+                CGFloat cardTop = 6.0;
+                if ([layout respondsToSelector:insSel]) {
+                    UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
+                    if (isfinite(ins.top) && ins.top >= 0.0 && ins.top < baseH) cardTop = ins.top;
+                }
                 if (isfinite(cardH) && cardH > 20.0 && cardH < baseH) {
-                    /* 卡片高度由宿主决定、我们不压它，底部原生留白也不够
-                       放时间行。固定要求完整一行的高度，cell 变成
-                       「原生 + 15」，多出的空间落在卡片下方。 */
-                    return needForRow;
+                    CGFloat r = baseH - (cardTop + cardH);
+                    if (r >= 0.0 && r < baseH) remaining = r;
                 }
             }
         } @catch (__unused NSException *e) {}
@@ -3930,25 +3922,6 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
     return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
 }
 
-/* 分享卡判定。layout 上没有可靠的类型标量：usercardModel 实测恒为 nil、
-   bubbleSize 恒为 0。真正稳定的信号是「bubbleSize 为 0 且这个 cell 很高」
-   —— 普通气泡消息一定给出非零 bubbleSize，而分享卡/卡片类消息不给。 */
-static BOOL SoulLayoutIsShareCard(id layout) {
-    if (!layout) return NO;
-    SEL bsSel = NSSelectorFromString(@"bubbleSize");
-    if (![layout respondsToSelector:bsSel]) return NO;
-    @try {
-        CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
-        if (bs.height > 1.0) return NO;
-    } @catch (__unused NSException *e) { return NO; }
-    SEL chSel = NSSelectorFromString(@"cellHeight");
-    if (![layout respondsToSelector:chSel]) return NO;
-    @try {
-        double h = ((double (*)(id, SEL))objc_msgSend)(layout, chSel);
-        return h > 100.0;
-    } @catch (__unused NSException *e) { return NO; }
-}
-
 static double (*gOrigMsgCellHeight)(id, SEL);
 /* 上一次真正加进去的预留行高。setCellHeight: 的回声判断必须用它而不是
    固定常量：留白够时预留是 0，不够时可能是 1~14 之间的任意值。 */
@@ -3957,6 +3930,7 @@ static const void *kSoulLayoutReserveKey = &kSoulLayoutReserveKey;
    （日志里 114 → 我们给 128 → 宿主写回 136 → 下一轮 150）。
    所以不能每次都在「当前值」上做加法，否则宿主每调整一次就再涨一次。
    这里记录第一次拿到的原生高度，之后一律以它为基准。 */
+static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
     NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
     if (!native) {
@@ -3970,11 +3944,7 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
 
     /* 只有真的要画时间行/撤回角标的消息才预留空间。 */
     CGFloat reserve = 0.0;
-    if (SoulLayoutNeedsFooterRow(self)) {
-        /* 分享卡走专用路径：usercardModel 实测常为 nil，bubbleSize 也是 0，
-           通用公式算不出可信留白，直接给完整一行。 */
-        if (SoulLayoutIsShareCard(self)) reserve = 2.0 + 12.0 + 1.0;
-        else reserve = SoulFooterReserveForLayout(self, h);    }
+    if (SoulLayoutNeedsFooterRow(self)) reserve = SoulFooterReserveForLayout(self, h);
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
