@@ -515,8 +515,11 @@ static NSUInteger gPluginOrderGeneration;
 // 把旧行里的 enabled=... 改写为内存中的状态。
 //
 // 重排时如果直接搬旧文件的整行，Loon 刚由 saveConfigPlayload 写下的启用状态
-// 就会被旧值覆盖——表现就是禁用后重启又变回启用。所以除插件自带参数外，
-// enabled 一律以内存模型为准；旧行没有这个参数时补上。
+// 就会被旧值覆盖——表现就是禁用后重启又变回启用。所以 enabled 一律以内存
+// 模型为准：已有该参数就换掉它的值，没有就补在末尾。
+//
+// 位置沿用第一个参数（URL）不变，因此按逗号切分即可：配置里的参数值
+// （tag、img-url、policy）都不含逗号。
 static NSString *lineWithEnabled(NSString *line, BOOL enabled) {
     if (!line.length) return line;
     NSString *want = enabled ? @"enabled=true" : @"enabled=false";
@@ -525,12 +528,23 @@ static NSString *lineWithEnabled(NSString *line, BOOL enabled) {
     for (NSUInteger i = 0; i < parts.count; i++) {
         NSString *item = trimmed(parts[i]);
         if (![item.lowercaseString hasPrefix:@"enabled="]) continue;
+        if (replaced) {
+            // 同一行里重复写了两遍 enabled：只保留第一处。
+            [parts removeObjectAtIndex:i];
+            i--;
+            continue;
+        }
         // 保留原来的前导空白，只替换参数本身。
         NSString *lead = [parts[i] substringToIndex:parts[i].length - item.length];
         parts[i] = [lead stringByAppendingString:want];
         replaced = YES;
     }
-    if (!replaced) [parts addObject:want];
+    if (!replaced) {
+        // 行尾若有多余逗号，直接接上会得到 ",,"。
+        while (parts.count && !trimmed(parts.lastObject).length) [parts removeLastObject];
+        // 与文件里其余行的写法一致：参数之间用 ", " 分隔。
+        [parts addObject:[@" " stringByAppendingString:want]];
+    }
     return [parts componentsJoinedByString:@","];
 }
 
@@ -1591,12 +1605,17 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     }
     if (self.mode == LNBLModePlugins) {
         NSString *path = configFilePath(config);
-        NSArray *ordered = [config.plugins copy];
         NSUInteger gen = ++gPluginOrderGeneration;
-        reorderPluginSection(path, ordered);
+        reorderPluginSection(path, [config.plugins copy]);
+        // Loon 会在这一小段时间里自己再写一次盘。稍后按当时的模型重排一次，
+        // 覆盖它写回的旧顺序。这里必须重新取 config.plugins：用刚捕获的快照
+        // 会把期间发生的启用/禁用一并回退。
+        __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            if (gen == gPluginOrderGeneration) reorderPluginSection(path, ordered);
+            if (gen != gPluginOrderGeneration) return;
+            LNDCConfigModel *latest = configForHost(weakSelf.host) ?: config;
+            reorderPluginSection(path, [latest.plugins copy]);
         });
     }
     UIViewController *vc = self.host;
