@@ -384,11 +384,18 @@ static void TKSendNewline(void) {
 
 #pragma mark - 按键外观
 
-static UIImage *TKShiftImage(void) {
+static UIImage *TKSymbolImage(NSString *name) {
     UIImageConfiguration *configuration =
-        [UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightMedium];
-    UIImage *image = [UIImage systemImageNamed:@"shift" withConfiguration:configuration];
-    return image ?: [UIImage systemImageNamed:@"shift.fill" withConfiguration:configuration];
+        [UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold];
+    return [UIImage systemImageNamed:name withConfiguration:configuration];
+}
+
+// 五种按键的字形大小统一按「视觉等重」调过：SF Symbol 的笔画比同号文字细，
+// 所以图标 15pt、文字 12pt 看上去才一样大。方向键原先用文字字符 ←↑↓→，
+// 字形本身比 SF Symbol 细，圈里就显得小一号；改用同一套符号就一致了。
+static UIImage *TKShiftImage(void) {
+    UIImage *image = TKSymbolImage(@"shift");
+    return image ?: TKSymbolImage(@"shift.fill");
 }
 
 static UIFont *TKKeyFont(void) {
@@ -396,7 +403,7 @@ static UIFont *TKKeyFont(void) {
 }
 
 static UIFont *TKArrowFont(void) {
-    return [UIFont monospacedSystemFontOfSize:16.0 weight:UIFontWeightSemibold];
+    return [UIFont monospacedSystemFontOfSize:15.0 weight:UIFontWeightSemibold];
 }
 
 @interface TKKeyButton : UIButton
@@ -623,11 +630,19 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
                                             forAxis:UILayoutConstraintAxisHorizontal];
     [topStack addArrangedSubview:spacer];
 
+    static NSString *const arrowSymbols[] = {@"arrow.left", @"arrow.up", @"arrow.down", @"arrow.right"};
     static NSString *const arrowTitles[] = {@"←", @"↑", @"↓", @"→"};
     static const unichar arrowFinals[] = {'D', 'A', 'B', 'C'};
     for (NSInteger index = 0; index < 4; index++) {
         unichar final = arrowFinals[index];
-        TKKeyButton *arrow = TKMakeButton(arrowTitles[index], 38.0, TKArrowFont());
+        TKKeyButton *arrow = TKMakeButton(@"", 38.0, TKArrowFont());
+        UIImage *symbol = TKSymbolImage(arrowSymbols[index]);
+        if (symbol) {
+            [arrow setImage:symbol forState:UIControlStateNormal];
+        } else {
+            [arrow setTitle:arrowTitles[index] forState:UIControlStateNormal];
+        }
+        arrow.accessibilityLabel = arrowTitles[index];
         arrow.onTap = ^{
             TKSendArrow(final);
         };
@@ -857,9 +872,17 @@ static BOOL TKInstallIGhostHooks(void) {
     return self;
 }
 
-// 硬件键盘只弹出附件栏时高度不够，不该给终端留下一条空白。
-- (BOOL)keyboardIsOnScreen:(CGRect)frame {
-    return frame.size.height > 100.0;
+// 键盘真在屏幕上才显示键栏、才给终端留位置。
+//
+// 收起键盘时 UIKit 报的 frame 高度并不变，只是整块被挪到屏幕下方——光看
+// 高度会以为键盘还在，键栏就留在屏幕上了。所以要门控「落在窗口内的高度」：
+// 硬件键盘只弹附件栏时它不到 100pt，不该留空白；收起时它 ≤ 0，键栏也该走。
+- (BOOL)keyboardIsOnScreenInWindow:(UIWindow *)window frame:(CGRect)frame {
+    if (CGRectIsEmpty(frame)) {
+        return NO;
+    }
+    CGRect inWindow = [window convertRect:frame fromWindow:nil];
+    return CGRectIntersection(inWindow, window.bounds).size.height > 100.0;
 }
 
 // 让终端腾出键栏高度。同一个值只设一次，不在 layout 回调里反复改 frame，
@@ -890,7 +913,10 @@ static BOOL TKInstallIGhostHooks(void) {
 
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = TKHostWindow();
-        if (!window || CGRectIsEmpty(endFrame)) {
+        if (!window) {
+            return;
+        }
+        if (CGRectIsEmpty(endFrame)) {
             return;
         }
         if (!self.bar || self.hostWindow != window) {
@@ -903,7 +929,7 @@ static BOOL TKInstallIGhostHooks(void) {
         // 键盘 frame 已含 App 自带附件栏，键栏就叠在它上面。
         CGRect keyboardInWindow = [window convertRect:endFrame fromWindow:nil];
         CGFloat barY = CGRectGetMinY(keyboardInWindow) - TKBarHeight;
-        BOOL visible = [self keyboardIsOnScreen:endFrame];
+        BOOL visible = [self keyboardIsOnScreenInWindow:window frame:endFrame];
         self.bar.hidden = !visible;
         [UIView animateWithDuration:(duration > 0 ? duration : 0.22)
                               delay:0
