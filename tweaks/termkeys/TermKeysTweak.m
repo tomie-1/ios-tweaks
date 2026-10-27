@@ -384,30 +384,33 @@ static void TKSendNewline(void) {
 
 #pragma mark - 按键外观
 
-// 所有按键共用的尺寸规则。按钮一律等宽等高，字形一律等点高——这是从实测
-// 数据定的，不是凭感觉：44/42/38/40 四种宽度会让整排的圆圈起点错位，
-// 字号相同也不等于墨迹同大。
+// 所有按键共用的尺寸规则。按钮一律等宽等高，字形一律落在同一个正方形里。
+// 这些数是从实测日志定的，不是凭感觉：44/42/38/40 四种按钮宽度会让整排
+// 圆圈起点错位；字号相同也不等于墨迹同大。
 static const CGFloat TKKeyWidth = 40.0;
-static const CGFloat TKGlyphHeight = 16.0;
+static const CGFloat TKGlyphSize = 15.0;
 
-// SF Symbol 的每个符号有自己的边界框，同一个字号下墨迹大小差很多：实测
-// `shift` 是 19.0×16.7，`arrow.left` 只有 18.3×14.3，而 `arrow.up` 是
-// 15.7×16.7。按字号配必然大小不一，改成按**固定点高**渲染，再让宽度按
-// 各自比例走——所有图标就同高了，横向箭头只是更宽，这也是它本来的形状。
+// SF Symbol 每个符号自带边界框，同一字号下墨迹差很多——实测 `arrow.up`
+// 是 15.0×16.0，`shift` 19.0×16.0，`arrow.left` 到 20.3×16.0。只统一高度
+// 时横箭头比纵向宽 35%，在圆圈里就是「大一圈」。
+//
+// 所以按**等比缩放塞进 TKGlyphSize 的正方形**：取长边缩放到该尺寸，短边
+// 按原比例。横箭头仍比纵向宽一点点（那是箭头本来的形状），但整块墨迹的
+// 外接尺寸一致，看上去就是同一个大小。
 static UIImage *TKSymbolImage(NSString *name) {
     UIImageConfiguration *configuration = [UIImageSymbolConfiguration
-        configurationWithPointSize:TKGlyphHeight
+        configurationWithPointSize:TKGlyphSize * 1.4
                             weight:UIImageSymbolWeightSemibold];
     UIImage *image = [UIImage systemImageNamed:name withConfiguration:configuration];
     if (!image) {
         return nil;
     }
-    // 统一缩放到同一高度；宽度按原比例，不做裁剪。
-    CGFloat scale = TKGlyphHeight / MAX(image.size.height, 1.0);
-    if (fabs(scale - 1.0) < 0.01) {
+    CGSize source = image.size;
+    if (source.width <= 0 || source.height <= 0) {
         return image;
     }
-    CGSize target = CGSizeMake(image.size.width * scale, TKGlyphHeight);
+    CGFloat scale = TKGlyphSize / MAX(source.width, source.height);
+    CGSize target = CGSizeMake(source.width * scale, source.height * scale);
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat];
     format.opaque = NO;
     format.scale = 0;
