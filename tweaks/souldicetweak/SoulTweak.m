@@ -3923,24 +3923,28 @@ static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
 }
 
 static double (*gOrigMsgCellHeight)(id, SEL);
-static const void *kSoulLayoutBaseHeightKey = &kSoulLayoutBaseHeightKey;
 /* 上一次真正加进去的预留行高。setCellHeight: 的回声判断必须用它而不是
    固定常量：留白够时预留是 0，不够时可能是 1~14 之间的任意值。 */
 static const void *kSoulLayoutReserveKey = &kSoulLayoutReserveKey;
+/* 宿主实测告诉我们：它在收到 cellHeight 之后会自己二次调整
+   （日志里 114 → 我们给 128 → 宿主写回 136 → 下一轮 150）。
+   所以不能每次都在「当前值」上做加法，否则宿主每调整一次就再涨一次。
+   这里记录第一次拿到的原生高度，之后一律以它为基准。 */
+static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
 static double SoulHookMsgCellHeight(id self, SEL _cmd) {
-    NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
-    double h;
-    if (cached) {
-        h = [cached doubleValue];
-    } else {
-        h = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
-        objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
+    if (!native) {
+        double raw = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
+        native = @(raw);
+        objc_setAssociatedObject(self, kSoulLayoutNativeHeightKey, native,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    /* 只有真的要画时间行/撤回角标的消息才加预留行；开关全关时行高保持原生，
-       防撤回开着也不会把每条普通消息都撑高。 */
+    double h = [native doubleValue];
+    if (h < 20.0) return h;
+
+    /* 只有真的要画时间行/撤回角标的消息才预留空间。 */
     CGFloat reserve = 0.0;
     if (SoulLayoutNeedsFooterRow(self)) reserve = SoulFooterReserveForLayout(self, h);
-    /* cellHeight 会被多次读取，不能每次都在上一次结果上再加预留行。 */
     objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSString *cls = NSStringFromClass([self class]);
@@ -3973,18 +3977,12 @@ static double SoulHookMsgCellHeight(id self, SEL _cmd) {
 
 static void (*gOrigSetCellHeight)(id, SEL, double);
 static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
-    NSNumber *cached = objc_getAssociatedObject(self, kSoulLayoutBaseHeightKey);
-    NSNumber *reserveNum = objc_getAssociatedObject(self, kSoulLayoutReserveKey);
-    /* 宿主重新布局时会写入新高度。若写回的正是「基础高度 + 上一次的预留」，
-       说明它读到了我们 hook 后的值，不能当成新的基础高度再累加一次。
-       这里必须用实际预留值比较，用固定常量会在留白够（预留 0）时失效。 */
-    BOOL echoOfInflated = NO;
-    if (cached && reserveNum) {
-        double base = [cached doubleValue] + [reserveNum doubleValue];
-        echoOfInflated = fabs(h - base) <= 0.6;
-    }
-    if (!echoOfInflated) {
-        objc_setAssociatedObject(self, kSoulLayoutBaseHeightKey, @(h),
+    /* 宿主会写回它自己二次调整后的高度（日志里 114 → 136）。这类写回值
+       不能再当成新的原生基线，否则每轮都会在更大的值上再加预留。
+       只在还没有原生基线时才采信一次——那时拿到的是首次布局的真实值。 */
+    NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
+    if (!native && h > 20.0) {
+        objc_setAssociatedObject(self, kSoulLayoutNativeHeightKey, @(h),
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     NSString *cls2 = NSStringFromClass([self class]);
@@ -3992,11 +3990,11 @@ static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
         static int setLog = 0;
         if (setLog < 12) {
             setLog++;
-            SoulLog(@"msg-time: setCellH cls=%@ wrote=%.1f cached=%@ reserve=%@ echo=%d",
+            NSNumber *reserveNum = objc_getAssociatedObject(self, kSoulLayoutReserveKey);
+            SoulLog(@"msg-time: setCellH cls=%@ wrote=%.1f native=%@ reserve=%@",
                     cls2, h,
-                    cached ? [NSString stringWithFormat:@"%.1f", [cached doubleValue]] : @"nil",
-                    reserveNum ? [NSString stringWithFormat:@"%.1f", [reserveNum doubleValue]] : @"nil",
-                    echoOfInflated);
+                    native ? [NSString stringWithFormat:@"%.1f", [native doubleValue]] : @"nil",
+                    reserveNum ? [NSString stringWithFormat:@"%.1f", [reserveNum doubleValue]] : @"nil");
         }
     }
     if (gOrigSetCellHeight) gOrigSetCellHeight(self, _cmd, h);
