@@ -1835,9 +1835,6 @@ static BOOL SoulRecallIsBlocked(id obj) {
 
 static const NSInteger kSoulRecallBadgeTag = 0x534C5242; /* 'SLRB' */
 static const CGFloat kSoulMsgTimeReserve = 14.0;
-/* 上一次实际排版量到的内容底边（相对 cell 顶部）。分享卡这类布局不给
-   bubbleSize，靠它反推气泡下方还剩多少空间，决定要不要真的加高。 */
-static const void *kSoulLayoutContentBottomKey = &kSoulLayoutContentBottomKey;
 static void SoulMsgTimeRelayout(id cell);
 static void SoulScheduleMsgTimeRetry(UIView *view);
 static void SoulApplyMsgTime(id cell, id layout);
@@ -3543,13 +3540,6 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (contentBottom > height - kSoulMsgTimeReserve)
         contentBottom = height - kSoulMsgTimeReserve;
     if (contentBottom < 0.0) contentBottom = 0.0;
-    /* 记下真实内容底边，供 SoulFooterReserveForLayout 反推剩余留白。
-       只在扫到内容时更新，避免回退值把真实测量覆盖掉。 */
-    id layoutObj = SoulCellLayout(view);
-    if (layoutObj && haveContent) {
-        objc_setAssociatedObject(layoutObj, kSoulLayoutContentBottomKey,
-                                 @(contentBottom), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
     BOOL mine = showTime && time.tag == 1;
     if (!showTime && contentRight > contentLeft) mine = contentLeft > width * 0.45;
 
@@ -3603,10 +3593,14 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
     if (x + totalW > width - 6.0) x = width - totalW - 6.0;
     if (x < 6.0) x = 6.0;
 
-    /* 时间统一放在整条消息（含引用条、分享卡）下方，不再回到气泡上方。
-       y 不再被钳到 cell 底部以内：预留行高已经保证 cell 够高，往回压
-       只会让时间叠到气泡上。 */
-    CGFloat y = contentBottom + 2.0;
+    /* 时间叠在内容下方，不参与行高。宿主在气泡下方本来就留有 6~8pt，
+       把标签塞进这段留白；放不下时贴住 cell 下沿，绝不溢出到相邻消息。 */
+    CGFloat y = contentBottom + 1.0;
+    if (y + rowH > height - 1.0) y = height - rowH - 1.0;
+    if (y < contentBottom - rowH + 2.0) {
+        /* 连半个标签都放不下：这一轮不画，避免压住气泡。 */
+        if (showTime) { time.hidden = YES; showTime = NO; }
+    }
     if (y < 0.0) y = 0.0;
 
     CGRect oldT = time.frame, oldB = badge.frame;
@@ -3836,169 +3830,6 @@ static BOOL SoulAssignMsgHook(NSString *className, NSString *selName, void **hoo
     return YES;
 }
 
-static BOOL SoulLayoutNeedsFooterRow(id layout) {
-    if (SoulDef(kFxMsgTime)) {
-        SEL msgSel = NSSelectorFromString(@"message");
-        id msg = nil;
-        @try {
-            if ([layout respondsToSelector:msgSel])
-                msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
-        } @catch (__unused NSException *e) {}
-        long long t = msg ? SoulMsgTimestamp(msg) : 0;
-        if (!SoulTimestampLooksValid(t)) t = SoulMsgTimestamp(layout);
-        if (SoulTimestampLooksValid(t)) return YES;
-    }
-    if (SoulDef(kFxAntiRecall) && SoulRecallIsBlocked(layout)) return YES;
-    return NO;
-}
-
-/* 时间行 12pt 高，加 2pt 间距、1pt 余量，一共需要 15pt。
-   目标是让「内容底边到 cell 底边」恒等于 15pt：够就完全不动行高，
-   不够只补差额，这样每条消息的视觉间距一致。
-
-   取数优先级（越靠前越可信）：
-   1. 分享卡：从 usercardModel 读宿主自己算好的卡片高。分享卡的
-      bubbleSize 恒为 0，cellInset 也是 0，模型里唯一可靠的就是
-      SOUsercardModel.usercardHeight —— 这是宿主渲染这张卡实际用的值。
-   2. 普通消息：bubbleSize 与 cellInset 自洽时用 ins.bottom。
-   3. 兜底：上一次实际排版量到的内容底边。
-   全都没有时才按整行预留，下一轮收敛。 */
-static CGFloat SoulFooterReserveForLayout(id layout, double baseH) {
-    if (!layout || baseH < 20.0) return 0.0;
-    const CGFloat needForRow = 2.0 + 12.0 + 1.0;
-    SEL insSel = NSSelectorFromString(@"cellInset");
-    SEL bsSel = NSSelectorFromString(@"bubbleSize");
-    CGFloat remaining = -1.0;
-
-    /* 1. 分享卡：cellInset.top + 卡片高 = 内容底边。
-       分享卡的 bubbleSize 恒为 0，但 cellInset.top 和 usercardHeight
-       都是宿主真实使用的值。 */
-    SEL ucSel = NSSelectorFromString(@"usercardModel");
-    if ([layout respondsToSelector:ucSel]) {
-        @try {
-            id uc = ((id (*)(id, SEL))objc_msgSend)(layout, ucSel);
-            SEL chSel = NSSelectorFromString(@"usercardHeight");
-            if (uc && [uc respondsToSelector:chSel]) {
-                CGFloat cardH = ((double (*)(id, SEL))objc_msgSend)(uc, chSel);
-                CGFloat cardTop = 6.0;
-                if ([layout respondsToSelector:insSel]) {
-                    UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
-                    if (isfinite(ins.top) && ins.top >= 0.0 && ins.top < baseH) cardTop = ins.top;
-                }
-                if (isfinite(cardH) && cardH > 20.0 && cardH < baseH) {
-                    CGFloat r = baseH - (cardTop + cardH);
-                    if (r >= 0.0 && r < baseH) remaining = r;
-                }
-            }
-        } @catch (__unused NSException *e) {}
-    }
-
-    /* 2. 普通气泡消息 */
-    if (remaining < 0.0 && [layout respondsToSelector:insSel] && [layout respondsToSelector:bsSel]) {
-        @try {
-            UIEdgeInsets ins = ((UIEdgeInsets (*)(id, SEL))objc_msgSend)(layout, insSel);
-            CGSize bs = ((CGSize (*)(id, SEL))objc_msgSend)(layout, bsSel);
-            if (isfinite(ins.top) && isfinite(ins.bottom) &&
-                ins.bottom >= 0.0 && ins.bottom < baseH && bs.height > 1.0) {
-                CGFloat expect = ins.top + bs.height + ins.bottom;
-                if (fabs(expect - baseH) <= 3.0) remaining = ins.bottom;  /* 自洽才采信 */
-            }
-        } @catch (__unused NSException *e) {}
-    }
-
-    /* 3. 实测内容底边 */
-    if (remaining < 0.0) {
-        NSNumber *measured = objc_getAssociatedObject(layout, kSoulLayoutContentBottomKey);
-        if (measured) {
-            CGFloat r = baseH - [measured doubleValue];
-            if (r >= 0.0 && r < baseH) remaining = r;
-        }
-    }
-    if (remaining < 0.0) {
-        /* 还没有任何可信数据：先按整行预留，下一轮收敛。 */
-        return kSoulMsgTimeReserve;
-    }
-    CGFloat need = needForRow - remaining;
-    return need <= 0.0 ? 0.0 : MIN(need, kSoulMsgTimeReserve);
-}
-
-static double (*gOrigMsgCellHeight)(id, SEL);
-/* 上一次真正加进去的预留行高。setCellHeight: 的回声判断必须用它而不是
-   固定常量：留白够时预留是 0，不够时可能是 1~14 之间的任意值。 */
-static const void *kSoulLayoutReserveKey = &kSoulLayoutReserveKey;
-/* 宿主实测告诉我们：它在收到 cellHeight 之后会自己二次调整
-   （日志里 114 → 我们给 128 → 宿主写回 136 → 下一轮 150）。
-   所以不能每次都在「当前值」上做加法，否则宿主每调整一次就再涨一次。
-   这里记录第一次拿到的原生高度，之后一律以它为基准。 */
-static const void *kSoulLayoutNativeHeightKey = &kSoulLayoutNativeHeightKey;
-static double SoulHookMsgCellHeight(id self, SEL _cmd) {
-    NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
-    if (!native) {
-        double raw = gOrigMsgCellHeight ? gOrigMsgCellHeight(self, _cmd) : 0;
-        native = @(raw);
-        objc_setAssociatedObject(self, kSoulLayoutNativeHeightKey, native,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    double h = [native doubleValue];
-    if (h < 20.0) return h;
-
-    /* 只有真的要画时间行/撤回角标的消息才预留空间。 */
-    CGFloat reserve = 0.0;
-    if (SoulLayoutNeedsFooterRow(self)) reserve = SoulFooterReserveForLayout(self, h);
-    objc_setAssociatedObject(self, kSoulLayoutReserveKey, @(reserve),
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSString *cls = NSStringFromClass([self class]);
-    if ([cls containsString:@"Message"] && h > 100.0) {
-        static int hLog = 0;
-        if (hLog < 6) {
-            hLog++;
-            id uc = nil;
-            SEL ucSel = NSSelectorFromString(@"usercardModel");
-            @try { if ([self respondsToSelector:ucSel]) uc = ((id (*)(id, SEL))objc_msgSend)(self, ucSel); }
-            @catch (__unused NSException *e) {}
-            NSMutableString *probe = [NSMutableString string];
-            NSArray *probes = @[@"usercardHeight", @"usercardNoBottomCapHeight",
-                                @"shrinkCellHeight", @"newUICardHeight", @"cellHeight"];
-            for (NSString *pn in probes) {
-                CGFloat v = -1.0;
-                @try {
-                    SEL ps = NSSelectorFromString(pn);
-                    if (uc && [uc respondsToSelector:ps])
-                        v = ((double (*)(id, SEL))objc_msgSend)(uc, ps);
-                } @catch (__unused NSException *e) {}
-                [probe appendFormat:@" %@=%.1f", pn, v];
-            }
-            SoulLog(@"msg-time: hgt cls=%@ base=%.1f reserve=%.1f uc=%@%@",
-                    cls, h, reserve, uc ? NSStringFromClass([uc class]) : @"nil", probe);
-        }
-    }
-    return h + reserve;
-}
-
-static void (*gOrigSetCellHeight)(id, SEL, double);
-static void SoulHookSetCellHeight(id self, SEL _cmd, double h) {
-    /* 宿主会写回它自己二次调整后的高度（日志里 114 → 136）。这类写回值
-       不能再当成新的原生基线，否则每轮都会在更大的值上再加预留。
-       只在还没有原生基线时才采信一次——那时拿到的是首次布局的真实值。 */
-    NSNumber *native = objc_getAssociatedObject(self, kSoulLayoutNativeHeightKey);
-    if (!native && h > 20.0) {
-        objc_setAssociatedObject(self, kSoulLayoutNativeHeightKey, @(h),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    NSString *cls2 = NSStringFromClass([self class]);
-    if ([cls2 containsString:@"Message"]) {
-        static int setLog = 0;
-        if (setLog < 12) {
-            setLog++;
-            NSNumber *reserveNum = objc_getAssociatedObject(self, kSoulLayoutReserveKey);
-            SoulLog(@"msg-time: setCellH cls=%@ wrote=%.1f native=%@ reserve=%@",
-                    cls2, h,
-                    native ? [NSString stringWithFormat:@"%.1f", [native doubleValue]] : @"nil",
-                    reserveNum ? [NSString stringWithFormat:@"%.1f", [reserveNum doubleValue]] : @"nil");
-        }
-    }
-    if (gOrigSetCellHeight) gOrigSetCellHeight(self, _cmd, h);
-}
 
 static BOOL SoulInstallMsgTimeHooks(void) {
     static BOOL done = NO;
@@ -4050,14 +3881,14 @@ static BOOL SoulInstallMsgTimeHooks(void) {
     for (NSString *name in prepareClasses) {
         any |= SoulAssignMsgHook(name, @"prepareCell:withMsgLayout:", gMsgPrepHooks, gMsgPrepOrig, &gMsgPrepCount, 12);
     }
-    any |= SoulInstallMethodHook(layout, NSSelectorFromString(@"cellHeight"),
-                                 (IMP)SoulHookMsgCellHeight, (IMP *)&gOrigMsgCellHeight);
-    any |= SoulInstallMethodHook(layout, NSSelectorFromString(@"setCellHeight:"),
-                                 (IMP)SoulHookSetCellHeight, (IMP *)&gOrigSetCellHeight);
+    /* 不再 hook cellHeight / setCellHeight:。
+       给每条消息加高会连带撑歪整个会话：表格底部内边距没跟着调整，
+       最后一条消息会被输入栏截断；卡片也会跟着变高；撤回提示被压住。
+       时间标签改为叠在气泡下方、完全不影响行高（见 SoulLayoutMsgFooter）。 */
     if (any) {
         done = YES;
-        SoulLog(@"msg-time: hooks installed config=%d prepare=%d height=%d",
-                gMsgCfgCount, gMsgPrepCount, gOrigMsgCellHeight != NULL);
+        SoulLog(@"msg-time: hooks installed config=%d prepare=%d (height hooks off)",
+                gMsgCfgCount, gMsgPrepCount);
     }
     return any;
 }
