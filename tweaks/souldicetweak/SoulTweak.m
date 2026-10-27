@@ -2194,6 +2194,13 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     cf.size.height = targetH;
     card.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     card.frame = cf;
+    /* 卡片刚被收缩，cell 内的几何已经变了。这里清掉按旧几何记下的
+       内容底边，让下一轮重新测量，否则时间会按收缩前的卡片底边定位。 */
+    id layoutObj = SoulCellLayout(cellView);
+    if (layoutObj) {
+        objc_setAssociatedObject(layoutObj, kSoulLayoutContentBottomKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     static int shrinkLog = 0;
     if (shrinkLog < 8) {
         shrinkLog++;
@@ -3547,9 +3554,21 @@ static void SoulLayoutMsgFooter(id cell, double height, double width) {
             haveContent = YES;
         }
     }
+    /* 分享卡的卡片被我们钉过高度，扫描结果可能是收缩前的：以卡片
+       实际 frame 为准，否则时间会贴回卡片下沿。 */
+    NSString *cellCN0 = NSStringFromClass([view class]).lowercaseString;
+    if ([cellCN0 rangeOfString:@"shareusercard"].location != NSNotFound && content) {
+        CGRect cr = [content convertRect:content.bounds toView:view];
+        if (SoulUsableContentRect(cr, view)) {
+            contentBottom = CGRectGetMaxY(cr);
+            contentLeft = CGRectGetMinX(cr);
+            contentRight = CGRectGetMaxX(cr);
+            haveContent = YES;
+        }
+    }
+
     if (!haveContent) {
-        /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。
-           两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
+        /* 撤回后原气泡可能已经隐藏，这时只剩角标可作锚点。           两样都没有时按发送方靠在左右内边距上，但 contentRight 必须跟着
            走，否则 alignTrailing 会退化成 (width - totalW) 把时间甩到最右边。 */
         BOOL mineFallback = showTime && time.tag == 1;
         if (showBadge && badge.frame.size.width > 0.0) {
