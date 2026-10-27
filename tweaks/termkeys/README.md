@@ -28,13 +28,15 @@ App 自带的附件栏一个按键都不改，只在它上面挂一层 Shift 拦
 - 越狱：deb 的过滤器默认包含 iGhostVT、CareServer、Blink、iSH、Termius、Prompt、Secure ShellFish，其他 App 改 `TermKeysTweak.plist` 后重新打包。
 - TrollFools：把 `TermKeys.dylib` 注入目标 App。
 
-## 开关
+## 诊断日志
+
+默认关闭。排查问题时可临时打开：
 
 ```
-defaults write wiki.qaq.iGhostVT TermKeys.diag -bool NO    # 关诊断日志
+defaults write wiki.qaq.iGhostVT TermKeys.diag -bool YES
 ```
 
-诊断日志在 App 容器的 `Documents/termkeys-diag.log`。
+日志写在 App 容器的 `Documents/termkeys-diag.log`，累计到 256KB 会自动清空。排查完记得关掉并删除该文件。
 
 ## 限制
 

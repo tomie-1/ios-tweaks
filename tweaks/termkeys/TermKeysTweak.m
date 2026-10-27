@@ -42,9 +42,13 @@ static const CGFloat TKButtonSpacing = 7.0;
 
 static NSString *const TKDiagKey = @"TermKeys.diag";
 
+// 诊断默认关闭：日志只服务于排查，日常运行不该在宿主容器的 Documents 里
+// 留文件。需要时用
+//   defaults write <bundle-id> TermKeys.diag -bool YES
+// 打开，排查完再关掉并删除日志。
 static BOOL TKDiagEnabled(void) {
     NSNumber *value = [NSUserDefaults.standardUserDefaults objectForKey:TKDiagKey];
-    return value ? value.boolValue : YES;
+    return value ? value.boolValue : NO;
 }
 
 static NSString *TKDiagPath(void) {
