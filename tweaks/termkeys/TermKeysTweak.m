@@ -1,17 +1,19 @@
 //
 //  TermKeysTweak.m — 给终端类 App 增补 Shift、NL 和 F1–F12。
 //
-//  系统键盘扩展无法传递硬件修饰键状态，所以这里把按键交给终端自己的按键
-//  入口（拿不到时退回 xterm 序列）。插件由 TrollFools 或 MobileSubstrate
+//  系统键盘没有 Shift 和 F 键，键盘扩展也无法向宿主传递硬件修饰键状态。
+//  所以插件自己画一条键栏，按键不走文本插入，而是调用终端自己的按键入口
+//  （取不到入口时退回 xterm 序列）。插件由 TrollFools 或 MobileSubstrate
 //  注入宿主进程。
 //
-//  布局：一条两行键栏浮在系统键盘（含 App 自带的那条附件栏）之上。键栏
-//  **不并入 inputAccessoryView**——键盘高度只要比原生多出一点，iOS 15 的
-//  键盘避让就会把整窗内容上顶，终端首行钻到状态栏下面，那是之前一直修不好
-//  的根因。改由根视图 additionalSafeAreaInsets 让终端腾出键栏高度：一次
-//  按键事件设一次，不在任何 layout 回调里改 frame，也就不会重排死循环。
+//  键栏是浮层：两行，贴在键盘上方，不并入宿主的 inputAccessoryView。
+//  附件栏一旦变高，键盘总高度随之变化，而 iOS 15 的键盘避让会把整窗内容
+//  上顶，终端首行被推到状态栏下面。浮层不改键盘高度；终端需要让出的空间由
+//  根视图的 additionalSafeAreaInsets 声明，只在键盘事件里设一次，不在任何
+//  布局回调里改 frame。
 //
-//  App 自带的附件栏一个按键都不改，只挂一层「只接管点按」的 Shift 拦截。
+//  宿主自带的附件栏保持原样，只在其上挂一个手势，让 Shift 也能修饰它自己的
+//  按键（见「让 Shift 也能修饰 App 自带栏的按键」）。
 //
 //  运行时开关（`defaults write <bundle-id> <key> ...`）：
 //    TermKeys.diag -bool NO   关掉 Documents/termkeys-diag.log 诊断日志
@@ -144,13 +146,13 @@ static UIControl *TKFindControl(UIView *view, NSString *accessibilityLabel) {
 
 #pragma mark - Ghostty 原生按键入口
 //
-// UITerminalView 的 `sendKey(_:modifiers:)` 接的是 Swift 的 `TerminalKey`
-// 枚举，不是 HID 用法码，所以要传 `TerminalKey` 的 case 序号——也就是
-// libghostty-spm `TerminalKey.swift` 里 case 的声明顺序。下面的值按该文件
-// 的声明顺序算出。传错的后果很隐蔽：方向键会变成别的按键，F 键更会被拆成
-// ESC。
+// `UITerminalView.sendKey(_:modifiers:)` 的 `key` 参数是 Swift 枚举
+// `TerminalKey`，不是 HID 用法码，所以要传该枚举的 case 序号。下面的值
+// 对应 libghostty-spm `TerminalKey.swift` 的声明顺序；上游增删 case 时
+// 这些数字会失准，症状是按键变成别的键、F 键被拆成 ESC。
 //
-// 调用约定：self 在 x20，按键码在 x0，修饰键在 x1。
+// 这是 Swift 方法，调用约定与 C 不同：self 在 x20，key 在 w0，modifiers
+// 在 w1。直接按 C 参数调用会走错寄存器，所以下面用一段裸汇编转发。
 
 enum {
     TKKeyJ = 28,
@@ -384,19 +386,16 @@ static void TKSendNewline(void) {
 
 #pragma mark - 按键外观
 
-// 所有按键共用的尺寸规则。按钮一律等宽等高，字形一律落在同一个正方形里。
-// 这些数是从实测日志定的，不是凭感觉：44/42/38/40 四种按钮宽度会让整排
-// 圆圈起点错位；字号相同也不等于墨迹同大。
+// 键栏的尺寸规则：按钮一律等宽等高，图标一律落在同样大小的正方形里。
+// 这两条必须成对成立——按钮宽度不一致，整排圆圈起点就错位；只统一字号
+// 而不统一墨迹尺寸，粗的符号看着比细的大一圈。
 static const CGFloat TKKeyWidth = 40.0;
 static const CGFloat TKGlyphSize = 15.0;
 
-// SF Symbol 每个符号自带边界框，同一字号下墨迹差很多——实测 `arrow.up`
-// 是 15.0×16.0，`shift` 19.0×16.0，`arrow.left` 到 20.3×16.0。只统一高度
-// 时横箭头比纵向宽 35%，在圆圈里就是「大一圈」。
-//
-// 所以按**等比缩放塞进 TKGlyphSize 的正方形**：取长边缩放到该尺寸，短边
-// 按原比例。横箭头仍比纵向宽一点点（那是箭头本来的形状），但整块墨迹的
-// 外接尺寸一致，看上去就是同一个大小。
+// SF Symbol 各自带有不同的边界框：`arrow.up` 窄而高，`arrow.left` 宽而扁，
+// `shift` 居中。按同一字号渲染出来墨迹差别明显，所以这里先取图、再按长边
+// 等比缩放，让每个图标的外接尺寸都等于 TKGlyphSize。短边保持原比例，
+// 箭头不会被拉变形。
 static UIImage *TKSymbolImage(NSString *name) {
     UIImageConfiguration *configuration = [UIImageSymbolConfiguration
         configurationWithPointSize:TKGlyphSize * 1.4
@@ -513,8 +512,8 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     shift.accessibilityLabel = @"Shift";
     shift.accessibilityHint = @"单击一次生效，双击锁定";
 
-    // 锁定徽标。图标缩到 15pt 后，原来 6pt 的点显得偏大，跟着缩到 4pt，
-    // 并往角里再收一点，保持「一个小角标」的比例。
+    // 锁定徽标：锁定时出现在右上角的小白点。尺寸随图标走——图标只有
+    // 15pt 时，过大的点会盖住键面。
     UIView *dot = [[UIView alloc] initWithFrame:CGRectZero];
     dot.translatesAutoresizingMaskIntoConstraints = NO;
     dot.userInteractionEnabled = NO;
@@ -578,9 +577,9 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     backdrop.clipsToBounds = YES;
     [self addSubview:backdrop];
 
-    // 第一行布局固定：Shift、NL 靠左，方向键靠右。但仍开启横向拖动，
-    // 拖动时整排跟着走、松手回弹——只是手感，内容宽度等于可视宽度，不会
-    // 真的滚出屏幕外。
+    // 第一行：Shift、NL 靠左，方向键靠右，中间留空。布局固定，但照样
+    // 允许横向拖动——内容宽度等于可视宽度，所以拖到头会回弹，不会有内容
+    // 滚出屏幕。这是手感，不是滚动。
     UIScrollView *topScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     topScroll.translatesAutoresizingMaskIntoConstraints = NO;
     topScroll.showsHorizontalScrollIndicator = NO;
@@ -597,7 +596,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     topStack.spacing = TKButtonSpacing;
     [topScroll addSubview:topStack];
 
-    // 第二行只放 F1–F12，键多到放不下，真的可以横向滑动。
+    // 第二行：只有 F1–F12。放不下一屏，可以真正横向滚动。
     UIScrollView *functionScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     functionScroll.translatesAutoresizingMaskIntoConstraints = NO;
     functionScroll.showsHorizontalScrollIndicator = NO;
@@ -625,9 +624,9 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
                                             constant:TKBarPadding],
         [topScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
 
-        // 两边都锚在内容区、宽度显式等于可视宽度：整排作为内容一起被拖动，
-        // 拖动时所有键同步移动。右边若锚 frame，右侧方向键会被钉在屏幕上
-        // 不动，只有左边跟着弹——那就成了「只有前两个键在弹」。
+        // 栈的整体必须作为内容一起移动：两边都锚内容区，宽度显式等于
+        // 可视宽度。若把右边锚到 frame 上，右侧方向键会被固定在屏幕上，
+        // 拖动时只有左边几个键跟着动。
         [topStack.leadingAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.leadingAnchor
                                                constant:8.0],
         [topStack.trailingAnchor constraintEqualToAnchor:topScroll.contentLayoutGuide.trailingAnchor
@@ -702,22 +701,25 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     return self;
 }
 
-// 把每个按键的字形尺寸、圆心和基线差异写进日志，用数据核对「看起来一样大」。
-// 看得出来的差异必须有数：字形高宽、按钮内偏移、两行基线。
-
 @end
 
 #pragma mark - 让 Shift 也能修饰 App 自带栏的按键
 //
-// libghostty 的粘滞修饰键只管 Ctrl/Alt/Cmd，它的 `Modifier` 枚举里没有
-// Shift；自带栏的 Tab/Esc/方向键读的是它自己的状态机，与插件的 Shift 毫无
-// 关系。所以 Shift 亮着时得在按钮把动作发出去之前截住，改由插件发带 Shift
-// 的原生按键。
+// 宿主自带的附件栏有自己的粘滞修饰键，但只支持 Ctrl/Alt/Cmd——libghostty
+// 的 `Modifier` 枚举里没有 Shift。栏上的 Tab/Esc/方向键读的是那套状态机，
+// 与插件的 Shift 互不相干，所以 Shift 亮着时按 Tab 只会发出普通 Tab，Shift
+// 也不会熄灭。
 //
-// 两处小心：一是不在 touchesBegan 就认下触摸（那会连横向滑动一起吞掉），
-// 而是等手抬起、确认是点按且落在可修饰的键上才认；二是打开
-// delaysTouchesEnded，让按钮的 touchUpInside 晚于本识别器一步，才有机会
-// 取消它。手指移动超过阈值即判定为滑动，本识别器立刻失败，滚动照常。
+// 唯一能介入的位置是触摸：Shift 亮着、落点又正好是这几个键时，由插件改发
+// 带 Shift 的原生按键，并让原生按钮收不到这次点按。
+//
+// 三个约束决定了实现方式：
+//   · 不能一按下就认领触摸，否则横向滑动也被吞掉——要等手抬起、确认是
+//     点按，才认。
+//   · 手指一旦移动超过阈值，立即判为滑动并失败，把这串触摸还给滚动视图。
+//   · 按钮的 touchUpInside 默认先于手势触发，所以打开
+//     delaysTouchesEnded，让按钮的动作晚一步，才有机会被 cancelsTouchesInView
+//     取消。
 
 static char TKShiftTapKey;
 
@@ -858,8 +860,8 @@ static UIView *TKInputAccessoryViewPassthrough(id self, SEL command) {
     UIView *original = TKOriginalInputAccessoryGetter
         ? TKOriginalInputAccessoryGetter(self, command)
         : nil;
-    // 原样返回：键盘高度与官方版一致，布局不因插件而变；这里只挂 Shift
-    // 拦截，不改栏里的任何按键。
+    // 原样返回，只顺手挂上 Shift 手势。不改返回值是刻意的：栏的高度、布局
+    // 与官方版完全一致，键盘总高度才不会被插件改变。
     TKInstallShiftPassthrough(original);
     return original;
 }
@@ -914,11 +916,9 @@ static BOOL TKInstallIGhostHooks(void) {
     return self;
 }
 
-// 键盘真在屏幕上才显示键栏、才给终端留位置。
-//
-// 收起键盘时 UIKit 报的 frame 高度并不变，只是整块被挪到屏幕下方——光看
-// 高度会以为键盘还在，键栏就留在屏幕上了。所以要门控「落在窗口内的高度」：
-// 硬件键盘只弹附件栏时它不到 100pt，不该留空白；收起时它 ≤ 0，键栏也该走。
+// 判断键盘是否真的在屏幕上。UIKit 收起键盘时不会缩小 frame，只是把整块挪
+// 到屏幕下方，所以单看高度会误判成「还在」。这里量的是它与窗口的实际
+// 交集：收起时为 0；硬件键盘只弹附件栏时不到 100pt，也不算软件键盘。
 - (BOOL)keyboardIsOnScreenInWindow:(UIWindow *)window frame:(CGRect)frame {
     if (CGRectIsEmpty(frame)) {
         return NO;
@@ -927,8 +927,9 @@ static BOOL TKInstallIGhostHooks(void) {
     return CGRectIntersection(inWindow, window.bounds).size.height > 100.0;
 }
 
-// 让终端腾出键栏高度。同一个值只设一次，不在 layout 回调里反复改 frame，
-// 也就不会出现之前那种重排死循环。
+// 让终端为键栏腾出底部空间。用根视图的 additionalSafeAreaInsets 而不是改
+// 任何视图的 frame：后者会在布局过程里再次触发布局，形成死循环。同一个值
+// 只写一次，键盘反复回调也不会抖动。
 - (void)updateReservationForWindow:(UIWindow *)window visible:(BOOL)visible {
     UIViewController *root = window.rootViewController;
     if (!root) {
@@ -968,7 +969,7 @@ static BOOL TKInstallIGhostHooks(void) {
             self.hostWindow = window;
         }
 
-        // 键盘 frame 已含 App 自带附件栏，键栏就叠在它上面。
+        // 键盘 frame 已包含宿主自带的附件栏，所以键栏直接叠在它上沿。
         CGRect keyboardInWindow = [window convertRect:endFrame fromWindow:nil];
         CGFloat barY = CGRectGetMinY(keyboardInWindow) - TKBarHeight;
         BOOL visible = [self keyboardIsOnScreenInWindow:window frame:endFrame];
@@ -1008,7 +1009,8 @@ static void TermKeysInit(void) {
         TKDiag(@"init %@ terminal=%@ sendKey=%p", bundleID, NSStringFromClass(TKTerminalClass()),
                (void *)TKSwiftSendKeyFunction());
         if ([bundleID isEqualToString:@"wiki.qaq.iGhostVT"]) {
-            // 自带栏原样保留，只加 Shift 拦截；键栏另浮一层。
+            // iGhostVT 自带附件栏：保留它，只挂 Shift 手势。键栏仍由下面
+            // 的统一逻辑负责浮在键盘上。
             TKInstallIGhostHooks();
         }
         (void)[TKKeyboardBarController shared];
