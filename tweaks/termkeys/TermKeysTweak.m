@@ -525,6 +525,10 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 @interface TKBarView : UIView
 @end
 
+@interface TKBarView ()
+- (void)tk_scheduleGlyphMetricsDump:(UIStackView *)topStack functionStack:(UIStackView *)functionStack;
+@end
+
 @implementation TKBarView
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -660,7 +664,50 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [functionStack addArrangedSubview:button];
     }
 
+    [self tk_scheduleGlyphMetricsDump:topStack functionStack:functionStack];
     return self;
+}
+
+// 把每个按键的字形尺寸、圆心和基线差异写进日志，用数据核对「看起来一样大」。
+// 看得出来的差异必须有数：字形高宽、按钮内偏移、两行基线。
+- (void)tk_scheduleGlyphMetricsDump:(UIStackView *)topStack functionStack:(UIStackView *)functionStack {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (!TKDiagEnabled()) {
+            return;
+        }
+        NSMutableString *report = [NSMutableString stringWithString:@"glyph-metrics"];
+        for (UIStackView *stack in @[ topStack, functionStack ]) {
+            [report appendFormat:@"\n  row axis=h count=%lu", (unsigned long)stack.arrangedSubviews.count];
+            for (UIView *view in stack.arrangedSubviews) {
+                if (![view isKindOfClass:UIButton.class]) {
+                    continue;
+                }
+                UIButton *button = (UIButton *)view;
+                CGRect frameInBar = [button convertRect:button.bounds toView:self];
+                NSString *label = button.accessibilityLabel ?: @"?";
+                // 文字按钮：看 titleLabel；图形按钮：看 imageView。
+                UIView *content = button.currentImage ? button.imageView : button.titleLabel;
+                if (!content) {
+                    continue;
+                }
+                CGSize glyph = content.isHidden ? CGSizeZero : content.bounds.size;
+                if (content == button.imageView) {
+                    glyph = button.currentImage.size;
+                }
+                CGRect contentFrame = [content convertRect:content.bounds toView:button];
+                CGFloat dx = CGRectGetMidX(contentFrame) - CGRectGetMidX(button.bounds);
+                CGFloat dy = CGRectGetMidY(contentFrame) - CGRectGetMidY(button.bounds);
+                [report appendFormat:
+                    @"\n    %@ btn=%.1fx%.1f glyph=%.1fx%.1f dx=%+.1f dy=%+.1f centerY=%.1f",
+                    label,
+                    CGRectGetWidth(button.bounds), CGRectGetHeight(button.bounds),
+                    glyph.width, glyph.height, dx, dy,
+                    CGRectGetMidY(frameInBar)];
+            }
+        }
+        TKDiag(@"%@", report);
+    });
 }
 
 @end
