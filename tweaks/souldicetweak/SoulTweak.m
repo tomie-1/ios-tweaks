@@ -2149,12 +2149,15 @@ static void SoulInstallRecallCellLayoutHook(void) {
 static IMP gOrigShareCardLayout = NULL;
 static Class gShareCardLayoutClass = nil;
 static BOOL gShareCardLayoutHooked = NO;
+/* 分享卡钉住后的目标高度。每 cell 只算一次，避免反复收缩。 */
+static const void *kSoulShareCardPinnedKey = &kSoulShareCardPinnedKey;
 
-/* 分享卡的卡片视图会跟着 cell 高度一起长：cell 122→128 时卡片从 108
-   涨到 114，底部留白永远是 8pt，时间行（15pt）永远塞不进去——这是个闭环。
+/* 分享卡的卡片视图会跟着 cell 高度一起长：cell 从 122 涨到 128 时，
+   卡片也从 108 涨到 114，底部留白恒为 8pt，15pt 的时间行永远塞不进去。
 
-   所以在第一次拿到卡片高度时就把它记住，之后一律钉死在这个原生值：
-   cell 变高腾出来的空间留在卡片下方，正好给时间行用。 */
+   所以在 cell 第一次布局时按「cell 高 - 顶部 - 15」定一个目标值并把卡片
+   收到这个高度，多出来的空间就留在卡片下方给时间行。每个 cell 只算一次
+   并记住目标值，避免拿收缩后的高度反复推算把卡片压到 0。 */
 static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     if (!cellView) return;
     NSString *cn = NSStringFromClass([cellView class]).lowercaseString;
@@ -2164,33 +2167,38 @@ static void SoulShrinkShareCardIfNeeded(UIView *cellView, UIView *content) {
     UIView *card = content;
     if (!card || card.bounds.size.height < 20.0 || card.bounds.size.width < 20.0) return;
 
-    /* 卡片原生高度 = 布局给出的原生 cell 高度 - 顶部偏移 6。
-       布局对象上的原生 cellHeight 已经由 cellHeight hook 记录
-       （kSoulLayoutNativeHeightKey），它不随我们加的预留变化，
-       所以这个卡片高度是稳定的原生值。 */
-    id layout = SoulCellLayout(cellView);
-    NSNumber *layoutNative = layout
-        ? objc_getAssociatedObject(layout, kSoulLayoutNativeHeightKey) : nil;
+    /* 卡片原生高度不靠 hook 顺序取：直接用卡片与 cell 的几何关系。
+       原生状态下卡片底边距 cell 底固定 8pt，而时间行要 15pt，差 7pt。
+       这里把卡片高度定为 cell 高 - 顶部偏移 - 15，差额让给时间行；
+       cell 高度本身由 cellHeight hook 保证（原生值 + 预留）。
+       只在卡片确实比目标高时才收，避免把矮卡压得更矮。 */
+    CGFloat cellH = cellView.bounds.size.height;
     CGFloat top = card.frame.origin.y;
-    CGFloat nativeH = -1.0;
-    if (layoutNative) {
-        CGFloat lh = [layoutNative doubleValue];
-        if (lh > 20.0) nativeH = lh - top;
-    }
+    if (cellH < 40.0 || top < 0.0 || top > 20.0) return;
+    CGFloat nativeH = cellH - top - 15.0;
     if (nativeH < 20.0) return;
 
+    /* 只收不放，并且每个 cell 只钉一次：钉完记下目标值，后续布局不再
+       用「已经收缩过的 cellH」重新推算，否则卡片会被一步步压到 0。 */
+    NSNumber *pinned = objc_getAssociatedObject(cellView, kSoulShareCardPinnedKey);
+    CGFloat targetH = pinned ? [pinned doubleValue] : nativeH;
+    if (!pinned) {
+        objc_setAssociatedObject(cellView, kSoulShareCardPinnedKey, @(targetH),
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
     CGFloat current = card.bounds.size.height;
-    if (fabs(current - nativeH) < 0.5) return;
+    if (current <= targetH + 0.5) return;
 
     CGRect cf = card.frame;
-    cf.size.height = nativeH;
+    cf.size.height = targetH;
     card.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     card.frame = cf;
     static int shrinkLog = 0;
     if (shrinkLog < 8) {
         shrinkLog++;
         SoulLog(@"msg-time: share-card cellH=%.1f top=%.1f card=%.1f -> %.1f (pinned)",
-                cellView.bounds.size.height, top, current, nativeH);
+                cellH, top, current, targetH);
     }
 }
 static void SoulHookShareCardLayout(id self, SEL _cmd) {
