@@ -217,17 +217,11 @@ static void SoulSetCfgString(NSString *key, NSString *val) {
 }
 static BOOL SoulDiceOn(void) { return SoulDef(kDiceEnabledKey); }
 
-// 面板数据：一个分组 = 二级页面；行分「开关」和「选项」两种。
-typedef NS_ENUM(NSInteger, SoulFxRowKind) {
-    SoulFxRowKindSwitch = 0,
-    SoulFxRowKindChoice = 1,
-};
-
+// 面板数据：一个分组 = 二级页面；行只有「开关」一种。
 @interface SoulFxRow : NSObject
 @property (nonatomic, copy) NSString *title;
 @property (nonatomic, copy) NSString *key;
 @property (nonatomic, assign) BOOL defaultOn;
-@property (nonatomic, assign) SoulFxRowKind kind;
 @end
 
 @implementation SoulFxRow
@@ -236,14 +230,6 @@ typedef NS_ENUM(NSInteger, SoulFxRowKind) {
     r.title = title;
     r.key = key;
     r.defaultOn = def;
-    r.kind = SoulFxRowKindSwitch;
-    return r;
-}
-+ (instancetype)choiceRow:(NSString *)title key:(NSString *)key {
-    SoulFxRow *r = [SoulFxRow new];
-    r.title = title;
-    r.key = key;
-    r.kind = SoulFxRowKindChoice;
     return r;
 }
 @end
@@ -337,75 +323,10 @@ static UIWindow *SoulHostWindow(void) {
     return SoulKeyWindow();
 }
 
-#pragma mark - 主题（跟随 SOUL 实际深浅色）
-
-static BOOL SoulColorIsDark(UIColor *c) {
-    if (!c) return NO;
-    CGFloat r = 0, g = 0, b = 0, a = 1;
-    if ([c getRed:&r green:&g blue:&b alpha:&a]) {
-        if (a < 0.4) return NO;
-        CGFloat lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        return lum < 0.5;
-    }
-    CGFloat w = 0;
-    if ([c getWhite:&w alpha:&a]) { if (a < 0.4) return NO; return w < 0.5; }
-    return NO;
-}
-
-static BOOL SoulAppDark(void) {
-    UIWindow *w = SoulHostWindow();
-    if (w) {
-        if (w.overrideUserInterfaceStyle == UIUserInterfaceStyleDark) return YES;
-        if (w.overrideUserInterfaceStyle == UIUserInterfaceStyleLight) return NO;
-    }
-    UIView *v = SoulTopViewController().view;
-    int guard = 0;
-    while (v && guard++ < 24) {
-        UIColor *bg = v.backgroundColor;
-        if (bg && CGColorGetAlpha(bg.CGColor) > 0.5) return SoulColorIsDark(bg);
-        v = v.superview;
-    }
-    if (w && w.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) return YES;
-    return NO;
-}
-
-static UIColor *SoulAccent(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithRed:1.00 green:0.42 blue:0.55 alpha:1.0]
-            : [UIColor colorWithRed:0.98 green:0.28 blue:0.45 alpha:1.0];
-    }];
-}
-// 面板透明度：数值越高越不透明（这里比之前更实）
-static UIColor *SoulPanelBg(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithRed:0.10 green:0.10 blue:0.12 alpha:0.99]
-            : [UIColor colorWithWhite:1.00 alpha:0.99];
-    }];
-}
-static UIColor *SoulRowBg(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithRed:0.19 green:0.19 blue:0.22 alpha:0.98]
-            : [UIColor colorWithWhite:0.95 alpha:0.98];
-    }];
-}
-static UIColor *SoulRowHi(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithRed:0.27 green:0.27 blue:0.31 alpha:1.0]
-            : [UIColor colorWithWhite:0.90 alpha:1.0];
-    }];
-}
-static UIColor *SoulText(void)    { return [UIColor labelColor]; }
-static UIColor *SoulHair(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithWhite:1.0 alpha:0.16]
-            : [UIColor colorWithWhite:0.0 alpha:0.12];
-    }];
-}
+/* 全部改用系统语义色：跟随 iOS 外观、深浅色、辅助功能里的「增强对比度」
+   和「加深颜色」自动适配。之前是手挑的粉色（1.0,0.42,0.55），
+   和任何系统界面都不一致。 */
+static UIColor *SoulAccent(void)   { return [UIColor tintColor]; }
 
 #pragma mark - hook 安装工具
 
@@ -450,156 +371,54 @@ typedef NS_ENUM(NSInteger, SoulGameMode) {
     SoulGameModeFinger = 1,
 };
 
-@interface SoulPickerVC : UIViewController
-@property (nonatomic, assign) SoulGameMode mode;
-@property (nonatomic, copy) void (^onDone)(NSInteger value);
-@end
+/* 骰子/猜拳选择用系统 UIAlertController 的 actionSheet：
+   圆角、分隔线、深浅色、按压反馈、安全区全部由系统处理，
+   不再自绘卡片——之前那版是圆角卡片 + 彩色边框 + 大粉按钮，
+   和 iOS 任何系统界面都不一致。 */
+static void SoulPresentGamePicker(SoulGameMode mode, void (^done)(NSInteger value)) {
+    UIViewController *presenter = SoulTopViewController();
+    if (!presenter) { if (done) done(NSNotFound); return; }
 
-@implementation SoulPickerVC {
-    NSInteger _selected;
-    NSMutableArray *_rows;
-}
+    NSString *title = (mode == SoulGameModeDice) ? @"选择骰子点数" : @"选择猜拳";
+    UIAlertController *sheet =
+        [UIAlertController alertControllerWithTitle:title message:nil
+                                     preferredStyle:UIAlertControllerStyleActionSheet];
 
-- (instancetype)initWithMode:(SoulGameMode)mode {
-    if ((self = [super init])) {
-        _mode = mode;
-        _selected = -1;
-        _rows = [NSMutableArray array];
-        self.modalPresentationStyle = UIModalPresentationOverFullScreen;
-        self.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    NSArray<NSArray *> *options;
+    if (mode == SoulGameModeDice) {
+        options = @[@[@"随机", @(-1)], @[@"1 点", @1], @[@"2 点", @2], @[@"3 点", @3],
+                    @[@"4 点", @4], @[@"5 点", @5], @[@"6 点", @6]];
+    } else {
+        options = @[@[@"随机", @(-1)], @[@"布", @1], @[@"剪刀", @2], @[@"石头", @3]];
     }
-    return self;
-}
-
-- (NSArray<NSArray *> *)options {
-    if (_mode == SoulGameModeDice) {
-        return @[@[@"随机", @(-1)], @[@"1 点", @1], @[@"2 点", @2], @[@"3 点", @3],
-                 @[@"4 点", @4], @[@"5 点", @5], @[@"6 点", @6]];
+    for (NSArray *o in options) {
+        NSString *label = o[0];
+        NSNumber *value = o[1];
+        [sheet addAction:[UIAlertAction actionWithTitle:label
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction *a) {
+            if (done) done(value.integerValue);
+        }]];
     }
-    return @[@[@"随机", @(-1)], @[@"✋  布", @1], @[@"✌️  剪刀", @2], @[@"✊  石头", @3]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"取消"
+                                              style:UIAlertActionStyleCancel
+                                            handler:^(__unused UIAlertAction *a) {
+        if (done) done(NSNotFound);
+    }]];
+
+    /* iPad / 弹出层需要锚点，否则会崩。 */
+    sheet.popoverPresentationController.sourceView = presenter.view;
+    sheet.popoverPresentationController.sourceRect =
+        CGRectMake(CGRectGetMidX(presenter.view.bounds),
+                   CGRectGetMaxY(presenter.view.bounds) - 1.0, 1.0, 1.0);
+
+    [presenter presentViewController:sheet animated:YES completion:nil];
 }
 
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.view.backgroundColor = [UIColor colorWithWhite:0 alpha:0.28];
-    [self.view addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(bgTapped:)]];
-
-    UIView *card = [[UIView alloc] init];
-    card.translatesAutoresizingMaskIntoConstraints = NO;
-    card.backgroundColor = SoulPanelBg();
-    card.layer.cornerRadius = 22;
-    card.layer.masksToBounds = YES;
-    [self.view addSubview:card];
-
-    UILabel *title = [[UILabel alloc] init];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = (_mode == SoulGameModeDice) ? @"选择骰子点数" : @"选择猜拳";
-    title.textColor = SoulText();
-    title.font = [UIFont boldSystemFontOfSize:17];
-    title.textAlignment = NSTextAlignmentCenter;
-    [card addSubview:title];
-
-    UIStackView *stack = [[UIStackView alloc] init];
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 8;
-    stack.distribution = UIStackViewDistributionFillEqually;
-
-    for (NSArray *o in [self options]) {
-        UIButton *row = [UIButton buttonWithType:UIButtonTypeCustom];
-        row.tag = [o[1] integerValue];
-        [row setTitle:o[0] forState:UIControlStateNormal];
-        [row setTitleColor:SoulText() forState:UIControlStateNormal];
-        row.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-        row.backgroundColor = SoulRowBg();
-        row.layer.cornerRadius = 14;
-        row.layer.borderWidth = 1.5;
-        row.layer.borderColor = [UIColor clearColor].CGColor;
-        [row addTarget:self action:@selector(rowTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [row.heightAnchor constraintEqualToConstant:44].active = YES;
-        [stack addArrangedSubview:row];
-        [_rows addObject:row];
-    }
-    [card addSubview:stack];
-
-    UIButton *sendBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    sendBtn.translatesAutoresizingMaskIntoConstraints = NO;
-    [sendBtn setTitle:@"发送" forState:UIControlStateNormal];
-    [sendBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    sendBtn.titleLabel.font = [UIFont boldSystemFontOfSize:17];
-    sendBtn.backgroundColor = SoulAccent();
-    sendBtn.layer.cornerRadius = 23;
-    [sendBtn addTarget:self action:@selector(sendTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [card addSubview:sendBtn];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:32],
-        [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-32],
-        [card.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor constant:-36],
-
-        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:18],
-        [title.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
-        [title.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
-
-        [stack.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:12],
-        [stack.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
-        [stack.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
-
-        [sendBtn.topAnchor constraintEqualToAnchor:stack.bottomAnchor constant:14],
-        [sendBtn.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
-        [sendBtn.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
-        [sendBtn.heightAnchor constraintEqualToConstant:46],
-        [sendBtn.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-16],
-    ]];
-
-    [self refresh];
-}
-
-- (void)rowTapped:(UIButton *)b {
-    _selected = b.tag;
-    SoulLog(@"picker row tap -> %ld", (long)_selected);
-    [self refresh];
-}
-
-- (void)refresh {
-    for (UIButton *b in _rows) {
-        BOOL active = (b.tag == _selected);
-        b.backgroundColor = active ? SoulRowHi() : SoulRowBg();
-        b.layer.borderColor = active ? SoulAccent().CGColor : [UIColor clearColor].CGColor;
-        [b setTitleColor:active ? SoulAccent() : SoulText() forState:UIControlStateNormal];
-    }
-}
-
-- (void)bgTapped:(id)sender { [self cancelTapped:nil]; }
-
-- (void)sendTapped:(id)sender {
-    NSInteger v = _selected;
-    SoulLog(@"picker send tap -> %ld", (long)v);
-    void (^done)(NSInteger) = self.onDone;
-    self.onDone = nil;
-    [self dismissViewControllerAnimated:YES completion:^{ if (done) done(v); }];
-}
-
-- (void)cancelTapped:(id)sender {
-    SoulLog(@"picker cancel");
-    void (^done)(NSInteger) = self.onDone;
-    self.onDone = nil;
-    [self dismissViewControllerAnimated:YES completion:^{ if (done) done(NSNotFound); }];
-}
-
-@end
 
 #pragma mark - 设置面板（分组 → 开关 / 选项）
 
 static void SoulHidePanel(void);
-
-static UIColor *SoulFxCardBackground(void) {
-    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
-        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
-            ? [UIColor colorWithRed:0.07 green:0.07 blue:0.08 alpha:1.0]
-            : [UIColor systemGroupedBackgroundColor];
-    }];
-}
 
 @interface SoulFxGroupVC : UITableViewController
 - (instancetype)initWithGroup:(SoulFxGroup *)group;
@@ -637,8 +456,10 @@ static UIColor *SoulFxCardBackground(void) {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
-        cell.textLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:12.5];
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        cell.textLabel.adjustsFontForContentSizeCategory = YES;
+        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
     SoulFxGroup *group = _groups[indexPath.row];
@@ -677,38 +498,22 @@ static UIColor *SoulFxCardBackground(void) {
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     SoulFxRow *row = _group.rows[indexPath.row];
-    if (row.kind == SoulFxRowKindChoice) {
-        static NSString *tid = @"soulfx-choice";
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:tid];
-        if (!cell) {
-            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:tid];
-            cell.textLabel.font = [UIFont systemFontOfSize:16];
-            cell.detailTextLabel.font = [UIFont systemFontOfSize:14];
-            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        }
-        cell.textLabel.text = row.title;
-        NSString *val = SoulCfgString(row.key);
-        cell.detailTextLabel.text = val.length ? val : @"HH:mm";
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        return cell;
-    }
     static NSString *sid = @"soulfx-switch";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:sid];
     UISwitch *sw = nil;
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:sid];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
-        cell.textLabel.font = [UIFont systemFontOfSize:16];
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        cell.textLabel.adjustsFontForContentSizeCategory = YES;
         cell.textLabel.numberOfLines = 2;
         sw = [[UISwitch alloc] init];
-        sw.transform = CGAffineTransformMakeScale(0.9, 0.9);
         [sw addTarget:self action:@selector(soulSwitchChanged:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
     } else {
         sw = (UISwitch *)cell.accessoryView;
     }
     sw.tag = indexPath.row;
-    sw.onTintColor = SoulAccent();
     sw.on = SoulDefOn(row.key, row.defaultOn);
     cell.textLabel.text = row.title;
     return cell;
@@ -768,42 +573,44 @@ static UILabel *SoulFindWidestLabel(UIView *root, UILabel *best) {
     return best;
 }
 
+/* 入口按钮：iOS 主流的「毛玻璃圆形悬浮按钮」。
+   之前是纯色填充 + 硬阴影 + 两次设置图标，视觉上和系统界面脱节。 */
 static void SoulInstallEntry(UIViewController *vc) {
     if (!vc) return;
     if (objc_getAssociatedObject(vc, kSoulEntryInstalledKey)) return;
     objc_setAssociatedObject(vc, kSoulEntryInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
+    const CGFloat kSize = 44.0;   /* 44pt 是 iOS 的最小可点区域 */
+
+    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:
+        [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
+    blur.translatesAutoresizingMaskIntoConstraints = NO;
+    blur.layer.cornerRadius = kSize / 2.0;
+    blur.layer.cornerCurve = kCALayerCornerCurveContinuous;
+    blur.clipsToBounds = YES;
+    blur.userInteractionEnabled = NO;
+
     UIImageSymbolConfiguration *cfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightSemibold];
+        [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
     btn.translatesAutoresizingMaskIntoConstraints = NO;
-    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg] forState:UIControlStateNormal];
-    btn.tintColor = [UIColor whiteColor];
-    btn.backgroundColor = SoulAccent();
-    btn.layer.cornerRadius = 24;
+    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg]
+         forState:UIControlStateNormal];
+    btn.tintColor = [UIColor tintColor];
     [btn addTarget:vc action:@selector(soulEntryTapped:) forControlEvents:UIControlEventTouchUpInside];
 
-    UIView *nav = nil;
-    SEL navSel = NSSelectorFromString(@"navView");
-    if ([vc respondsToSelector:navSel]) {
-        id v = ((id (*)(id, SEL))objc_msgSend)(vc, navSel);
-        if ([v isKindOfClass:[UIView class]]) nav = v;
-    }
-    [vc.view addSubview:btn];
+    [vc.view addSubview:blur];
+    [blur.contentView addSubview:btn];
     [NSLayoutConstraint activateConstraints:@[
-        [btn.widthAnchor constraintEqualToConstant:48],
-        [btn.heightAnchor constraintEqualToConstant:48],
-        [btn.trailingAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.trailingAnchor constant:-18],
-        [btn.bottomAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.bottomAnchor constant:-28],
+        [blur.widthAnchor constraintEqualToConstant:kSize],
+        [blur.heightAnchor constraintEqualToConstant:kSize],
+        [blur.trailingAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.trailingAnchor constant:-16],
+        [blur.bottomAnchor constraintEqualToAnchor:vc.view.safeAreaLayoutGuide.bottomAnchor constant:-24],
+        [btn.centerXAnchor constraintEqualToAnchor:blur.centerXAnchor],
+        [btn.centerYAnchor constraintEqualToAnchor:blur.centerYAnchor],
+        [btn.widthAnchor constraintEqualToConstant:kSize],
+        [btn.heightAnchor constraintEqualToConstant:kSize],
     ]];
-    btn.layer.cornerRadius = 24;
-    btn.layer.shadowColor = [UIColor blackColor].CGColor;
-    btn.layer.shadowOpacity = 0.22;
-    btn.layer.shadowRadius = 8;
-    btn.layer.shadowOffset = CGSizeMake(0, 3);
-    UIImageSymbolConfiguration *bigCfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:21 weight:UIImageSymbolWeightSemibold];
-    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:bigCfg] forState:UIControlStateNormal];
 }
 
 @implementation UIViewController (SoulEntry)
@@ -926,15 +733,10 @@ static void SoulPresentPicker(SoulGameMode mode, void (^done)(NSInteger value)) 
     dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *top = SoulTopViewController();
         if (!top) { SoulLog(@"picker: no top vc"); gPickerShowing = NO; return; }
-        SoulPickerVC *picker = [[SoulPickerVC alloc] initWithMode:mode];
-        if (@available(iOS 13.0, *)) {
-            picker.overrideUserInterfaceStyle = SoulAppDark() ? UIUserInterfaceStyleDark : UIUserInterfaceStyleLight;
-        }
-        picker.onDone = ^(NSInteger value) {
+        SoulPresentGamePicker(mode, ^(NSInteger v) {
             gPickerShowing = NO;
-            if (done) done(value);
-        };
-        [top presentViewController:picker animated:YES completion:nil];
+            if (done) done(v);
+        });
         SoulLog(@"picker presented on %@", NSStringFromClass([top class]));
     });
 }
