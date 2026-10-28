@@ -2772,6 +2772,261 @@ static BOOL SoulInstallAdHooks(void) {
     return ok;
 }
 
+// —— Q. 消息转发 ——
+/* 宿主没有现成的转发接口，只有一堆 sendXxxIMMessage:to:（to 为 FollowUser）。
+   所以转发 = 按消息类型重新构造一条再发出去，而不是把原对象重发：
+   原对象的 msgId / 状态字段属于旧会话，直接复用会出问题。
+
+   目标选择用自画列表，数据取自 SOChatListViewController._dataArr
+   （每项是 SOChatListModel，内含 SOIMSessionModel：toUserId / toUserIdEcpt /
+   lastMsgText / chatType）。 */
+
+@interface SoulForwardTarget : NSObject
+@property (nonatomic, copy) NSString *name;
+@property (nonatomic, copy) NSString *detail;
+@property (nonatomic, copy) NSString *userIdEcpt;
+@property (nonatomic, strong) id session;
+@end
+
+@implementation SoulForwardTarget
+@end
+
+static void SoulPresentForwardPicker(id msg, id cell);
+static NSArray<SoulForwardTarget *> *SoulForwardTargets(void);
+static id SoulForwardUserForTarget(SoulForwardTarget *target);
+
+/* 选目标会话的列表。样式跟随系统 grouped 列表，避免和宿主风格冲突。 */
+@interface SoulForwardPickerVC : UITableViewController
+@property (nonatomic, strong) NSArray<SoulForwardTarget *> *targets;
+@property (nonatomic, copy) void (^onPick)(SoulForwardTarget *target);
+@end
+
+@implementation SoulForwardPickerVC
+- (instancetype)init {
+    if ((self = [super initWithStyle:UITableViewStyleInsetGrouped])) {
+        self.title = @"转发给";
+        self.navigationItem.leftBarButtonItem =
+            [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
+                                                          target:self action:@selector(soulCancel)];
+    }
+    return self;
+}
+- (void)soulCancel {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return (NSInteger)self.targets.count;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *cid = @"soulfx-forward";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
+        cell.textLabel.font = [UIFont systemFontOfSize:16];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+    }
+    SoulForwardTarget *t = self.targets[(NSUInteger)indexPath.row];
+    cell.textLabel.text = t.name;
+    cell.detailTextLabel.text = t.detail;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    SoulForwardTarget *t = self.targets[(NSUInteger)indexPath.row];
+    void (^pick)(SoulForwardTarget *) = self.onPick;
+    __weak SoulForwardPickerVC *weakSelf = self;
+    [self dismissViewControllerAnimated:YES completion:^{
+        SoulForwardPickerVC *strongSelf = weakSelf;
+        (void)strongSelf;
+        if (pick) pick(t);
+    }];
+}
+@end
+
+static void SoulPresentForwardPicker(id msg, id cell) {
+    NSArray<SoulForwardTarget *> *targets = SoulForwardTargets();
+    if (!targets.count) {
+        SoulToast(@"没有可转发的会话");
+        SoulLog(@"forward: empty targets");
+        return;
+    }
+    SoulForwardPickerVC *vc = [SoulForwardPickerVC new];
+    vc.targets = targets;
+    vc.onPick = ^(SoulForwardTarget *target) {
+        id to = SoulForwardUserForTarget(target);
+        if (!to) {
+            SoulToast([NSString stringWithFormat:@"无法定位会话：%@", target.name]);
+            SoulLog(@"forward: no FollowUser for %@", target.userIdEcpt);
+            return;
+        }
+        NSString *text = SoulMenuText(msg);
+        if (!text.length) {
+            SoulToast(@"这条消息暂不支持转发");
+            return;
+        }
+        BOOL ok = SoulForwardSendText(text, to);
+        SoulToast(ok ? [NSString stringWithFormat:@"已转发给 %@", target.name]
+                     : @"转发失败，请查看调试日志");
+    };
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationPageSheet;
+    UIViewController *presenter = SoulTopViewController();
+    [presenter presentViewController:nav animated:YES completion:nil];
+}
+
+static NSString *SoulForwardStr(id obj, NSArray<NSString *> *keys) {
+    for (NSString *k in keys) {
+        id v = nil;
+        @try { v = [obj valueForKey:k]; } @catch (__unused NSException *e) {}
+        if ([v isKindOfClass:[NSString class]] && [(NSString *)v length]) return v;
+    }
+    return nil;
+}
+
+/* 找承载会话列表的 VC。取不到就返回 nil，上层退化为空列表。 */
+static UIViewController *SoulFindChatListVC(UIViewController *root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:objc_getClass("SOChatListViewController")]) return root;
+    for (UIViewController *child in root.childViewControllers) {
+        UIViewController *found = SoulFindChatListVC(child);
+        if (found) return found;
+    }
+    if (root.presentedViewController) return SoulFindChatListVC(root.presentedViewController);
+    return nil;
+}
+
+/* 会话列表 → 转发目标数组。只保留单聊（toUserIdEcpt 非空）。 */
+static NSArray<SoulForwardTarget *> *SoulForwardTargets(void) {
+    UIWindow *win = SoulKeyWindow();
+    UIViewController *root = win.rootViewController;
+    UIViewController *listVC = SoulFindChatListVC(root);
+    if (!listVC) {
+        SoulLog(@"forward: chat list vc not found");
+        return @[];
+    }
+    NSArray *rows = nil;
+    @try { rows = [listVC valueForKey:@"dataArr"]; } @catch (__unused NSException *e) {}
+    if (![rows isKindOfClass:[NSArray class]]) {
+        SoulLog(@"forward: dataArr unavailable");
+        return @[];
+    }
+    NSMutableArray<SoulForwardTarget *> *out = [NSMutableArray array];
+    for (id row in rows) {
+        if (![row isKindOfClass:[NSObject class]]) continue;
+        id sess = nil;
+        @try { sess = [row valueForKey:@"imSessionModel"]; } @catch (__unused NSException *e) {}
+        if (!sess) continue;
+        NSString *ecpt = SoulForwardStr(sess, @[@"toUserIdEcpt"]);
+        if (!ecpt.length) continue;                       /* 群聊跳过 */
+
+        /* 昵称优先从会话关联的用户模型取；contentStr 是最后一条消息内容，
+           不能当名字用。都取不到就退回 userId。 */
+        NSString *name = nil;
+        id userModel = nil;
+        @try { userModel = [sess valueForKey:@"userInfoModel"]; } @catch (__unused NSException *e) {}
+        if (!userModel) {
+            @try { userModel = [row valueForKey:@"chatUserModel"]; } @catch (__unused NSException *e) {}
+        }
+        name = SoulForwardStr(userModel, @[@"nickname", @"nickName", @"name", @"remarkName"]);
+        if (!name.length) name = SoulForwardStr(row, @[@"nickname", @"nickName"]);
+        if (!name.length) name = SoulForwardStr(sess, @[@"userId"]);
+
+        NSString *detail = SoulForwardStr(sess, @[@"lastMsgText"]);
+        SoulForwardTarget *t = [SoulForwardTarget new];
+        t.name = name.length ? name : ecpt;
+        t.detail = detail ?: @"";
+        t.userIdEcpt = ecpt;
+        t.session = sess;
+        [out addObject:t];
+    }
+    SoulLog(@"forward: targets=%lu", (unsigned long)out.count);
+    return out;
+}
+
+/* ---------- 按类型重发 ---------- */
+
+/* 把 SOIMSessionModel 还原成 sendXxx:to: 需要的 FollowUser。
+   宿主内部也走这条路：FollowUser 支持 initWithUserInfoPBData:，
+   但这里没有原始 PB，所以先尝试从会话里直接取现成对象。 */
+static id SoulForwardUserForTarget(SoulForwardTarget *target) {
+    if (!target.session) return nil;
+    id user = nil;
+    NSArray<NSString *> *keys = @[@"chatUser", @"user", @"toUser", @"followUser"];
+    for (NSString *k in keys) {
+        @try { user = [target.session valueForKey:k]; } @catch (__unused NSException *e) {}
+        if (user) return user;
+    }
+    return nil;
+}
+
+/* 找宿主正在用的 SOPCMessageSender 实例。
+   这个类没有单例入口（二进制里搜不到 sharedSender / senderInstance），
+   delegate/datasource 都是 weak，说明实例由外部持有。这里扫当前窗口的
+   VC 树，看谁持有它。 */
+static id SoulFindLiveSender(void) {
+    UIWindow *win = SoulKeyWindow();
+    if (!win) return nil;
+    NSMutableArray *stack = [NSMutableArray arrayWithObject:win.rootViewController];
+    while (stack.count) {
+        id obj = [stack lastObject];
+        [stack removeLastObject];
+        if (!obj) continue;
+        if ([obj isKindOfClass:objc_getClass("SOPCMessageSender")]) return obj;
+        if ([obj isKindOfClass:[UIViewController class]]) {
+            for (UIViewController *c in ((UIViewController *)obj).childViewControllers)
+                [stack addObject:c];
+            UIViewController *p = ((UIViewController *)obj).presentedViewController;
+            if (p) [stack addObject:p];
+        }
+        if ([obj isKindOfClass:[UIView class]]) {
+            for (UIView *sv in ((UIView *)obj).subviews) [stack addObject:sv];
+        }
+        /* 顺带看一层的关联对象持有者：VC 的 ivar 里可能挂着 sender */
+        unsigned int count = 0;
+        Ivar *ivars = class_copyIvarList([obj class], &count);
+        for (unsigned int i = 0; i < count && ivars; i++) {
+            const char *tn = ivar_getTypeEncoding(ivars[i]);
+            if (!tn || tn[0] != '@') continue;
+            NSString *typeStr = [NSString stringWithUTF8String:tn] ?: @"";
+            if (![typeStr containsString:@"Sender"]) continue;
+            @try {
+                id v = [obj valueForKey:[NSString stringWithUTF8String:ivar_getName(ivars[i])]];
+                if ([v isKindOfClass:objc_getClass("SOPCMessageSender")]) {
+                    if (ivars) free(ivars);
+                    return v;
+                }
+            } @catch (__unused NSException *e) {}
+        }
+        if (ivars) free(ivars);
+    }
+    return nil;
+}
+
+/* 发送文本：sendFastTextMessage:to: 是宿主自己发文本用的接口。 */
+static BOOL SoulForwardSendText(NSString *text, id to) {
+    Class senderCls = objc_getClass("SOPCMessageSender");
+    if (!senderCls || !text.length || !to) return NO;
+    SEL sel = NSSelectorFromString(@"sendFastTextMessage:to:");
+    if (![senderCls instancesRespondToSelector:sel]) return NO;
+
+    id sender = SoulFindLiveSender();
+    BOOL live = (sender != nil);
+    if (!sender) {
+        @try { sender = [senderCls new]; } @catch (__unused NSException *e) {}
+    }
+    if (!sender) return NO;
+    @try {
+        ((void (*)(id, SEL, id, id))objc_msgSend)(sender, sel, text, to);
+        SoulLog(@"forward: sent text len=%lu via %@ sender=%@",
+                (unsigned long)text.length, live ? @"live" : @"new", NSStringFromClass([sender class]));
+        return YES;
+    } @catch (NSException *e) {
+        SoulLog(@"forward: send text threw %@", e.reason);
+        return NO;
+    }
+}
+
 // —— O. 长按菜单增强（复制文本 / 复制转写 / 保存语音）——
 /* msg/cell 必须强引用：菜单弹出后 cell 可能被复用或回收，weak 会让
    点击菜单项时 self.msg 已经是 nil，表现为「点了没反应」。 */
@@ -2782,6 +3037,7 @@ static BOOL SoulInstallAdHooks(void) {
 - (void)soulCopyText;
 - (void)soulCopyVoiceText;
 - (void)soulSaveVoice;
+- (void)soulForwardCurrent;
 - (void)releaseTargets;
 @end
 
@@ -2842,6 +3098,9 @@ static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys);
 - (void)releaseTargets {
     self.msg = nil;
     self.cell = nil;
+}
+- (void)soulForwardCurrent {
+    SoulPresentForwardPicker(self.msg, self.cell);
 }
 @end
 
@@ -3028,6 +3287,15 @@ static NSMutableArray *SoulMenuItemsWithAdditions(NSArray *base, id msg, id cell
         id item = SoulMenuItemWithImage(itemCls, @"保存语音", borrowIcon,
                                         SoulMenuTools.shared, @selector(soulSaveVoice));
         if (item) { [items addObject:item]; added = YES; }
+    }
+    /* 转发：文本和语音先支持，图片/视频走另一条构造路径（后续补）。 */
+    if ((textCell || voiceCell) && !voiceCell && ![titles containsObject:@"转发"]) {
+        id item = SoulMenuItemWithImage(itemCls, @"转发", borrowIcon,
+                                        SoulMenuTools.shared, @selector(soulForwardCurrent));
+        if (item) {
+            [items addObject:item];
+            added = YES;
+        }
     }
     if (added) {
         SoulMenuTools.shared.msg = msg;
