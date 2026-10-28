@@ -546,6 +546,8 @@ static void SoulHidePanel(void);
 static UINavigationController *gSoulPanelNav = nil;
 static BOOL gSoulPanelTransitioning = NO;
 
+static void SoulInstallFloatingEntry(UIWindow *win);
+
 static void SoulHidePanel(void) {
     UINavigationController *nav = gSoulPanelNav;
     gSoulPanelNav = nil;
@@ -572,11 +574,22 @@ static void SoulHidePanel(void) {
     UIView *container = self.containerView;
     if (!container) return CGRectZero;
     CGSize size = container.bounds.size;
-    /* 比例参考 Android 版的 dialog：更扁更宽，而不是又窄又高的竖条。 */
     const CGFloat sideMargin = 24.0;
     const CGFloat maxW = 560.0;
     CGFloat w = MIN(size.width - sideMargin * 2.0, maxW);
-    CGFloat h = MIN(size.height * 0.62, 560.0);
+
+    /* 高度按内容自适应：根页只有几个分组，硬撑 62% 会留下大片空白。
+       取内容自然高度 + 导航栏，再夹在 [320, 屏高*0.8] 之间。 */
+    CGFloat contentH = 320.0;
+    UINavigationController *nav = (UINavigationController *)self.presentedViewController;
+    UIViewController *root = nav.viewControllers.firstObject;
+    if ([root isKindOfClass:[UITableViewController class]]) {
+        UITableView *tv = ((UITableViewController *)root).tableView;
+        [tv layoutIfNeeded];
+        CGFloat natural = tv.contentSize.height;
+        if (natural > 0.0) contentH = natural + nav.navigationBar.bounds.size.height;
+    }
+    CGFloat h = MIN(MAX(contentH, 320.0), size.height * 0.8);
     return CGRectMake((size.width - w) / 2.0, (size.height - h) / 2.0, w, h);
 }
 
@@ -639,8 +652,23 @@ static void SoulHidePanel(void) {
 
 static void SoulTogglePanel(void) {
     if (gSoulPanelTransitioning) return;
-    if (gSoulPanelNav) { SoulHidePanel(); return; }
+
+    /* 用「屏幕上是否真有我们的面板」来判断，而不是只看全局变量：
+       全局变量可能在 dismiss 未完成时残留，导致第一下被当成「关闭」吞掉，
+       用户体感就是「要按两下才出来」。 */
     UIViewController *top = SoulTopViewController();
+    UIViewController *presented = top.presentedViewController;
+    BOOL showing = (gSoulPanelNav && presented == gSoulPanelNav);
+    if (showing) { SoulHidePanel(); return; }
+
+    /* 有残留的旧面板先清掉，避免两个列表叠在一起。 */
+    if (gSoulPanelNav) {
+        UIViewController *stale = gSoulPanelNav;
+        gSoulPanelNav = nil;
+        if (stale.presentingViewController) {
+            [stale dismissViewControllerAnimated:NO completion:nil];
+        }
+    }
     if (!top) { SoulLog(@"toggle: no top view controller"); return; }
     SoulPanelNavController *nav =
         [[SoulPanelNavController alloc] initWithRootViewController:[SoulFxRootVC new]];
@@ -648,13 +676,24 @@ static void SoulTogglePanel(void) {
     nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
     nav.transitioningDelegate = nav;   /* 必须设，否则 custom 不生效、退化成全屏 */
 
-    /* 导航栏用不透明背景 + 系统语义色，保证标题在任何宿主主题下都清晰。
-       之前只设了 tintColor，标题在深色/浅色背景下对比度不够，看起来发虚。 */
+    /* 导航栏样式。之前只设了 tintColor，标题和「完成」按钮都走默认值，
+       在浮层面板里显得又矮又粗。这里显式给标题和按钮配字号与字重。 */
     UINavigationBarAppearance *ap = [[UINavigationBarAppearance alloc] init];
-    [ap configureWithDefaultBackground];      /* 自动适配深浅色 */
+    [ap configureWithDefaultBackground];
     ap.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
-    ap.titleTextAttributes = @{ NSForegroundColorAttributeName: [UIColor labelColor] };
-    ap.largeTitleTextAttributes = @{ NSForegroundColorAttributeName: [UIColor labelColor] };
+    ap.shadowColor = [UIColor clearColor];    /* 浮层里不需要底部分隔线 */
+    ap.titleTextAttributes = @{
+        NSForegroundColorAttributeName: [UIColor labelColor],
+        NSFontAttributeName: [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline],
+    };
+    UIBarButtonItemAppearance *btnAp = [[UIBarButtonItemAppearance alloc] init];
+    btnAp.normal.titleTextAttributes = @{
+        NSForegroundColorAttributeName: SoulAccent(),
+        NSFontAttributeName: [UIFont preferredFontForTextStyle:UIFontTextStyleBody],
+    };
+    btnAp.highlighted.titleTextAttributes = btnAp.normal.titleTextAttributes;
+    ap.buttonAppearance = btnAp;
+    ap.doneButtonAppearance = btnAp;
     nav.navigationBar.standardAppearance = ap;
     nav.navigationBar.scrollEdgeAppearance = ap;
     nav.navigationBar.compactAppearance = ap;
@@ -806,11 +845,12 @@ static void SoulHookTabDidAppear(id self, SEL _cmd, BOOL animated) {
     UILongPressGestureRecognizer *lp =
         [[UILongPressGestureRecognizer alloc] initWithTarget:[SoulTabPressTarget shared]
                                                       action:@selector(longPressed:)];
-    lp.minimumPressDuration = 0.55;
+    lp.minimumPressDuration = 0.35;   /* 0.55 太容易「第一下没到时间」而失败 */
     lp.cancelsTouchesInView = NO;
     lp.delegate = [SoulTabPressTarget shared];
     [tbc.tabBar addGestureRecognizer:lp];
     [SoulTabPressTarget shared].tabBarController = tbc;
+    SoulInstallFloatingEntry(tbc.view.window);
     NSMutableArray<NSString *> *titles = [NSMutableArray array];
     for (UITabBarItem *item in tbc.tabBar.items) [titles addObject:item.title ?: @"?"];
     SoulLog(@"tab: long-press installed %@ titles=%@", NSStringFromClass([tbc class]), titles);
@@ -1402,12 +1442,68 @@ static void SoulHookWebDidAppear(id self, SEL _cmd, BOOL animated) {
     gOrigWebDidAppear(self, _cmd, animated);
     NSString *url = SoulWebURL(self);
     SoulLog(@"web appear %@ url=%@", NSStringFromClass([self class]), url);
-    if (url.length) {
-        NSString *l = url.lowercaseString;
-        if ([l containsString:@"/setting"] || [l containsString:@"setting/#"]) {
-            SoulInstallEntry((UIViewController *)self);
-        }
-    }
+}
+
+/* 常驻悬浮入口：挂在主 TabBar 上，不依赖任何具体页面。
+   之前只装在 SOWebViewController 且 URL 含 setting 时，用户不进那个页面
+   就永远看不到图标，只能靠长按「自己」，看起来像「图标点不了」。 */
+static const void *kSoulFloatingInstalledKey = &kSoulFloatingInstalledKey;
+
+@interface SoulEntryProxy : NSObject
++ (instancetype)shared;
+- (void)soulEntryTapped:(id)sender;
+@end
+
+@implementation SoulEntryProxy
++ (instancetype)shared {
+    static SoulEntryProxy *p = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ p = [SoulEntryProxy new]; });
+    return p;
+}
+- (void)soulEntryTapped:(id)sender {
+    SoulLog(@"floating entry tapped");
+    SoulTogglePanel();
+}
+@end
+
+static void SoulInstallFloatingEntry(UIWindow *win) {
+    if (!win) return;
+    if (objc_getAssociatedObject(win, kSoulFloatingInstalledKey)) return;
+    objc_setAssociatedObject(win, kSoulFloatingInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    const CGFloat kSize = 44.0;
+    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:
+        [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
+    blur.translatesAutoresizingMaskIntoConstraints = NO;
+    blur.layer.cornerRadius = kSize / 2.0;
+    blur.layer.cornerCurve = kCACornerCurveContinuous;
+    blur.clipsToBounds = YES;
+    blur.userInteractionEnabled = YES;
+
+    UIImageSymbolConfiguration *cfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    btn.translatesAutoresizingMaskIntoConstraints = NO;
+    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg]
+         forState:UIControlStateNormal];
+    btn.tintColor = SoulAccent();
+    [btn addTarget:[SoulEntryProxy shared] action:@selector(soulEntryTapped:)
+ forControlEvents:UIControlEventTouchUpInside];
+
+    [win addSubview:blur];
+    [blur.contentView addSubview:btn];
+    [NSLayoutConstraint activateConstraints:@[
+        [blur.widthAnchor constraintEqualToConstant:kSize],
+        [blur.heightAnchor constraintEqualToConstant:kSize],
+        [blur.trailingAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.trailingAnchor constant:-16],
+        [blur.bottomAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.bottomAnchor constant:-96],
+        [btn.centerXAnchor constraintEqualToAnchor:blur.centerXAnchor],
+        [btn.centerYAnchor constraintEqualToAnchor:blur.centerYAnchor],
+        [btn.widthAnchor constraintEqualToConstant:kSize],
+        [btn.heightAnchor constraintEqualToConstant:kSize],
+    ]];
+    SoulLog(@"floating entry installed on %@", NSStringFromClass([win class]));
 }
 
 #pragma mark - 安装
