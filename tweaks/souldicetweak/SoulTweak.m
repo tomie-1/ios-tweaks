@@ -2626,8 +2626,10 @@ static NSString *SoulMenuText(id obj);
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
-        cell.textLabel.font = [UIFont systemFontOfSize:16];
-        cell.detailTextLabel.font = [UIFont systemFontOfSize:12];
+        cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+        cell.textLabel.adjustsFontForContentSizeCategory = YES;
+        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
     }
     SoulForwardTarget *t = self.targets[(NSUInteger)indexPath.row];
