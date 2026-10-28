@@ -2773,13 +2773,16 @@ static BOOL SoulInstallAdHooks(void) {
 }
 
 // —— O. 长按菜单增强（复制文本 / 复制转写 / 保存语音）——
+/* msg/cell 必须强引用：菜单弹出后 cell 可能被复用或回收，weak 会让
+   点击菜单项时 self.msg 已经是 nil，表现为「点了没反应」。 */
 @interface SoulMenuTools : NSObject
-@property (nonatomic, weak) id msg;
-@property (nonatomic, weak) id cell;
+@property (nonatomic, strong) id msg;
+@property (nonatomic, strong) id cell;
 + (instancetype)shared;
 - (void)soulCopyText;
 - (void)soulCopyVoiceText;
 - (void)soulSaveVoice;
+- (void)releaseTargets;
 @end
 
 static NSString *SoulMenuText(id obj);
@@ -2835,12 +2838,44 @@ static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys);
     }];
     [task resume];
 }
+/* 菜单关掉后释放强引用，避免一直攥着 cell / 消息对象。 */
+- (void)releaseTargets {
+    self.msg = nil;
+    self.cell = nil;
+}
 @end
 
-static id SoulMenuItem(Class cls, NSString *title, id target, SEL action) {
+/* GMenuItem 有两个构造：带 image 和不带的。之前一直用不带的那个，
+   菜单项就只剩下文字、没有图标。这里优先走带 image 的，图标复用宿主
+   已有菜单项的 image（复制类沿用宿主的复制图标观感，其余用首个可用项）。 */
+static id SoulMenuItemWithImage(Class cls, NSString *title, UIImage *image,
+                                id target, SEL action) {
     if (!cls) return nil;
+    SEL withImg = NSSelectorFromString(@"initWithTitle:image:target:action:");
+    if (image && [cls instancesRespondToSelector:withImg]) {
+        id item = ((id (*)(id, SEL, id, id, id, SEL))objc_msgSend)([cls alloc], withImg,
+                                                                  title, image, target, action);
+        if (item) return item;
+    }
     return ((id (*)(id, SEL, id, id, SEL))objc_msgSend)([cls alloc],
         NSSelectorFromString(@"initWithTitle:target:action:"), title, target, action);
+}
+
+static id SoulMenuItem(Class cls, NSString *title, id target, SEL action) {
+    return SoulMenuItemWithImage(cls, title, nil, target, action);
+}
+
+/* 从宿主现成的菜单项里挑一个图标借用，保证我们的条目和系统条目同风格。 */
+static UIImage *SoulBorrowMenuImage(NSArray *items) {
+    for (id it in items) {
+        UIImage *img = nil;
+        @try {
+            id v = [it valueForKey:@"image"];
+            if ([v isKindOfClass:[UIImage class]]) img = (UIImage *)v;
+        } @catch (__unused NSException *e) {}
+        if (img) return img;
+    }
+    return nil;
 }
 
 static BOOL SoulMenuStringValue(id v, NSString **out) {
@@ -2979,15 +3014,19 @@ static NSMutableArray *SoulMenuItemsWithAdditions(NSArray *base, id msg, id cell
         if ([t isKindOfClass:[NSString class]] && [(NSString *)t length]) [titles addObject:t];
     }
     BOOL added = NO;
+    UIImage *borrowIcon = SoulBorrowMenuImage(items);
     if (textCell && bubble.length && ![titles containsObject:@"复制文本"]) {
-        id item = SoulMenuItem(itemCls, @"复制文本", SoulMenuTools.shared, @selector(soulCopyText));
+        id item = SoulMenuItemWithImage(itemCls, @"复制文本", borrowIcon,
+                                        SoulMenuTools.shared, @selector(soulCopyText));
         if (item) { [items addObject:item]; added = YES; }
     } else if (voiceCell && audio.length && ![titles containsObject:@"复制转写文字"]) {
-        id item = SoulMenuItem(itemCls, @"复制转写文字", SoulMenuTools.shared, @selector(soulCopyVoiceText));
+        id item = SoulMenuItemWithImage(itemCls, @"复制转写文字", borrowIcon,
+                                        SoulMenuTools.shared, @selector(soulCopyVoiceText));
         if (item) { [items addObject:item]; added = YES; }
     }
     if (voiceCell && voice && ![titles containsObject:@"保存语音"]) {
-        id item = SoulMenuItem(itemCls, @"保存语音", SoulMenuTools.shared, @selector(soulSaveVoice));
+        id item = SoulMenuItemWithImage(itemCls, @"保存语音", borrowIcon,
+                                        SoulMenuTools.shared, @selector(soulSaveVoice));
         if (item) { [items addObject:item]; added = YES; }
     }
     if (added) {
@@ -3029,6 +3068,15 @@ static void SoulHookSetMenuItems(id self, SEL _cmd, id items) {
         }
     }
     if (gOrigSetMenuItems) ((void (*)(id, SEL, id))gOrigSetMenuItems)(self, _cmd, finalItems);
+    /* 菜单收起 10 秒后释放强引用，给用户留出点选的时间。
+       用序号防止「连续开多个菜单时，前一个的定时器把新目标清掉」。 */
+    static NSUInteger releaseSeq = 0;
+    NSUInteger mine = ++releaseSeq;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (mine != releaseSeq) return;
+        [SoulMenuTools.shared releaseTargets];
+    });
 }
 
 // —— P. 语音消息自动转文字（复用 cell 自带转写按钮）——
@@ -3036,20 +3084,28 @@ static NSMutableSet<NSString *> *gVoiceTextTried = nil;
 
 static void SoulMaybeAutoVoiceText(id cell, id layout) {
     if (!SoulDef(kFxAutoVoiceText)) return;
+    if (![cell isKindOfClass:[UIView class]]) return;
     NSString *className = NSStringFromClass([cell class]);
     if (![className containsString:@"Audio"]) return;
+
     id msg = nil;
     SEL msgSel = NSSelectorFromString(@"message");
     if (layout && [layout respondsToSelector:msgSel]) {
         msg = ((id (*)(id, SEL))objc_msgSend)(layout, msgSel);
     }
-    if (!msg) return;
+    if (!msg) {
+        static int noMsgLog = 0;
+        if (noMsgLog < 5) { noMsgLog++; SoulLog(@"voice-text: no msg cell=%@", className); }
+        return;
+    }
     NSString *existing = nil;
     @try { existing = [msg valueForKey:@"audioText"]; } @catch (__unused NSException *e) {}
     if ([existing isKindOfClass:[NSString class]] && existing.length) return;
+
     NSString *mid = nil;
     @try { mid = [[msg valueForKey:@"msgId"] description]; } @catch (__unused NSException *e) {}
     if (!mid.length) return;
+
     static dispatch_once_t once;
     dispatch_once(&once, ^{ gVoiceTextTried = [NSMutableSet set]; });
     @synchronized (gVoiceTextTried) {
@@ -3057,14 +3113,35 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
         if (gVoiceTextTried.count > 300) [gVoiceTextTried removeAllObjects];
         [gVoiceTextTried addObject:mid];
     }
-    SEL btnSel = NSSelectorFromString(@"convertVoiceBtn");
-    if (![cell respondsToSelector:btnSel]) return;
-    id btn = ((id (*)(id, SEL))objc_msgSend)(cell, btnSel);
-    if (![btn isKindOfClass:[UIControl class]]) return;
+
+    /* 直接走 cell 自己的转写入口 convertAudioBtnAction:。
+       之前用 convertVoiceBtn + sendActionsForControlEvents:，但那个按钮
+       由 showConvertTextBtn / hiddenConvertTextBtn 控制显隐，隐藏状态下
+       sendActions 不会触发任何回调，日志里于是看不到 voice-text 记录。 */
+    SEL actionSel = NSSelectorFromString(@"convertAudioBtnAction:");
+    BOOL hasAction = [cell respondsToSelector:actionSel];
+    if (!hasAction) {
+        static int noActionLog = 0;
+        if (noActionLog < 5) {
+            noActionLog++;
+            SoulLog(@"voice-text: no convertAudioBtnAction cell=%@", className);
+        }
+        return;
+    }
+    UIView *cellView = (UIView *)cell;
+    __weak UIView *weakCell = cellView;
+    NSString *msgId = [mid copy];
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!SoulDef(kFxAutoVoiceText)) return;
-        [(UIControl *)btn sendActionsForControlEvents:UIControlEventTouchUpInside];
-        SoulLog(@"voice-text: auto convert msg=%@", mid);
+        UIView *c = weakCell;
+        if (!c || !SoulDef(kFxAutoVoiceText)) return;
+        SEL sel = NSSelectorFromString(@"convertAudioBtnAction:");
+        if (![c respondsToSelector:sel]) return;
+        @try {
+            ((void (*)(id, SEL, id))objc_msgSend)(c, sel, nil);
+            SoulLog(@"voice-text: convertAudioBtnAction msg=%@", msgId);
+        } @catch (NSException *e) {
+            SoulLog(@"voice-text: convertAudioBtnAction threw %@", e.reason);
+        }
     });
 }
 
