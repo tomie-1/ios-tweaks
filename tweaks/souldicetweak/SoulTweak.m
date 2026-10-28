@@ -586,7 +586,7 @@ static void SoulInstallEntry(UIViewController *vc) {
         [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
     blur.translatesAutoresizingMaskIntoConstraints = NO;
     blur.layer.cornerRadius = kSize / 2.0;
-    blur.layer.cornerCurve = kCALayerCornerCurveContinuous;
+    blur.layer.cornerCurve = kCACornerCurveContinuous;
     blur.clipsToBounds = YES;
     blur.userInteractionEnabled = NO;
 
