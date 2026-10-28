@@ -2794,6 +2794,8 @@ static BOOL SoulInstallAdHooks(void) {
 static void SoulPresentForwardPicker(id msg, id cell);
 static NSArray<SoulForwardTarget *> *SoulForwardTargets(void);
 static id SoulForwardUserForTarget(SoulForwardTarget *target);
+static BOOL SoulForwardSendText(NSString *text, id to);
+static NSString *SoulMenuText(id obj);
 
 /* 选目标会话的列表。样式跟随系统 grouped 列表，避免和宿主风格冲突。 */
 @interface SoulForwardPickerVC : UITableViewController
@@ -3041,7 +3043,6 @@ static BOOL SoulForwardSendText(NSString *text, id to) {
 - (void)releaseTargets;
 @end
 
-static NSString *SoulMenuText(id obj);
 static id SoulMenuVoice(id obj);
 static NSString *SoulMenuVoiceURL(id voice);
 static NSString *SoulStringValue(id obj, NSArray<NSString *> *keys);
