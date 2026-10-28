@@ -544,15 +544,98 @@ static void SoulHidePanel(void) {
     }
 }
 
+/* 悬浮式面板：居中、固定尺寸、圆角、背景变暗，点外面关闭。
+   PageSheet 是「从底部升起的抽屉」，不是悬浮卡片——之前一直搞错了。 */
+@interface SoulPanelPresentation : UIPresentationController
+@end
+
+@implementation SoulPanelPresentation {
+    UIView *_dimming;
+}
+
+- (CGRect)frameOfPresentedViewInContainerView {    UIView *container = self.containerView;
+    if (!container) return CGRectZero;
+    CGSize size = container.bounds.size;
+    const CGFloat sideMargin = 28.0;
+    const CGFloat maxW = 520.0;
+    CGFloat w = MIN(size.width - sideMargin * 2.0, maxW);
+    CGFloat h = MIN(size.height * 0.72, 620.0);
+    return CGRectMake((size.width - w) / 2.0, (size.height - h) / 2.0, w, h);
+}
+
+- (void)presentationTransitionWillBegin {
+    UIView *container = self.containerView;
+    if (!container) return;
+    _dimming = [[UIView alloc] initWithFrame:container.bounds];
+    _dimming.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.0];
+    _dimming.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [_dimming addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self
+                                                                          action:@selector(soulDimTapped)]];
+    [container insertSubview:_dimming atIndex:0];
+
+    [self.presentedViewController.transitionCoordinator animateAlongsideTransition:^(id ctx) {
+        self->_dimming.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.38];
+    } completion:nil];
+}
+
+- (void)dismissalTransitionWillBegin {
+    [self.presentedViewController.transitionCoordinator animateAlongsideTransition:^(id ctx) {
+        self->_dimming.backgroundColor = [UIColor clearColor];
+    } completion:^(id ctx) {
+        [self->_dimming removeFromSuperview];
+        self->_dimming = nil;
+    }];
+}
+
+- (void)soulDimTapped {
+    [self.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)containerViewDidLayoutSubviews {
+    [super containerViewDidLayoutSubviews];
+    self.presentedView.frame = [self frameOfPresentedViewInContainerView];
+    /* 圆角在呈现视图上，不在 nav 上，避免内容溢出圆角。 */
+    self.presentedView.layer.cornerRadius = 16.0;
+    self.presentedView.layer.cornerCurve = kCACornerCurveContinuous;
+    self.presentedView.clipsToBounds = YES;
+}
+
+@end
+
+@interface SoulPanelNavController : UINavigationController
+@end
+
+@implementation SoulPanelNavController
+- (UIPresentationController *)presentationControllerForPresentedViewController:(UIViewController *)presented
+                                                      presentingViewController:(UIViewController *)presenting
+                                                          sourceViewController:(UIViewController *)source {
+    return [[SoulPanelPresentation alloc] initWithPresentedViewController:presented
+                                                 presentingViewController:presenting];
+}
+@end
+
 static void SoulTogglePanel(void) {
     if (gSoulPanelTransitioning) return;
     if (gSoulPanelNav) { SoulHidePanel(); return; }
     UIViewController *top = SoulTopViewController();
     if (!top) { SoulLog(@"toggle: no top view controller"); return; }
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[SoulFxRootVC new]];
-    nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    nav.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
+    SoulPanelNavController *nav =
+        [[SoulPanelNavController alloc] initWithRootViewController:[SoulFxRootVC new]];
+    nav.modalPresentationStyle = UIModalPresentationCustom;
+    nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+
+    /* 导航栏用不透明背景 + 系统语义色，保证标题在任何宿主主题下都清晰。
+       之前只设了 tintColor，标题在深色/浅色背景下对比度不够，看起来发虚。 */
+    UINavigationBarAppearance *ap = [[UINavigationBarAppearance alloc] init];
+    [ap configureWithDefaultBackground];      /* 自动适配深浅色 */
+    ap.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
+    ap.titleTextAttributes = @{ NSForegroundColorAttributeName: [UIColor labelColor] };
+    ap.largeTitleTextAttributes = @{ NSForegroundColorAttributeName: [UIColor labelColor] };
+    nav.navigationBar.standardAppearance = ap;
+    nav.navigationBar.scrollEdgeAppearance = ap;
+    nav.navigationBar.compactAppearance = ap;
     nav.navigationBar.tintColor = SoulAccent();
+
     gSoulPanelNav = nav;
     gSoulPanelTransitioning = YES;
     [top presentViewController:nav animated:YES completion:^{ gSoulPanelTransitioning = NO; }];
@@ -588,7 +671,9 @@ static void SoulInstallEntry(UIViewController *vc) {
     blur.layer.cornerRadius = kSize / 2.0;
     blur.layer.cornerCurve = kCACornerCurveContinuous;
     blur.clipsToBounds = YES;
-    blur.userInteractionEnabled = NO;
+    /* 必须保持可交互：关掉它，加在 contentView 里的按钮收不到触摸，
+       表现就是「图标看得见但点不动」。 */
+    blur.userInteractionEnabled = YES;
 
     UIImageSymbolConfiguration *cfg =
         [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
@@ -611,6 +696,7 @@ static void SoulInstallEntry(UIViewController *vc) {
         [btn.widthAnchor constraintEqualToConstant:kSize],
         [btn.heightAnchor constraintEqualToConstant:kSize],
     ]];
+    [vc.view bringSubviewToFront:blur];
 }
 
 @implementation UIViewController (SoulEntry)
