@@ -553,7 +553,8 @@ static void SoulHidePanel(void) {
     UIView *_dimming;
 }
 
-- (CGRect)frameOfPresentedViewInContainerView {    UIView *container = self.containerView;
+- (CGRect)frameOfPresentedViewInContainerView {
+    UIView *container = self.containerView;
     if (!container) return CGRectZero;
     CGSize size = container.bounds.size;
     const CGFloat sideMargin = 28.0;
@@ -591,10 +592,12 @@ static void SoulHidePanel(void) {
     [self.presentedViewController dismissViewControllerAnimated:YES completion:nil];
 }
 
-- (void)containerViewDidLayoutSubviews {
-    [super containerViewDidLayoutSubviews];
+/* 标准回调是 containerViewWillLayoutSubviews；Did 版本不保证被调用，
+   漏掉它会导致 presentedView 保持全屏尺寸。 */
+- (void)containerViewWillLayoutSubviews {
+    [super containerViewWillLayoutSubviews];
+    if (!self.presentedView) return;
     self.presentedView.frame = [self frameOfPresentedViewInContainerView];
-    /* 圆角在呈现视图上，不在 nav 上，避免内容溢出圆角。 */
     self.presentedView.layer.cornerRadius = 16.0;
     self.presentedView.layer.cornerCurve = kCACornerCurveContinuous;
     self.presentedView.clipsToBounds = YES;
@@ -602,7 +605,11 @@ static void SoulHidePanel(void) {
 
 @end
 
-@interface SoulPanelNavController : UINavigationController
+/* UIModalPresentationCustom 只有在设置了 transitioningDelegate 时
+   才会走 presentationControllerForPresentedViewController。
+   UINavigationController 本身不实现 UIViewControllerTransitioningDelegate，
+   所以这里让 nav 自己兼任，否则会退化成全屏。 */
+@interface SoulPanelNavController : UINavigationController <UIViewControllerTransitioningDelegate>
 @end
 
 @implementation SoulPanelNavController
@@ -623,6 +630,7 @@ static void SoulTogglePanel(void) {
         [[SoulPanelNavController alloc] initWithRootViewController:[SoulFxRootVC new]];
     nav.modalPresentationStyle = UIModalPresentationCustom;
     nav.modalTransitionStyle = UIModalTransitionStyleCrossDissolve;
+    nav.transitioningDelegate = nav;   /* 必须设，否则 custom 不生效、退化成全屏 */
 
     /* 导航栏用不透明背景 + 系统语义色，保证标题在任何宿主主题下都清晰。
        之前只设了 tintColor，标题在深色/浅色背景下对比度不够，看起来发虚。 */
