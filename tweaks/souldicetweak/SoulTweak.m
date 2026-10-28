@@ -3114,17 +3114,21 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
         [gVoiceTextTried addObject:mid];
     }
 
-    /* 直接走 cell 自己的转写入口 convertAudioBtnAction:。
-       之前用 convertVoiceBtn + sendActionsForControlEvents:，但那个按钮
-       由 showConvertTextBtn / hiddenConvertTextBtn 控制显隐，隐藏状态下
-       sendActions 不会触发任何回调，日志里于是看不到 voice-text 记录。 */
+    /* 转写有两条入口，实际用哪条取决于按钮当时的状态：
+       1. convertAudioBtnAction: —— cell 自己的处理函数，最直接；
+       2. convertVoiceBtn + sendActions —— 按钮已显示时也能走通
+          （按钮受 showConvertTextBtn / hiddenConvertTextBtn 控制，
+           隐藏时这条路径不会触发任何回调）。
+       先试 1，取不到再退回 2，两者都不行就记一条日志便于排查。 */
     SEL actionSel = NSSelectorFromString(@"convertAudioBtnAction:");
+    SEL btnSel = NSSelectorFromString(@"convertVoiceBtn");
     BOOL hasAction = [cell respondsToSelector:actionSel];
-    if (!hasAction) {
-        static int noActionLog = 0;
-        if (noActionLog < 5) {
-            noActionLog++;
-            SoulLog(@"voice-text: no convertAudioBtnAction cell=%@", className);
+    BOOL hasBtn = [cell respondsToSelector:btnSel];
+    if (!hasAction && !hasBtn) {
+        static int noEntryLog = 0;
+        if (noEntryLog < 5) {
+            noEntryLog++;
+            SoulLog(@"voice-text: no entry cell=%@", className);
         }
         return;
     }
@@ -3134,14 +3138,27 @@ static void SoulMaybeAutoVoiceText(id cell, id layout) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIView *c = weakCell;
         if (!c || !SoulDef(kFxAutoVoiceText)) return;
+
         SEL sel = NSSelectorFromString(@"convertAudioBtnAction:");
-        if (![c respondsToSelector:sel]) return;
-        @try {
-            ((void (*)(id, SEL, id))objc_msgSend)(c, sel, nil);
-            SoulLog(@"voice-text: convertAudioBtnAction msg=%@", msgId);
-        } @catch (NSException *e) {
-            SoulLog(@"voice-text: convertAudioBtnAction threw %@", e.reason);
+        if ([c respondsToSelector:sel]) {
+            @try {
+                ((void (*)(id, SEL, id))objc_msgSend)(c, sel, nil);
+                SoulLog(@"voice-text: convertAudioBtnAction msg=%@", msgId);
+                return;
+            } @catch (NSException *e) {
+                SoulLog(@"voice-text: action threw %@", e.reason);
+            }
         }
+        SEL bs = NSSelectorFromString(@"convertVoiceBtn");
+        if ([c respondsToSelector:bs]) {
+            id btn = ((id (*)(id, SEL))objc_msgSend)(c, bs);
+            if ([btn isKindOfClass:[UIControl class]]) {
+                [(UIControl *)btn sendActionsForControlEvents:UIControlEventTouchUpInside];
+                SoulLog(@"voice-text: sendActions fallback msg=%@", msgId);
+                return;
+            }
+        }
+        SoulLog(@"voice-text: no usable entry msg=%@ cell=%@", msgId, NSStringFromClass([c class]));
     });
 }
 
