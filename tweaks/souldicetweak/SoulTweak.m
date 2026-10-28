@@ -546,7 +546,6 @@ static void SoulHidePanel(void);
 static UINavigationController *gSoulPanelNav = nil;
 static BOOL gSoulPanelTransitioning = NO;
 
-static void SoulInstallFloatingEntry(UIWindow *win);
 
 static void SoulHidePanel(void) {
     UINavigationController *nav = gSoulPanelNav;
@@ -744,7 +743,7 @@ static void SoulInstallEntry(UIViewController *vc) {
     btn.translatesAutoresizingMaskIntoConstraints = NO;
     [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg]
          forState:UIControlStateNormal];
-    btn.tintColor = [UIColor tintColor];
+    btn.tintColor = SoulAccent();
     [btn addTarget:vc action:@selector(soulEntryTapped:) forControlEvents:UIControlEventTouchUpInside];
 
     [vc.view addSubview:blur];
@@ -850,7 +849,6 @@ static void SoulHookTabDidAppear(id self, SEL _cmd, BOOL animated) {
     lp.delegate = [SoulTabPressTarget shared];
     [tbc.tabBar addGestureRecognizer:lp];
     [SoulTabPressTarget shared].tabBarController = tbc;
-    SoulInstallFloatingEntry(tbc.view.window);
     NSMutableArray<NSString *> *titles = [NSMutableArray array];
     for (UITabBarItem *item in tbc.tabBar.items) [titles addObject:item.title ?: @"?"];
     SoulLog(@"tab: long-press installed %@ titles=%@", NSStringFromClass([tbc class]), titles);
@@ -1442,68 +1440,12 @@ static void SoulHookWebDidAppear(id self, SEL _cmd, BOOL animated) {
     gOrigWebDidAppear(self, _cmd, animated);
     NSString *url = SoulWebURL(self);
     SoulLog(@"web appear %@ url=%@", NSStringFromClass([self class]), url);
-}
-
-/* 常驻悬浮入口：挂在主 TabBar 上，不依赖任何具体页面。
-   之前只装在 SOWebViewController 且 URL 含 setting 时，用户不进那个页面
-   就永远看不到图标，只能靠长按「自己」，看起来像「图标点不了」。 */
-static const void *kSoulFloatingInstalledKey = &kSoulFloatingInstalledKey;
-
-@interface SoulEntryProxy : NSObject
-+ (instancetype)shared;
-- (void)soulEntryTapped:(id)sender;
-@end
-
-@implementation SoulEntryProxy
-+ (instancetype)shared {
-    static SoulEntryProxy *p = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ p = [SoulEntryProxy new]; });
-    return p;
-}
-- (void)soulEntryTapped:(id)sender {
-    SoulLog(@"floating entry tapped");
-    SoulTogglePanel();
-}
-@end
-
-static void SoulInstallFloatingEntry(UIWindow *win) {
-    if (!win) return;
-    if (objc_getAssociatedObject(win, kSoulFloatingInstalledKey)) return;
-    objc_setAssociatedObject(win, kSoulFloatingInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    const CGFloat kSize = 44.0;
-    UIVisualEffectView *blur = [[UIVisualEffectView alloc] initWithEffect:
-        [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterial]];
-    blur.translatesAutoresizingMaskIntoConstraints = NO;
-    blur.layer.cornerRadius = kSize / 2.0;
-    blur.layer.cornerCurve = kCACornerCurveContinuous;
-    blur.clipsToBounds = YES;
-    blur.userInteractionEnabled = YES;
-
-    UIImageSymbolConfiguration *cfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-    btn.translatesAutoresizingMaskIntoConstraints = NO;
-    [btn setImage:[UIImage systemImageNamed:@"sparkles" withConfiguration:cfg]
-         forState:UIControlStateNormal];
-    btn.tintColor = SoulAccent();
-    [btn addTarget:[SoulEntryProxy shared] action:@selector(soulEntryTapped:)
- forControlEvents:UIControlEventTouchUpInside];
-
-    [win addSubview:blur];
-    [blur.contentView addSubview:btn];
-    [NSLayoutConstraint activateConstraints:@[
-        [blur.widthAnchor constraintEqualToConstant:kSize],
-        [blur.heightAnchor constraintEqualToConstant:kSize],
-        [blur.trailingAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.trailingAnchor constant:-16],
-        [blur.bottomAnchor constraintEqualToAnchor:win.safeAreaLayoutGuide.bottomAnchor constant:-96],
-        [btn.centerXAnchor constraintEqualToAnchor:blur.centerXAnchor],
-        [btn.centerYAnchor constraintEqualToAnchor:blur.centerYAnchor],
-        [btn.widthAnchor constraintEqualToConstant:kSize],
-        [btn.heightAnchor constraintEqualToConstant:kSize],
-    ]];
-    SoulLog(@"floating entry installed on %@", NSStringFromClass([win class]));
+    if (url.length) {
+        NSString *l = url.lowercaseString;
+        if ([l containsString:@"/setting"] || [l containsString:@"setting/#"]) {
+            SoulInstallEntry((UIViewController *)self);
+        }
+    }
 }
 
 #pragma mark - 安装
