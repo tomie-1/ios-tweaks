@@ -326,7 +326,15 @@ static UIWindow *SoulHostWindow(void) {
 /* 全部改用系统语义色：跟随 iOS 外观、深浅色、辅助功能里的「增强对比度」
    和「加深颜色」自动适配。之前是手挑的粉色（1.0,0.42,0.55），
    和任何系统界面都不一致。 */
-static UIColor *SoulAccent(void)   { return [UIColor tintColor]; }
+/* Soul 的品牌青绿（界面里「关注」按钮、消息气泡用的就是这个色）。
+   深浅色下都保持同一色相，只在暗色下略微提亮，保证在深色背景上不发闷。 */
+static UIColor *SoulAccent(void) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *t) {
+        return (t.userInterfaceStyle == UIUserInterfaceStyleDark)
+            ? [UIColor colorWithRed:0.20 green:0.85 blue:0.75 alpha:1.0]
+            : [UIColor colorWithRed:0.00 green:0.78 blue:0.68 alpha:1.0];
+    }];
+}
 
 #pragma mark - hook 安装工具
 
@@ -455,17 +463,23 @@ static void SoulHidePanel(void);
     static NSString *cid = @"soulfx-group";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cid];
     if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:cid];
+        /* 目录型列表用 Value1 而不是 Subtitle：系统里 Subtitle 是给设置项
+           本身用的（如「关于本机 / 序列号」），拿它做导航目录会显得零碎。 */
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:cid];
         cell.textLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
         cell.textLabel.adjustsFontForContentSizeCategory = YES;
-        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        cell.detailTextLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
         cell.detailTextLabel.adjustsFontForContentSizeCategory = YES;
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
     SoulFxGroup *group = _groups[indexPath.row];
     cell.textLabel.text = group.title;
-    cell.detailTextLabel.text = group.summary;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    /* 右侧显示「已启用 3 / 12」，替代原来那行灰色说明文字。 */
+    NSInteger on = 0;
+    for (SoulFxRow *r in group.rows) if (SoulDefOn(r.key, r.defaultOn)) on++;
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld / %lu",
+                                 (long)on, (unsigned long)group.rows.count];
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -514,6 +528,7 @@ static void SoulHidePanel(void);
         sw = (UISwitch *)cell.accessoryView;
     }
     sw.tag = indexPath.row;
+    sw.onTintColor = SoulAccent();      /* Soul 青绿 */
     sw.on = SoulDefOn(row.key, row.defaultOn);
     cell.textLabel.text = row.title;
     return cell;
@@ -557,10 +572,11 @@ static void SoulHidePanel(void) {
     UIView *container = self.containerView;
     if (!container) return CGRectZero;
     CGSize size = container.bounds.size;
-    const CGFloat sideMargin = 28.0;
-    const CGFloat maxW = 520.0;
+    /* 比例参考 Android 版的 dialog：更扁更宽，而不是又窄又高的竖条。 */
+    const CGFloat sideMargin = 24.0;
+    const CGFloat maxW = 560.0;
     CGFloat w = MIN(size.width - sideMargin * 2.0, maxW);
-    CGFloat h = MIN(size.height * 0.72, 620.0);
+    CGFloat h = MIN(size.height * 0.62, 560.0);
     return CGRectMake((size.width - w) / 2.0, (size.height - h) / 2.0, w, h);
 }
 
