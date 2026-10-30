@@ -588,6 +588,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 
 @interface TKBarView ()
 @property(nonatomic, strong) UIScrollView *functionScroll;
+@property(nonatomic, strong) UIStackView *functionStack;
 @property(nonatomic, strong) NSLayoutConstraint *functionRowHeightConstraint;
 @property(nonatomic, strong) NSLayoutConstraint *rowGapConstraint;
 @property(nonatomic, strong) TKKeyButton *functionToggleButton;
@@ -661,6 +662,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     functionStack.axis = UILayoutConstraintAxisHorizontal;
     functionStack.alignment = UIStackViewAlignmentCenter;
     functionStack.spacing = TKButtonSpacing;
+    self.functionStack = functionStack;
     [functionScroll addSubview:functionStack];
 
     self.functionRowHeightConstraint =
@@ -674,8 +676,12 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [backdrop.topAnchor constraintEqualToAnchor:self.topAnchor],
         [backdrop.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
 
-        // F 行在上，主行在下。两行之间的间距和 F 行高度都是可变的，收起时
-        // 一起归零，键栏才会真正变矮而不是留一块空白。
+        // F 行在上，主行在下。行高与行距都可变，收起时一起归零，键栏才会
+        // 真正变矮而不是留一块空白。宽度固定，高度由 constraint 控制。
+        //
+        // F 行的底边锚在主行上方，顶边随高度自由——收起时行高变成 0，
+        // 消失的是顶边那一侧，内容跟着往上收。若反过来锚顶边，收缩时底边
+        // 上移会把 F 行推进主行，看起来像两层叠在一起。
         [functionScroll.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [functionScroll.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
         [functionScroll.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor
@@ -707,11 +713,11 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
                            constant:-8.0],
         // 内容区高度固定在按键高度：滚动视图要知道内容多高才能横向滚动。
         [functionScroll.contentLayoutGuide.heightAnchor constraintEqualToConstant:TKButtonSize],
-        [functionStack.centerYAnchor
-            constraintEqualToAnchor:functionScroll.contentLayoutGuide.centerYAnchor],
-        // 不绑 stack 的高度与底部：收起时行高为 0，绑死会把按键压扁或让
-        // Auto Layout 打破约束、把按钮画到行外。让它按自身高度在内容区居中，
-        // 行变矮时由滚动视图裁掉溢出部分。
+        // 内容锚在底部而不是居中：收起时行高从 40 缩到 0，锚底的内容会留在
+        // 原处、由容器从上方裁掉（抽屉效果）；若居中，内容会跟着行高一起
+        // 往上走，行高越小越贴近上一行，看起来就是两层叠在一起。
+        [functionStack.bottomAnchor
+            constraintEqualToAnchor:functionScroll.contentLayoutGuide.bottomAnchor],
         [functionStack.heightAnchor constraintEqualToConstant:TKButtonSize],
     ]];
 
@@ -803,19 +809,18 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 // 还没准备好，也不该有人来改 frame。
 //
 // 收起/展开的动画要素：
-//   · F 行用 alpha 淡入淡出。hidden 不可动画，先设 hidden 会让 F 键瞬间消失，
-//     高度才开始收缩，看着就是「啪一下没了，空白再慢慢挤掉」。
+//   · 只动行高与行距，内容锚在行底部（见上方约束说明），收起时自然被容器
+//     从上方裁掉，不需要额外的淡出或位移。
 //   · 只对 F 行那一层 layoutIfNeeded，不要对整棵子树：整棵会把 12 个 F 键
 //     连同按钮一起重排，动画期间它们被压扁。
-//   · 收起动画结束再补 hidden，让不可见的行彻底退出命中测试。
+//   · hidden 不可动画，收起等动画结束再补，让它彻底退出命中测试。
 - (void)applyFunctionRowStateAnimated:(BOOL)animated notify:(BOOL)notify {
     BOOL expanded = self.isFunctionRowExpanded;
-    // 展开时先取消隐藏，否则淡入看不见。
+    // 展开时先取消隐藏，否则看不到内容。
     if (expanded) {
         self.functionScroll.hidden = NO;
     }
     void (^changes)(void) = ^{
-        self.functionScroll.alpha = expanded ? 1.0 : 0.0;
         self.functionRowHeightConstraint.constant = expanded ? TKRowHeight : 0.0;
         self.rowGapConstraint.constant = expanded ? TKRowGap : 0.0;
         self.functionToggleButton.backgroundColor =
