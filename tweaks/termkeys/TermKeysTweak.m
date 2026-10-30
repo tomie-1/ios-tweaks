@@ -651,6 +651,9 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     functionScroll.alwaysBounceHorizontal = YES;
     functionScroll.bounces = YES;
     functionScroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
+    // 收起时高度会缩到 0，而里面的按键有固定高度、无法跟着缩。裁掉溢出
+    // 的部分，否则按钮会画到行外、叠到下面那行上。
+    functionScroll.clipsToBounds = YES;
     [backdrop.contentView addSubview:functionScroll];
 
     UIStackView *functionStack = [[UIStackView alloc] init];
@@ -702,9 +705,14 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [functionStack.trailingAnchor
             constraintEqualToAnchor:functionScroll.contentLayoutGuide.trailingAnchor
                            constant:-8.0],
-        [functionStack.topAnchor constraintEqualToAnchor:functionScroll.contentLayoutGuide.topAnchor],
-        [functionStack.bottomAnchor constraintEqualToAnchor:functionScroll.contentLayoutGuide.bottomAnchor],
-        [functionStack.heightAnchor constraintEqualToAnchor:functionScroll.frameLayoutGuide.heightAnchor],
+        // 内容区高度固定在按键高度：滚动视图要知道内容多高才能横向滚动。
+        [functionScroll.contentLayoutGuide.heightAnchor constraintEqualToConstant:TKButtonSize],
+        [functionStack.centerYAnchor
+            constraintEqualToAnchor:functionScroll.contentLayoutGuide.centerYAnchor],
+        // 不绑 stack 的高度与底部：收起时行高为 0，绑死会把按键压扁或让
+        // Auto Layout 打破约束、把按钮画到行外。让它按自身高度在内容区居中，
+        // 行变矮时由滚动视图裁掉溢出部分。
+        [functionStack.heightAnchor constraintEqualToConstant:TKButtonSize],
     ]];
 
     [topStack addArrangedSubview:TKMakeShiftButton(TKKeyWidth)];
