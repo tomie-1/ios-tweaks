@@ -577,10 +577,6 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 @interface TKBarView : UIView
 @end
 
-@interface TKBarView ()
-@property(nonatomic, strong) UIScrollView *functionScroll;
-@end
-
 @implementation TKBarView
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -627,7 +623,6 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     // 上面这行：只有 F1–F12。放不下一屏，可以真正横向滚动。
     UIScrollView *functionScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     functionScroll.translatesAutoresizingMaskIntoConstraints = NO;
-    self.functionScroll = functionScroll;
     functionScroll.showsHorizontalScrollIndicator = NO;
     functionScroll.alwaysBounceHorizontal = YES;
     functionScroll.bounces = YES;
@@ -1016,6 +1011,10 @@ static BOOL TKInstallIGhostHooks(void) {
             return;
         }
         if (CGRectIsEmpty(endFrame)) {
+            // 收起键盘时也可能报空 frame。这里按「键盘不在」处理，否则键栏
+            // 会留在屏幕上、安全区也不归位。
+            self.bar.hidden = YES;
+            [self updateReservationForWindow:window visible:NO];
             return;
         }
         if (!self.bar || self.hostWindow != window) {
