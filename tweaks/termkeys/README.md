@@ -1,13 +1,16 @@
 # TermKeys
 
-给终端类 App 补上 Shift、`NL`、方向键和 F1–F12。系统键盘没有这些键，键盘扩展也传不了真正的修饰键状态，所以插件把按键交给终端自己的按键入口（拿不到时退回 xterm 序列）。
+给 iGhostVT 补上 Shift、`NL`、方向键和 F1–F12。系统键盘没有这些键，键盘扩展也传不了真正的修饰键状态，所以插件把按键交给终端自己的按键入口（拿不到时退回 xterm 序列）。
+
+只对 `wiki.qaq.iGhostVT` 生效：`TermKeysTweak.plist` 的过滤器和代码入口都限定同一个 bundle，注入到别的 App 里会直接跳过，既不挂 hook 也不画键栏。
 
 ## 布局
 
 一条两行键栏浮在系统键盘之上，**不并入 `inputAccessoryView`**。
 
-- 第一行固定不滚动：`⇧`、`NL` 靠左，方向键靠右（按住连发）。
-- 第二行只放 `F1`–`F12`，可横向滑动。
+- 上面一行只放 `F1`–`F12`，可横向滑动，默认展开。
+- 下面一行固定不滚动：`Shift`、`NL` 靠左，中间是 `F` 折叠键，方向键靠右（按住连发）。
+- 点 `F` 收起上面一行，键栏高度从两行降为一行（`TKBarHeight()` 按行高、行距与内边距算出，不写死数值），再点一下展开。
 
 不并入附件栏是有原因的：附件栏一旦变高，键盘总高度随之变大，iOS 15 的键盘避让会把整窗内容上顶，终端首行压到状态栏下面。所以键栏改成独立的浮层，终端用根视图的 `additionalSafeAreaInsets` 精确让出这块高度——键盘高度不变，布局不会被顶。
 
@@ -19,14 +22,15 @@ App 自带的附件栏一个按键都不改，只在它上面挂一层 Shift 拦
 
 拦截器只在「Shift 亮着 + 落点是这几个键 + 手指没移动」时才接管，其余情况一律放行，横向滑动不受影响。
 
-- `⇧`：单击一次生效，0.3 秒内再点一次锁定（右上角白点），再点解除。
+- `Shift`：单击一次生效，0.3 秒内再点一次锁定（右上角白点），再点解除。键面用文字而不是 `⇧` 图标——iOS 的 shift 符号和 Caps Lock 几乎一样，容易被读成「大写锁定」。三态配色：灰底深字（熄灭）→ 浅蓝底蓝字（生效一次）→ 实心蓝底白字加白点（锁定）。
+- `F`：展开或收起上面一行 F 键，展开时键面是浅蓝底蓝字。
 - `NL`：发送 Ctrl+J 插入换行，用于 Codex / Claude Code 这类终端 Agent。
 - F1–F12：走 Ghostty 原生 `sendKey`，不会被拆成单独的 ESC。
 
 ## 安装
 
-- 越狱：deb 的过滤器默认包含 iGhostVT、CareServer、Blink、iSH、Termius、Prompt、Secure ShellFish，其他 App 改 `TermKeysTweak.plist` 后重新打包。
-- TrollFools：把 `TermKeys.dylib` 注入目标 App。
+- 越狱：deb 的过滤器只包含 iGhostVT，其他 App 不会被注入。
+- TrollFools：把 `TermKeys.dylib` 注入 iGhostVT。
 
 ## 诊断日志
 
@@ -40,4 +44,4 @@ defaults write wiki.qaq.iGhostVT TermKeys.diag -bool YES
 
 ## 限制
 
-iOS 键盘扩展只能向输入框插入文本，不能把真正的硬件修饰键状态交给宿主 App。本插件因此把 Shift 和 F 键编码成终端序列；它适合 xterm 兼容终端，不能让普通 App 获得 PC 那样的 F 键语义。普通文本 App 的系统键盘本来就有 Shift。
+iOS 键盘扩展只能向输入框插入文本，不能把真正的硬件修饰键状态交给宿主 App。本插件因此把 Shift 和 F 键编码成终端序列；它只服务 iGhostVT 这类 xterm 兼容终端，不能让普通 App 获得 PC 那样的 F 键语义。
