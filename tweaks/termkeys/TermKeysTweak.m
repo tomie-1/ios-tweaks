@@ -793,10 +793,21 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 //
 // notify 与 animated 分开：构造期间要把约束摆成初始状态，但那时 controller
 // 还没准备好，也不该有人来改 frame。
+//
+// 收起/展开的动画要素：
+//   · F 行用 alpha 淡入淡出。hidden 不可动画，先设 hidden 会让 F 键瞬间消失，
+//     高度才开始收缩，看着就是「啪一下没了，空白再慢慢挤掉」。
+//   · 只对 F 行那一层 layoutIfNeeded，不要对整棵子树：整棵会把 12 个 F 键
+//     连同按钮一起重排，动画期间它们被压扁。
+//   · 收起动画结束再补 hidden，让不可见的行彻底退出命中测试。
 - (void)applyFunctionRowStateAnimated:(BOOL)animated notify:(BOOL)notify {
     BOOL expanded = self.isFunctionRowExpanded;
-    self.functionScroll.hidden = !expanded;
+    // 展开时先取消隐藏，否则淡入看不见。
+    if (expanded) {
+        self.functionScroll.hidden = NO;
+    }
     void (^changes)(void) = ^{
+        self.functionScroll.alpha = expanded ? 1.0 : 0.0;
         self.functionRowHeightConstraint.constant = expanded ? TKRowHeight : 0.0;
         self.rowGapConstraint.constant = expanded ? TKRowGap : 0.0;
         self.functionToggleButton.backgroundColor =
@@ -805,15 +816,30 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [self.functionToggleButton setTitleColor:(expanded ? UIColor.systemBlueColor
                                                           : UIColor.labelColor)
                                         forState:UIControlStateNormal];
-        [self layoutIfNeeded];
+        // 只让 F 行所在的那一层完成布局。构造期还没进窗口，跳过。
+        if (self.window) {
+            [self.functionScroll.superview layoutIfNeeded];
+        }
+        // 回调放在动画块内：controller 在这里改键栏 frame 与终端安全区，
+        // 才会和上面这些约束变化落在同一个事务里。
+        if (notify && self.onFunctionRowToggle) {
+            self.onFunctionRowToggle(expanded);
+        }
+    };
+    void (^completion)(BOOL) = ^(__unused BOOL finished) {
+        if (!expanded) {
+            self.functionScroll.hidden = YES;
+        }
     };
     if (animated) {
-        [UIView animateWithDuration:0.2 animations:changes];
+        [UIView animateWithDuration:0.2
+                              delay:0
+                            options:UIViewAnimationOptionBeginFromCurrentState
+                         animations:changes
+                         completion:completion];
     } else {
         changes();
-    }
-    if (notify && self.onFunctionRowToggle) {
-        self.onFunctionRowToggle(expanded);
+        completion(YES);
     }
 }
 
@@ -1132,8 +1158,9 @@ static BOOL TKInstallIGhostHooks(void) {
 // 收起/展开只改键栏自己的高度：底边仍贴着键盘上沿，所以上边上下移动。
 // 高度变了，安全区预留也得跟着改，否则终端底部会多让或少让一行。
 //
-// 安全区与 frame 放在同一个动画块里改：两者分开改的话，终端会先跳一下再
-// 跟着键栏动。键栏隐藏时（键盘已收起）不需要动画，但安全区仍要归位。
+// 这个回调由键栏在它的动画块内部调用，所以这里直接改 frame 和 inset 就会
+// 落进同一个动画事务——键栏高度与终端底部同步变化。若在这里再包一层
+// UIView animate，会另起事务，两边各走各的曲线，看起来就是错开动。
 - (void)handleFunctionRowToggle:(BOOL)expanded {
     self.functionRowExpanded = expanded;
     TKBarView *bar = self.bar;
@@ -1145,17 +1172,8 @@ static BOOL TKInstallIGhostHooks(void) {
     CGRect frame = bar.frame;
     frame.size.height = height;
     frame.origin.y = self.keyboardTopY - height;
-
-    BOOL visible = !bar.hidden;
-    void (^changes)(void) = ^{
-        bar.frame = frame;
-        [self updateReservationForWindow:window visible:visible];
-    };
-    if (visible) {
-        [UIView animateWithDuration:0.2 animations:changes];
-    } else {
-        changes();
-    }
+    bar.frame = frame;
+    [self updateReservationForWindow:window visible:!bar.hidden];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification {
