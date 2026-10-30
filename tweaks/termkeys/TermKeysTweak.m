@@ -34,14 +34,10 @@
 static const CGFloat TKRowHeight = 40.0;
 static const CGFloat TKRowGap = 4.0;
 static const CGFloat TKBarPadding = 4.0;
+// 两行固定：上面 F1–F12，下面 Shift/NL/方向键。高度不随状态变化。
+static const CGFloat TKBarHeight = TKRowHeight * 2 + TKRowGap + TKBarPadding * 2;
 static const CGFloat TKButtonSize = 34.0;
 static const CGFloat TKButtonSpacing = 7.0;
-
-// 键栏高度随 F 行展开状态变化：收起时只剩下面那一行。
-static CGFloat TKBarHeight(BOOL functionRowExpanded) {
-    return TKBarPadding * 2 + TKRowHeight +
-           (functionRowExpanded ? TKRowGap + TKRowHeight : 0.0);
-}
 
 #pragma mark - 诊断日志
 
@@ -579,34 +575,19 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
 #pragma mark - 键栏
 
 @interface TKBarView : UIView
-/// F 行是否展开。收起时键栏只剩一行，高度由 TKBarHeight() 给出。
-@property(nonatomic, assign, getter=isFunctionRowExpanded) BOOL functionRowExpanded;
-/// 展开状态变化后回调。键栏不改自己的 frame，交给 controller 重算。
-@property(nonatomic, copy) void (^onFunctionRowToggle)(BOOL expanded);
-- (instancetype)initWithFrame:(CGRect)frame expanded:(BOOL)expanded;
 @end
 
 @interface TKBarView ()
 @property(nonatomic, strong) UIScrollView *functionScroll;
-@property(nonatomic, strong) UIStackView *functionStack;
-@property(nonatomic, strong) NSLayoutConstraint *functionRowHeightConstraint;
-@property(nonatomic, strong) NSLayoutConstraint *rowGapConstraint;
-@property(nonatomic, strong) TKKeyButton *functionToggleButton;
-- (void)applyFunctionRowStateAnimated:(BOOL)animated notify:(BOOL)notify;
 @end
 
 @implementation TKBarView
 
 - (instancetype)initWithFrame:(CGRect)frame {
-    return [self initWithFrame:frame expanded:YES];
-}
-
-- (instancetype)initWithFrame:(CGRect)frame expanded:(BOOL)expanded {
     self = [super initWithFrame:frame];
     if (!self) {
         return nil;
     }
-    _functionRowExpanded = expanded;
 
     self.backgroundColor = UIColor.clearColor;
     self.layer.cornerRadius = 14.0;
@@ -624,9 +605,9 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     backdrop.clipsToBounds = YES;
     [self addSubview:backdrop];
 
-    // 下面这行：Shift、NL 靠左，F 折叠键居中，方向键靠右。布局固定，但照样
-    // 允许横向拖动——内容宽度等于可视宽度，所以拖到头会回弹，不会有内容
-    // 滚出屏幕。这是手感，不是滚动。
+    // 下面这行：Shift、NL 靠左，方向键靠右。布局固定，但照样允许横向拖动
+    // ——内容宽度等于可视宽度，所以拖到头会回弹，不会有内容滚出屏幕。这是
+    // 手感，不是滚动。
     UIScrollView *topScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     topScroll.translatesAutoresizingMaskIntoConstraints = NO;
     topScroll.showsHorizontalScrollIndicator = NO;
@@ -643,8 +624,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     topStack.spacing = TKButtonSpacing;
     [topScroll addSubview:topStack];
 
-    // 上面这行：只有 F1–F12，默认展开，由下面那行中间的键收起。放不下
-    // 一屏，可以真正横向滚动。
+    // 上面这行：只有 F1–F12。放不下一屏，可以真正横向滚动。
     UIScrollView *functionScroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
     functionScroll.translatesAutoresizingMaskIntoConstraints = NO;
     self.functionScroll = functionScroll;
@@ -652,8 +632,6 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     functionScroll.alwaysBounceHorizontal = YES;
     functionScroll.bounces = YES;
     functionScroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeNone;
-    // 收起时高度会缩到 0，而里面的按键有固定高度、无法跟着缩。裁掉溢出
-    // 的部分，否则按钮会画到行外、叠到下面那行上。
     functionScroll.clipsToBounds = YES;
     [backdrop.contentView addSubview:functionScroll];
 
@@ -662,13 +640,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     functionStack.axis = UILayoutConstraintAxisHorizontal;
     functionStack.alignment = UIStackViewAlignmentCenter;
     functionStack.spacing = TKButtonSpacing;
-    self.functionStack = functionStack;
     [functionScroll addSubview:functionStack];
-
-    self.functionRowHeightConstraint =
-        [functionScroll.heightAnchor constraintEqualToConstant:expanded ? TKRowHeight : 0.0];
-    self.rowGapConstraint = [topScroll.topAnchor constraintEqualToAnchor:functionScroll.bottomAnchor
-                                                               constant:expanded ? TKRowGap : 0.0];
 
     [NSLayoutConstraint activateConstraints:@[
         [backdrop.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
@@ -676,22 +648,20 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [backdrop.topAnchor constraintEqualToAnchor:self.topAnchor],
         [backdrop.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
 
-        // F 行在上，主行在下。行高与行距都可变，收起时一起归零，键栏才会
-        // 真正变矮而不是留一块空白。宽度固定，高度由 constraint 控制。
-        //
-        // F 行的底边锚在主行上方，顶边随高度自由——收起时行高变成 0，
-        // 消失的是顶边那一侧，内容跟着往上收。若反过来锚顶边，收缩时底边
-        // 上移会把 F 行推进主行，看起来像两层叠在一起。
+        // F 行在上，主行在下，两行等高手行距固定。
         [functionScroll.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [functionScroll.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
         [functionScroll.topAnchor constraintEqualToAnchor:backdrop.contentView.topAnchor
                                                  constant:TKBarPadding],
-        self.functionRowHeightConstraint,
+        [functionScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
 
         [topScroll.leadingAnchor constraintEqualToAnchor:backdrop.contentView.leadingAnchor],
         [topScroll.trailingAnchor constraintEqualToAnchor:backdrop.contentView.trailingAnchor],
-        self.rowGapConstraint,
+        [topScroll.topAnchor constraintEqualToAnchor:functionScroll.bottomAnchor
+                                            constant:TKRowGap],
         [topScroll.heightAnchor constraintEqualToConstant:TKRowHeight],
+        [topScroll.bottomAnchor constraintEqualToAnchor:backdrop.contentView.bottomAnchor
+                                               constant:-TKBarPadding],
 
         // 栈的整体必须作为内容一起移动：两边都锚内容区，宽度显式等于
         // 可视宽度。若把右边锚到 frame 上，右侧方向键会被固定在屏幕上，
@@ -713,11 +683,8 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
                            constant:-8.0],
         // 内容区高度固定在按键高度：滚动视图要知道内容多高才能横向滚动。
         [functionScroll.contentLayoutGuide.heightAnchor constraintEqualToConstant:TKButtonSize],
-        // 内容锚在底部而不是居中：收起时行高从 40 缩到 0，锚底的内容会留在
-        // 原处、由容器从上方裁掉（抽屉效果）；若居中，内容会跟着行高一起
-        // 往上走，行高越小越贴近上一行，看起来就是两层叠在一起。
-        [functionStack.bottomAnchor
-            constraintEqualToAnchor:functionScroll.contentLayoutGuide.bottomAnchor],
+        [functionStack.centerYAnchor
+            constraintEqualToAnchor:functionScroll.contentLayoutGuide.centerYAnchor],
         [functionStack.heightAnchor constraintEqualToConstant:TKButtonSize],
     ]];
 
@@ -736,22 +703,6 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
     [leftSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow
                                                forAxis:UILayoutConstraintAxisHorizontal];
     [topStack addArrangedSubview:leftSpacer];
-
-    // F 折叠键放在原来那片空白里：点一下收起上面一行 F 键，再点一下展开。
-    // 展开时键面用与 Shift armed 同一档浅蓝，跟其它键区分开。
-    TKKeyButton *functionToggle = TKMakeButton(@"F", TKKeyWidth, TKKeyFont());
-    functionToggle.accessibilityLabel = @"功能键";
-    functionToggle.accessibilityHint = @"点按展开或收起 F1–F12";
-    __weak TKBarView *weakBar = self;
-    functionToggle.onTap = ^{
-        TKBarView *bar = weakBar;
-        if (!bar) {
-            return;
-        }
-        bar.functionRowExpanded = !bar.isFunctionRowExpanded;
-    };
-    [topStack addArrangedSubview:functionToggle];
-    self.functionToggleButton = functionToggle;
 
     UIView *rightSpacer = [[UIView alloc] initWithFrame:CGRectZero];
     [rightSpacer setContentHuggingPriority:UILayoutPriorityDefaultLow
@@ -790,70 +741,7 @@ static TKKeyButton *TKMakeShiftButton(CGFloat width) {
         [functionStack addArrangedSubview:button];
     }
 
-    [self applyFunctionRowStateAnimated:NO notify:NO];
     return self;
-}
-
-- (void)setFunctionRowExpanded:(BOOL)expanded {
-    if (_functionRowExpanded == expanded) {
-        return;
-    }
-    _functionRowExpanded = expanded;
-    [self applyFunctionRowStateAnimated:YES notify:YES];
-}
-
-// 只改内部约束：键栏自己的 frame 由 controller 按 TKBarHeight() 重算，
-// 这里不碰，避免两边各算一次高度。
-//
-// notify 与 animated 分开：构造期间要把约束摆成初始状态，但那时 controller
-// 还没准备好，也不该有人来改 frame。
-//
-// 收起/展开的动画要素：
-//   · 只动行高与行距，内容锚在行底部（见上方约束说明），收起时自然被容器
-//     从上方裁掉，不需要额外的淡出或位移。
-//   · 只对 F 行那一层 layoutIfNeeded，不要对整棵子树：整棵会把 12 个 F 键
-//     连同按钮一起重排，动画期间它们被压扁。
-//   · hidden 不可动画，收起等动画结束再补，让它彻底退出命中测试。
-- (void)applyFunctionRowStateAnimated:(BOOL)animated notify:(BOOL)notify {
-    BOOL expanded = self.isFunctionRowExpanded;
-    // 展开时先取消隐藏，否则看不到内容。
-    if (expanded) {
-        self.functionScroll.hidden = NO;
-    }
-    void (^changes)(void) = ^{
-        self.functionRowHeightConstraint.constant = expanded ? TKRowHeight : 0.0;
-        self.rowGapConstraint.constant = expanded ? TKRowGap : 0.0;
-        self.functionToggleButton.backgroundColor =
-            expanded ? [UIColor.systemBlueColor colorWithAlphaComponent:0.18]
-                     : UIColor.tertiarySystemFillColor;
-        [self.functionToggleButton setTitleColor:(expanded ? UIColor.systemBlueColor
-                                                          : UIColor.labelColor)
-                                        forState:UIControlStateNormal];
-        // 只让 F 行所在的那一层完成布局。构造期还没进窗口，跳过。
-        if (self.window) {
-            [self.functionScroll.superview layoutIfNeeded];
-        }
-        // 回调放在动画块内：controller 在这里改键栏 frame 与终端安全区，
-        // 才会和上面这些约束变化落在同一个事务里。
-        if (notify && self.onFunctionRowToggle) {
-            self.onFunctionRowToggle(expanded);
-        }
-    };
-    void (^completion)(BOOL) = ^(__unused BOOL finished) {
-        if (!expanded) {
-            self.functionScroll.hidden = YES;
-        }
-    };
-    if (animated) {
-        [UIView animateWithDuration:0.2
-                              delay:0
-                            options:UIViewAnimationOptionBeginFromCurrentState
-                         animations:changes
-                         completion:completion];
-    } else {
-        changes();
-        completion(YES);
-    }
 }
 
 @end
@@ -1043,10 +931,6 @@ static BOOL TKInstallIGhostHooks(void) {
 @interface TKKeyboardBarController : NSObject
 @property(nonatomic, strong) TKBarView *bar;
 @property(nonatomic, weak) UIWindow *hostWindow;
-/// F 行展开状态。键栏换窗口重建时沿用上一次的选择。
-@property(nonatomic, assign) BOOL functionRowExpanded;
-/// 最近一次键盘上沿在窗口坐标里的 y，收起/展开时用它重排键栏 frame。
-@property(nonatomic, assign) CGFloat keyboardTopY;
 /// 上一次写入安全区的根控制器。换根时基线要重新取，否则新根永远拿不到
 /// 键栏高度。
 @property(nonatomic, weak) UIViewController *reservedController;
@@ -1072,7 +956,6 @@ static BOOL TKInstallIGhostHooks(void) {
     if (!self) {
         return nil;
     }
-    _functionRowExpanded = YES;
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     for (NSString *name in @[UIKeyboardWillChangeFrameNotification, UIKeyboardDidChangeFrameNotification]) {
         [center addObserver:self selector:@selector(keyboardWillChangeFrame:) name:name object:nil];
@@ -1103,7 +986,7 @@ static BOOL TKInstallIGhostHooks(void) {
     if (!root) {
         return;
     }
-    CGFloat wanted = visible ? TKBarHeight(self.functionRowExpanded) : 0;
+    CGFloat wanted = visible ? TKBarHeight : 0;
     BOOL newRoot = self.reservedController != root;
     if (!newRoot && fabs(self.reservedHeight - wanted) < 0.5) {
         return;
@@ -1137,12 +1020,7 @@ static BOOL TKInstallIGhostHooks(void) {
         }
         if (!self.bar || self.hostWindow != window) {
             [self.bar removeFromSuperview];
-            self.bar = [[TKBarView alloc] initWithFrame:CGRectZero
-                                               expanded:self.functionRowExpanded];
-            __weak TKKeyboardBarController *weakSelf = self;
-            self.bar.onFunctionRowToggle = ^(BOOL expanded) {
-                [weakSelf handleFunctionRowToggle:expanded];
-            };
+            self.bar = [[TKBarView alloc] initWithFrame:CGRectZero];
             [window addSubview:self.bar];
             self.hostWindow = window;
         }
@@ -1150,43 +1028,20 @@ static BOOL TKInstallIGhostHooks(void) {
         // 键盘 frame 已包含宿主自带的附件栏，所以键栏直接叠在它上沿。
         CGRect keyboardInWindow = [window convertRect:endFrame fromWindow:nil];
         CGFloat keyboardTop = CGRectGetMinY(keyboardInWindow);
-        CGFloat barHeight = TKBarHeight(self.functionRowExpanded);
-        self.keyboardTopY = keyboardTop;
         BOOL visible = [self keyboardIsOnScreenInWindow:window frame:endFrame];
         self.bar.hidden = !visible;
         [UIView animateWithDuration:(duration > 0 ? duration : 0.22)
                               delay:0
                             options:(UIViewAnimationOptions)(curve << 16)
                          animations:^{
-                             self.bar.frame = CGRectMake(0, keyboardTop - barHeight,
-                                                         CGRectGetWidth(window.bounds), barHeight);
+                             self.bar.frame = CGRectMake(0, keyboardTop - TKBarHeight,
+                                                         CGRectGetWidth(window.bounds), TKBarHeight);
                          }
                          completion:nil];
         [window bringSubviewToFront:self.bar];
 
         [self updateReservationForWindow:window visible:visible];
     });
-}
-
-// 收起/展开只改键栏自己的高度：底边仍贴着键盘上沿，所以上边上下移动。
-// 高度变了，安全区预留也得跟着改，否则终端底部会多让或少让一行。
-//
-// 这个回调由键栏在它的动画块内部调用，所以这里直接改 frame 和 inset 就会
-// 落进同一个动画事务——键栏高度与终端底部同步变化。若在这里再包一层
-// UIView animate，会另起事务，两边各走各的曲线，看起来就是错开动。
-- (void)handleFunctionRowToggle:(BOOL)expanded {
-    self.functionRowExpanded = expanded;
-    TKBarView *bar = self.bar;
-    UIWindow *window = self.hostWindow;
-    if (!bar || !window) {
-        return;
-    }
-    CGFloat height = TKBarHeight(expanded);
-    CGRect frame = bar.frame;
-    frame.size.height = height;
-    frame.origin.y = self.keyboardTopY - height;
-    bar.frame = frame;
-    [self updateReservationForWindow:window visible:!bar.hidden];
 }
 
 - (void)keyboardWillHide:(NSNotification *)notification {
