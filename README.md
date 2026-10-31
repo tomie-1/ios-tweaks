@@ -9,12 +9,19 @@
 | [soultweak](tweaks/soultweak/README.md) | `com.tomie.soultweak` | SOUL 6.17 助手 | 自用 |
 | [tftool](tweaks/tftool/README.md) | `com.tomie.tftool` | TestFlight 批量停止测试 | 自用 |
 | [trollfoolsnoads](tweaks/trollfoolsnoads/README.md) | `com.tomie.trollfoolsnoads` | TrollFools 去广告 | 自用 |
-| [tfdevices](tweaks/tfdevices/README.md) | `com.tomie.tfdevices` | TestFlight 设备伪装 | 实验性，已停用 |
-| [tfinstallbypass](tweaks/tfinstallbypass/README.md) | `com.tomie.tfinstallbypass` | installd 兼容性放行 | 实验性，已停用 |
 | [loonbatch](tweaks/loonbatch/README.md) | `com.tomie.loonbatch` | Loon 插件/规则/节点批量管理 | 自用 |
 | [termkeys](tweaks/termkeys/README.md) | `com.tomie.termkeys` | 终端类 App 补 Shift、NL、F1–F12（iGhostVT 加进自带键栏，不改布局） | 自用 |
 
 功能、入口和已知问题见各插件目录下的 `README.md`。
+
+## 已归档
+
+以下插件已停用，仅保留源码，不参与构建，也不会发布到越狱源：
+
+- [tfdevices](archive/tweaks/tfdevices/README.md)（`com.tomie.tfdevices`）
+- [tfinstallbypass](archive/tweaks/tfinstallbypass/README.md)（`com.tomie.tfinstallbypass`）
+
+归档插件统一放在 `archive/tweaks/`。只有 `tweaks/` 下的插件会被 Actions 构建和发布。
 
 ## 构建
 
