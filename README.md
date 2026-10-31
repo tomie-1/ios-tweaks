@@ -25,7 +25,7 @@ bash scripts/build_repo.sh .
 ## 添加源
 
 ```
-<公开后的地址>
+https://tomie-1.github.io/ios-tweaks/
 ```
 
 > 注意：Sileo / Zebra 无法携带鉴权，**私有库不能直接作为源**。
@@ -46,4 +46,4 @@ dylib 本体是同一个文件，差异只在安装路径与架构标记。
 | 包 | 说明 |
 |---|---|
 | `com.tomie.trollfoolsnoads` | TrollFools 去广告（官方/修改版通用） |
-| `com.soulfx.souldicetweak` | SOUL 助手 |
+| `com.tomie.soultweak` | SoulTweak（SOUL 6.17，含去广告、防撤回、表情等） |
