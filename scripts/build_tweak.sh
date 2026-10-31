@@ -25,7 +25,9 @@ MAINTAINER="${MAINTAINER:-unknown}"
 AUTHOR="${AUTHOR:-$MAINTAINER}"
 MIN_IOS="${MIN_IOS:-15.0}"
 KILL_APP="${KILL_APP:-}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-${PKG_VERSION:-1.0.0}}"
+PKG_REPLACES="${PKG_REPLACES:-}"
+PKG_CONFLICTS="${PKG_CONFLICTS:-}"
 FILTER="${FILTER:-}"
 
 WORK="$(mktemp -d)"
@@ -70,6 +72,8 @@ Author: $AUTHOR
 Section: Tweaks
 Depends: mobilesubstrate
 EOF
+  if [ -n "$PKG_REPLACES" ]; then echo "Replaces: $PKG_REPLACES" >> "$d/DEBIAN/control"; fi
+  if [ -n "$PKG_CONFLICTS" ]; then echo "Conflicts: $PKG_CONFLICTS" >> "$d/DEBIAN/control"; fi
   if [ -n "$KILL_APP" ]; then
     printf '#!/bin/bash\nkillall -9 %s 2>/dev/null || true\nexit 0\n' "$KILL_APP" > "$d/DEBIAN/postinst"
     chmod 755 "$d/DEBIAN/postinst"

@@ -6,7 +6,7 @@
 
 | 目录 | 包名 | 说明 | 状态 |
 |---|---|---|---|
-| [souldicetweak](tweaks/souldicetweak/README.md) | `com.soulfx.souldicetweak` | SOUL 6.17 助手 | 自用 |
+| [soultweak](tweaks/soultweak/README.md) | `com.tomie.soultweak` | SOUL 6.17 助手 | 自用 |
 | [tftool](tweaks/tftool/README.md) | `com.tomie.tftool` | TestFlight 批量停止测试 | 自用 |
 | [trollfoolsnoads](tweaks/trollfoolsnoads/README.md) | `com.tomie.trollfoolsnoads` | TrollFools 去广告 | 自用 |
 | [tfdevices](tweaks/tfdevices/README.md) | `com.tomie.tfdevices` | TestFlight 设备伪装 | 实验性，已停用 |
