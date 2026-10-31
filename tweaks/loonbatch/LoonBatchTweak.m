@@ -283,22 +283,32 @@ static NSArray *arrayByRemovingPlugins(NSArray *src, NSArray *remove) {
     return out;
 }
 
-static BOOL itemEnabled(id item) {
+// 规则页的条目有时是包着 Rule/RemoteRule 的壳，启用状态在里层对象上。
+static id toggleObject(id item) {
     id t = pluginObject(item);
+    if (!t || t == item) {
+        id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule");
+        if (inner) t = inner;
+    }
+    return t ?: item;
+}
+
+static BOOL itemEnabled(id item) {
+    id t = toggleObject(item);
     if ([t respondsToSelector:NSSelectorFromString(@"enable")]) return boolv(t, @"enable");
     if ([t respondsToSelector:NSSelectorFromString(@"enabled")]) return boolv(t, @"enabled");
     return NO;
 }
 
 static BOOL itemSetEnabled(id item, BOOL enable) {
-    id t = pluginObject(item);
+    id t = toggleObject(item);
     if ([t respondsToSelector:NSSelectorFromString(@"setEnable:")]) return setBoolv(t, @"setEnable:", enable);
     if ([t respondsToSelector:NSSelectorFromString(@"setEnabled:")]) return setBoolv(t, @"setEnabled:", enable);
     return NO;
 }
 
 static BOOL itemCanToggle(id item) {
-    id t = pluginObject(item);
+    id t = toggleObject(item);
     return [t respondsToSelector:NSSelectorFromString(@"setEnable:")]
         || [t respondsToSelector:NSSelectorFromString(@"setEnabled:")];
 }
@@ -612,6 +622,202 @@ static BOOL reorderPluginSection(NSString *path, NSArray *plugins) {
     return YES;
 }
 
+#pragma mark - 规则/节点段落同步
+
+// 插件、规则、节点最终都要落到同一个 .lcf。saveConfigPlayload 负责把内存模型
+// 写盘，但不保证按内存数组顺序排列，也不一定把远程项的 enabled 状态写回对应
+// 行。这里按模型重排段落、同步 enabled，让原生页面重新 initData 后看到一致的
+// 结果；删除时再按 key 丢掉已经不在模型里的残留行。
+
+static NSString *headerForKind(NSString *kind) {
+    if ([kind isEqualToString:@"plugins"]) return @"[Plugin]";
+    if ([kind isEqualToString:@"localRules"]) return @"[Rule]";
+    if ([kind isEqualToString:@"remoteRules"]) return @"[Remote Rule]";
+    if ([kind isEqualToString:@"localNodes"]) return @"[Proxy]";
+    if ([kind isEqualToString:@"remoteProxies"]) return @"[Remote Proxy]";
+    return nil;
+}
+
+static BOOL kindIsRemote(NSString *kind) {
+    return [kind isEqualToString:@"remoteRules"] || [kind isEqualToString:@"remoteProxies"];
+}
+
+static id ruleInnerObject(id item) {
+    return msg0(item, @"remoteRule") ?: msg0(item, @"rule") ?: item;
+}
+
+// 配置行的稳定标识：插件和远程规则用首个逗号前的 URL；节点用 "name =" 前的
+// 名字；本地规则用整行文本（规则本身含逗号，不能按逗号切分）。
+static NSString *keyForConfigLine(NSString *kind, NSString *line) {
+    NSString *t = trimmed(line);
+    if (!t.length || [t hasPrefix:@"#"]) return nil;
+    if ([kind isEqualToString:@"plugins"] || [kind isEqualToString:@"remoteRules"])
+        return trimmed([[t componentsSeparatedByString:@","] firstObject]);
+    if ([kind isEqualToString:@"localNodes"] || [kind isEqualToString:@"remoteProxies"]) {
+        NSRange eq = [t rangeOfString:@"="];
+        if (eq.location == NSNotFound) return nil;
+        return trimmed([t substringToIndex:eq.location]);
+    }
+    return t;
+}
+
+static NSString *keyForItem(NSString *kind, id item) {
+    if ([kind isEqualToString:@"plugins"]) return pluginURLForObject(item);
+    if ([kind isEqualToString:@"remoteRules"]) {
+        id inner = ruleInnerObject(item);
+        NSString *u = strv(inner, @"remoteUrl") ?: strv(item, @"remoteUrl") ?: strv(inner, @"url");
+        return u.length ? u : remoteRuleTitle(inner);
+    }
+    if ([kind isEqualToString:@"localRules"]) {
+        NSString *p = strv(ruleInnerObject(item), @"playload");
+        return p.length ? trimmed(p) : nil;
+    }
+    NSString *name = strv(item, @"proxyName");
+    if (!name.length) name = strv(item, @"remarks");
+    if (!name.length) name = strv(item, @"name");
+    return name.length ? name : nil;
+}
+
+// 删除时按稳定 key 从数组里剔除，避免页面给的是包装对象、和配置数组里的
+// 元素不是同一个指针时删不干净。
+static NSArray *arrayByRemovingKeys(NSArray *src, NSString *kind, NSSet *keys) {
+    if (!src) return @[];
+    if (!keys.count) return src;
+    NSMutableArray *out = [NSMutableArray array];
+    for (id x in src) {
+        NSString *k = keyForItem(kind, x);
+        if (k.length && [keys containsObject:k]) continue;
+        [out addObject:x];
+    }
+    return out;
+}
+
+static NSString *generatedLineForItem(NSString *kind, id item) {
+    if ([kind isEqualToString:@"plugins"]) {
+        NSString *g = msg0(pluginObject(item), @"generatePlayload");
+        NSString *first = [[g componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] firstObject];
+        return trimmed(first);
+    }
+    if ([kind isEqualToString:@"localRules"]) {
+        return strv(ruleInnerObject(item), @"playload");
+    }
+    if ([kind isEqualToString:@"remoteRules"]) {
+        id inner = ruleInnerObject(item);
+        NSString *u = strv(inner, @"remoteUrl") ?: strv(item, @"remoteUrl");
+        if (!u.length) return nil;
+        NSString *policy = strv(inner, @"strategyName") ?: strv(inner, @"policy") ?: @"DIRECT";
+        NSString *tag = strv(inner, @"tag") ?: remoteRuleTitle(inner);
+        return [NSString stringWithFormat:@"%@, policy=%@, tag=%@, enabled=%@",
+                u, policy, tag, itemEnabled(item) ? @"true" : @"false"];
+    }
+    NSString *name = keyForItem(kind, item);
+    if (!name.length) return nil;
+    if ([kind isEqualToString:@"localNodes"]) {
+        NSString *v = strv(item, @"playload");
+        if (!v.length) v = msg0(item, @"generateLoonFormat");
+        if (!v.length) return nil;
+        return [NSString stringWithFormat:@"%@ = %@", name, trimmed(v)];
+    }
+    NSString *u = strv(item, @"remoteUrl");
+    if (!u.length) return nil;
+    return [NSString stringWithFormat:@"%@ = %@, enabled=%@",
+            name, u, itemEnabled(item) ? @"true" : @"false"];
+}
+
+static BOOL rewriteSectionFromItems(NSString *path, NSString *kind, NSArray *items, NSSet *removedKeys) {
+    NSString *header = headerForKind(kind);
+    if (!path.length || !header.length) return NO;
+    NSError *err = nil;
+    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
+    if (!text) { LBL(@"读取配置失败 %@", err); return NO; }
+    NSMutableArray *lines = [[text componentsSeparatedByString:@"\n"] mutableCopy];
+    NSInteger start = NSNotFound, end = NSNotFound;
+    for (NSInteger i = 0; i < (NSInteger)lines.count; i++) {
+        NSString *t = trimmed(lines[(NSUInteger)i]);
+        if (!(t.length >= 2 && [t hasPrefix:@"["] && [t hasSuffix:@"]"])) continue;
+        if ([t caseInsensitiveCompare:header] == NSOrderedSame) start = i + 1;
+        else if (start != NSNotFound) { end = i; break; }
+    }
+    if (start == NSNotFound) return NO;
+    if (end == NSNotFound) end = (NSInteger)lines.count;
+
+    // 每个 key 对应一条记录：前半是紧贴在规则上方的注释/空行，最后一项才是
+    // 配置行本身。搬动规则时注释跟着走，也不会被误当成规则内容改写 enabled。
+    NSMutableDictionary *byKey = [NSMutableDictionary dictionary];
+    NSMutableArray *pending = [NSMutableArray array];
+    NSMutableArray *other = [NSMutableArray array];
+    for (NSInteger i = start; i < end; i++) {
+        NSString *line = lines[(NSUInteger)i];
+        NSString *t = trimmed(line);
+        if (!t.length || [t hasPrefix:@"#"]) { [pending addObject:line]; continue; }
+        NSString *key = keyForConfigLine(kind, line);
+        if (!key.length) {
+            [other addObjectsFromArray:pending];
+            [pending removeAllObjects];
+            [other addObject:line];
+            continue;
+        }
+        NSMutableArray *record = [NSMutableArray array];
+        [record addObjectsFromArray:pending];
+        [pending removeAllObjects];
+        [record addObject:line];
+        NSMutableArray *bucket = byKey[key];
+        if (!bucket) { bucket = [NSMutableArray array]; byKey[key] = bucket; }
+        [bucket addObject:record];
+    }
+    [other addObjectsFromArray:pending];
+
+    NSMutableArray *body = [NSMutableArray array];
+    NSMutableSet *used = [NSMutableSet set];
+    NSInteger generated = 0;
+    for (id item in items ?: @[]) {
+        NSString *key = keyForItem(kind, item);
+        NSMutableArray *bucket = key.length ? byKey[key] : nil;
+        NSString *line = nil;
+        if (bucket.count) {
+            NSArray *record = bucket[0];
+            [bucket removeAllObjects];  // 同一 key 的重复记录只保留一条
+            for (NSUInteger j = 0; j + 1 < record.count; j++) [body addObject:record[j]];
+            line = record.lastObject;
+        }
+        if (!line.length) {
+            line = generatedLineForItem(kind, item);
+            if (line.length) generated++;
+        }
+        if (!line.length) continue;
+        if (kindIsRemote(kind)) line = lineWithEnabled(line, itemEnabled(item));
+        [body addObject:line];
+        if (key.length) [used addObject:key];
+    }
+    // 有项在配置里找不到原行时生成的文本未必准确（节点格式尤其绕），宁可这次
+    // 不写盘也不要写出半截或重复的段落。正常流程里所有项都应该能匹配到。
+    if (generated > 0) {
+        LBL(@"%@ 段有 %ld 项未匹配，跳过同步", header, (long)generated);
+        return NO;
+    }
+    for (NSString *key in byKey) {
+        if ([used containsObject:key]) continue;
+        if (removedKeys && [removedKeys containsObject:key]) continue;
+        for (NSArray *record in byKey[key]) [body addObjectsFromArray:record];
+    }
+    [body addObjectsFromArray:other];
+
+    NSArray *head = [lines subarrayWithRange:NSMakeRange(0, (NSUInteger)start)];
+    NSMutableArray *out = [head mutableCopy];
+    [out addObjectsFromArray:body];
+    [out addObjectsFromArray:[lines subarrayWithRange:NSMakeRange((NSUInteger)end, lines.count - (NSUInteger)end)]];
+    NSString *fixed = [out componentsJoinedByString:@"\n"];
+    if ([fixed isEqualToString:text]) return YES;
+    if (![fixed writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
+        LBL(@"写入 %@ 段失败 %@", header, err);
+        return NO;
+    }
+    LBL(@"已同步 %@ 段 %lu 项", header, (unsigned long)[items count]);
+    return YES;
+}
+
+static NSUInteger gSectionSyncGeneration;
+
 static void dropStringKeys(id object, NSString *getter, NSString *setter, NSSet *urls) {
     if (!object || !urls.count) return;
     @try {
@@ -721,6 +927,14 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 @property (nonatomic, strong) NSTimer *selectScrollTimer;
 @property (nonatomic, strong) NSMutableArray *disabledSheetPans;
 @property (nonatomic, copy) void (^onClose)(void);
+- (void)commitChange;
+- (void)commitLight;
+- (void)commitLightForKinds:(NSArray *)kinds;
+- (NSArray *)itemsForKind:(NSString *)kind config:(LNDCConfigModel *)config;
+- (NSArray *)allKindsForMode;
+- (void)syncConfigSectionsWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds;
+- (void)scheduleSectionSyncWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds;
+- (BOOL)batchItemCanToggle:(id)item;
 @end
 
 @implementation LNBatchVC
@@ -1501,16 +1715,29 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } else if ([kind isEqualToString:@"remoteProxies"]) {
         config.remoteProxys = items;
     }
-    [self commitLight];
+    [self commitLightForKinds:kind.length ? @[kind] : nil];
 }
 
 #pragma mark 操作菜单
+
+- (NSString *)kindForItem:(id)item {
+    for (NSDictionary *sec in self.sections)
+        for (id x in sec[@"items"]) if (x == item) return sec[@"kind"];
+    return nil;
+}
+
+// 本地规则和本地节点在 Loon 里没有启用/禁用概念，批量菜单不提供这两项。
+- (BOOL)batchItemCanToggle:(id)item {
+    NSString *kind = [self kindForItem:item];
+    if ([kind isEqualToString:@"localRules"] || [kind isEqualToString:@"localNodes"]) return NO;
+    return itemCanToggle(item);
+}
 
 - (UIMenu *)buildActionMenu {
     BOOL has = self.selected.count > 0;
     BOOL toggleable = NO, anyEnabled = NO, anyDisabled = NO;
     for (id item in self.selected) {
-        if (!itemCanToggle(item)) continue;
+        if (![self batchItemCanToggle:item]) continue;
         toggleable = YES;
         if (itemEnabled(item)) anyEnabled = YES;
         else anyDisabled = YES;
@@ -1573,6 +1800,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (void)setSelectedEnabled:(BOOL)enable {
     NSInteger changed = 0;
     for (id item in [self.selected copy]) {
+        if (![self batchItemCanToggle:item]) continue;
         if (itemSetEnabled(item, enable)) changed++;
     }
     if (!changed) {
@@ -1584,6 +1812,48 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     [self showToast:[NSString stringWithFormat:@"%@ %ld 项", enable ? @"已启用" : @"已禁用", (long)changed]];
 }
 
+- (NSArray *)itemsForKind:(NSString *)kind config:(LNDCConfigModel *)config {
+    if ([kind isEqualToString:@"plugins"]) return config.plugins ?: @[];
+    if ([kind isEqualToString:@"localRules"]) return config.localRule ?: @[];
+    if ([kind isEqualToString:@"remoteRules"]) return config.remoteRules ?: @[];
+    if ([kind isEqualToString:@"localNodes"]) return config.proxys ?: @[];
+    if ([kind isEqualToString:@"remoteProxies"]) return config.remoteProxys ?: @[];
+    return @[];
+}
+
+- (NSArray *)allKindsForMode {
+    if (self.mode == LNBLModeRules) return @[@"localRules", @"remoteRules"];
+    if (self.mode == LNBLModeNodes) return @[@"localNodes", @"remoteProxies"];
+    return @[@"plugins"];
+}
+
+- (void)syncConfigSectionsWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds {
+    LNDCConfigModel *config = configForHost(self.host);
+    NSString *path = configFilePath(config);
+    if (!config || !path.length) return;
+    for (NSString *kind in [self allKindsForMode]) {
+        if (kinds && ![kinds containsObject:kind]) continue;
+        if ([kind isEqualToString:@"plugins"]) {
+            reorderPluginSection(path, [config.plugins copy]);
+            continue;
+        }
+        rewriteSectionFromItems(path, kind, [self itemsForKind:kind config:config], removals[kind]);
+    }
+}
+
+- (void)scheduleSectionSyncWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds {
+    NSUInteger gen = ++gSectionSyncGeneration;
+    [self syncConfigSectionsWithRemovals:removals kinds:kinds];
+    // Loon 保存后常会自己再写一次盘，延迟同步一次覆盖它写回的旧顺序，
+    // 期间重新取模型，避免把新发生的启停回退。
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (gen != gSectionSyncGeneration) return;
+        [weakSelf syncConfigSectionsWithRemovals:removals kinds:kinds];
+    });
+}
+
 - (void)commitChange {
     LNDCConfigModel *config = configForHost(self.host);
     @try {
@@ -1591,12 +1861,18 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } @catch (NSException *e) {
         LBL(@"保存异常 %@", e);
     }
+    // 启停只影响远程项的 enabled，没必要顺手重排本地段落。
+    NSArray *kinds = (self.mode == LNBLModeRules) ? @[@"remoteRules"]
+                    : (self.mode == LNBLModeNodes) ? @[@"remoteProxies"] : nil;
+    [self scheduleSectionSyncWithRemovals:nil kinds:kinds];
     msgv(dataManager(), @"postChangeNoti");
     [self refreshHost];
     [self reloadData];
 }
 
-- (void)commitLight {
+- (void)commitLight { [self commitLightForKinds:nil]; }
+
+- (void)commitLightForKinds:(NSArray *)kinds {
     LNDCConfigModel *config = configForHost(self.host);
     @try {
         [config saveConfigPlayload];
@@ -1618,14 +1894,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             reorderPluginSection(path, [latest.plugins copy]);
         });
     }
-    UIViewController *vc = self.host;
-    if (vc) {
-        @try {
-            if ([vc respondsToSelector:NSSelectorFromString(@"setPlugins:")]) {
-                [vc setValue:(config.plugins ?: @[]) forKey:@"plugins"];
-            }
-        } @catch (NSException *e) {}
-        [self reloadHostListsOnly];
+    if (self.mode == LNBLModePlugins) {
+        UIViewController *vc = self.host;
+        if (vc) {
+            @try {
+                if ([vc respondsToSelector:NSSelectorFromString(@"setPlugins:")]) {
+                    [vc setValue:(config.plugins ?: @[]) forKey:@"plugins"];
+                }
+            } @catch (NSException *e) {}
+            [self reloadHostListsOnly];
+        }
+    } else {
+        // 规则/节点页靠 initData 从配置模型重建 section，单纯 reloadData 不够。
+        [self scheduleSectionSyncWithRemovals:nil kinds:kinds];
+        [self refreshHost];
     }
     [self reloadData];
 }
@@ -1696,6 +1978,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSArray *newRemote = origRemote;
     NSArray *pluginSurvivors = nil;
     NSMutableSet *removedPluginURLs = [NSMutableSet set];
+    NSMutableDictionary *sectionRemovals = [NSMutableDictionary dictionary];
     NSUInteger repairGen = light ? ++gPluginRepairGeneration : 0;
     NSError *error = nil;
     @try {
@@ -1716,8 +1999,20 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                 if (isRemoteProxy(x)) [remote addObject:x];
                 else [local addObject:x];
             }
-            config.proxys = arrayByRemovingPtrs(origProxys, local);
-            config.remoteProxys = arrayByRemovingPtrs(origRemoteProxys, remote);
+            NSMutableSet *localKeys = [NSMutableSet set];
+            NSMutableSet *remoteKeys = [NSMutableSet set];
+            for (id n in local) {
+                NSString *k = keyForItem(@"localNodes", n);
+                if (k.length) [localKeys addObject:k];
+            }
+            for (id r in remote) {
+                NSString *k = keyForItem(@"remoteProxies", r);
+                if (k.length) [remoteKeys addObject:k];
+            }
+            config.proxys = arrayByRemovingKeys(origProxys, @"localNodes", localKeys);
+            config.remoteProxys = arrayByRemovingKeys(origRemoteProxys, @"remoteProxies", remoteKeys);
+            sectionRemovals[@"localNodes"] = localKeys;
+            sectionRemovals[@"remoteProxies"] = remoteKeys;
             for (id n in local) {
                 if ([config respondsToSelector:NSSelectorFromString(@"deleteNode:")]) msg1(config, @"deleteNode:", n);
                 else msgv(n, @"deleteProxy");
@@ -1736,10 +2031,22 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                     else if (r) [local addObject:r];
                 }
             }
-            newLocal = arrayByRemovingPtrs(origLocal, local);
-            newRemote = arrayByRemovingPtrs(origRemote, remote);
+            NSMutableSet *localKeys = [NSMutableSet set];
+            NSMutableSet *remoteKeys = [NSMutableSet set];
+            for (id r in local) {
+                NSString *k = keyForItem(@"localRules", r);
+                if (k.length) [localKeys addObject:k];
+            }
+            for (id r in remote) {
+                NSString *k = keyForItem(@"remoteRules", r);
+                if (k.length) [remoteKeys addObject:k];
+            }
+            newLocal = arrayByRemovingKeys(origLocal, @"localRules", localKeys);
+            newRemote = arrayByRemovingKeys(origRemote, @"remoteRules", remoteKeys);
             config.localRule = newLocal;
             config.remoteRules = newRemote;
+            sectionRemovals[@"localRules"] = localKeys;
+            sectionRemovals[@"remoteRules"] = remoteKeys;
             for (id r in local) [mgr deleteLocalRule:r];
             for (id r in remote) [mgr deleteRemoteRule:r];
         }
@@ -1776,7 +2083,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         });
     }
     if (light) [self refreshPluginHostLight];
-    else [self refreshHost];
+    else {
+        [self scheduleSectionSyncWithRemovals:sectionRemovals kinds:nil];
+        [self refreshHost];
+    }
     [self reloadData];
     LBL(@"已删除 %lu 项 mode=%ld error=%@", (unsigned long)picked.count, (long)self.mode, error);
     if (error) [self showResult:[NSString stringWithFormat:@"删除失败：%@", error.localizedDescription] ok:NO];
@@ -1794,7 +2104,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         if ([vc respondsToSelector:NSSelectorFromString(@"setRules:")]) [vc setValue:local forKey:@"rules"];
         if ([vc respondsToSelector:NSSelectorFromString(@"setRemoteAllRules:")]) [vc setValue:remote forKey:@"remoteAllRules"];
         if ([vc respondsToSelector:NSSelectorFromString(@"setAllRemoteRules:")]) [vc setValue:remote forKey:@"allRemoteRules"];
-        if ([vc respondsToSelector:NSSelectorFromString(@"refreshPlugins")]) msgv(vc, @"refreshPlugins");
+        // AllRulesVC 用 configHasChanged，PolicyGroupSelectVC 用 configDidChanged，
+        // 这两个入口本来就是为了外部改配置后重建列表准备的。插件页沿用
+        // refreshPlugins / initData。
+        if ([vc respondsToSelector:NSSelectorFromString(@"configHasChanged")]) msgv(vc, @"configHasChanged");
+        else if ([vc respondsToSelector:NSSelectorFromString(@"configDidChanged")]) msgv(vc, @"configDidChanged");
+        else if ([vc respondsToSelector:NSSelectorFromString(@"refreshPlugins")]) msgv(vc, @"refreshPlugins");
         else if ([vc respondsToSelector:NSSelectorFromString(@"initData")]) msgv(vc, @"initData");
         id list = msg0(vc, @"listView");
         if ([list respondsToSelector:NSSelectorFromString(@"reloadData")]) msgv(list, @"reloadData");
