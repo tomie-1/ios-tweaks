@@ -1,19 +1,3 @@
-Package: com.soulfx.souldicetweak
-Name: SoulDiceTweak
-Version: 1.0.0
-Architecture: iphoneos-arm
-Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
-Maintainer: soulfx
-Author: soulfx
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm/com.soulfx.souldicetweak_iphoneos-arm.deb
-Size: 46316
-MD5sum: 2cb3437cf2040f484cf073d6ab51066d
-SHA1: 6aa57badb8bbd68b876cb82814f18677eaabbf41
-SHA256: 695186f1a0ce611993c822e69982ba4f1509b7e70bb965c98c510ad10b86f375
-SHA512: ee580e525619bf4f299faf9213a8962f4708af221407560b95b46b673ed02ee02ded6423b948915b5462a2a5b5055063be6a97668c321277d4ce9c7f477b3e63
-
 Package: com.tomie.loonbatch
 Name: LoonBatch
 Version: 1.0.4
@@ -24,11 +8,29 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.loonbatch_iphoneos-arm.deb
-Size: 42940
-MD5sum: af551d0a3cafee8eec8edc0ec10414a0
-SHA1: 783d352c44a121cc48fd59beb1a19c8eb029efaf
-SHA256: f1e472bded8376cff7c7e849ae0dbf8db725495789c1df79e4666e631bf1332d
-SHA512: 47206d6577764b795bf169140ee6acdd08461cf45b851076b792ba9f96d371c59c67a4eda506ed9f42b7288b367c677578ad3aee630e37e503d947413ec781a7
+Size: 42848
+MD5sum: e66a2b5d1e480923d9ddba9429505637
+SHA1: 76c13fd0e053192a2f43108e663cfa0dc742f8a0
+SHA256: 8118fdbc37389e31b332c61b125f80c7b02a18b571a44ef1cb72ebb3ce87536f
+SHA512: 9f1df1cb7ace27426b56ef2b5eb694281a8462e82414d4c1b5b1f5477baf6183886c0f8216c56e89c1c28981bbd806db4297884fc280ef1b5e7b28f5d5468abd
+
+Package: com.tomie.soultweak
+Name: SoulTweak
+Version: 1.0.1
+Architecture: iphoneos-arm
+Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
+Maintainer: soulfx
+Author: soulfx
+Section: Tweaks
+Depends: mobilesubstrate
+Replaces: com.soulfx.souldicetweak
+Conflicts: com.soulfx.souldicetweak
+Filename: ./debs/iphoneos-arm/com.tomie.soultweak_iphoneos-arm.deb
+Size: 34684
+MD5sum: d97213957c96d34191ca5cfb832233c1
+SHA1: 2bc8c9897e5739e8d862ae2681814ecbb0cd430c
+SHA256: 8bde8deb7f849b691a58e4e63dd6c4a229e7cdb2a0c1042756dfa333d9485747
+SHA512: a9cfe1ff3adfcb0b65292b219900e1fdfe5b34207909b9cf65a0e0bea8ff7e41980e91cea7774e0fe8e28d3bc39870b09f66171da309731f78349bcf81152ccc
 
 Package: com.tomie.termkeys
 Name: TermKeys
@@ -40,11 +42,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.termkeys_iphoneos-arm.deb
-Size: 15888
-MD5sum: f3b1f41f0fbad60512ffe5ef7332c374
-SHA1: f218b20df92938792909dca45fae6e7b4b83a1d2
-SHA256: c5d0e93270ee0426ae1eb669e94367a210dd46ff17402b9d832e37bc51dc2abc
-SHA512: 4c6a9e1c2db53da0b4b2954d16e8f7e33eaff16fd9c983bf6e71b4f9a599aa24120dfa50b6feb6a8a810a4fa35993c60f1132334f52067ad0259d3219addbce9
+Size: 15880
+MD5sum: 3c4e567ca02d7e1741c81c60ccbc55f6
+SHA1: e9ff7bcca4ca925160a59193f121e0960880bf89
+SHA256: 57cffb4f96d45784afd849c27dd8d2aba380a160f916ac4b320cf143a5747dbf
+SHA512: e45ade89a4f6680445282dc26bf158e5ef5863b5bc0bdaaad22af3d0ca9872811e4b25a39307796c533057e6c7c124c93625f4604ed462c6ec7adc8c57e7c617
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -56,11 +58,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tfdevices_iphoneos-arm.deb
-Size: 20692
-MD5sum: 987914463f37bceeb9d11840780c7cde
-SHA1: 8cf1305bfd88f8b3d824bc243e25319515e850de
-SHA256: c6925933931ac00169046620c056bd46cdba17402ce0a9fb4f2eb5f68ce49653
-SHA512: d71de92741dc65328bb06c0fc35e8153b46e111f0bd87d949f51632a4b99f697878e77ee9a7e30c5dd54ba206e013d4bb4b2899e5c909ab7cf6a9586655647e7
+Size: 20716
+MD5sum: e06f8902d05f6452050413bc9d06cbf8
+SHA1: 03c4b13c8fc4766991b3e84a3b11fc077cfe6d67
+SHA256: de7bca23c10a94227de6dd3440c5f9aa0b53fdf9ae070143f807eaf7171f419a
+SHA512: 6f1d16de9a85dc1be1b2f364332c03849032a4b0d244273510d98e3c8a83368a73df45ba6fc04871f9b3857cae7304af9218b788bcc0f5bea7a04904c6c6d4ac
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
@@ -72,11 +74,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tfinstallbypass_iphoneos-arm.deb
-Size: 5152
-MD5sum: 8549bf8f2ce25de1e31819479cd7bdad
-SHA1: f0380f596937b1f4dbf106f9e62ad52f0efc6902
-SHA256: 67ff84d1156d6800b7c59002a38f55240272796220ba8ce9330347505e858ff4
-SHA512: fad8bc5cce0fc180b95e0fe84affc5a48bfc35c1fe2ce8f711f5f65691f425194d59f8588773eec07ce41477804c2e3591ee6befc7c1cce71a119525023028ee
+Size: 5156
+MD5sum: 19b7e92c29e5a7bc994942bae861a6e1
+SHA1: dadc1da20833df454a9b184f487bf1cd00aa95c5
+SHA256: 0f61553b5b2027c11b38440d43e378700cce1a281dc81d93a19b6df2322f244c
+SHA512: c171c45ffd4fb2cb207d3a56f39011467099d5bcaef43d15055ff9b38d1a446d75796bd0bc047c672e9e3eadca220f8a769b4cace97c5a6fece15a82307844c9
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -88,11 +90,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.tftool_iphoneos-arm.deb
-Size: 35264
-MD5sum: c9442e9fb514a34e29327a928f37ab18
-SHA1: eb537feb75fcd522051aa10211ad3c8efb511d66
-SHA256: 00b153cd5226c86141e525f6ff13d0aa6e79d019f3878c8628b28560dea72d44
-SHA512: ab32c9075b27ca026bbc8bf643baad40b586055277c65f5cfd5f3866e67087c02f00475b5ae310c2e38182840859ec9c0f72dae4e6523e21aa736b28187483d7
+Size: 35192
+MD5sum: c593161de798ad5a84bdddfc04e6731b
+SHA1: 68a21eb55caea24d191323b9ed7521738eb848ab
+SHA256: f43bd4911f7ef23852acb5260b038b50e01d664143d4b6118733c1220d3b3939
+SHA512: ddecbae2cb7cd62a3c4041c7a428f16c4126ff6e57c9c6f0c3792273b5c95cce695e1f65a0c960016f472cc78276383b444fa9ee115bf81c082c5e54e7dfa3f8
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -104,27 +106,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm/com.tomie.trollfoolsnoads_iphoneos-arm.deb
-Size: 3552
-MD5sum: 04cb5e0f44c35a9778d55c3bea99a84d
-SHA1: 446e8d856dc3fd4a389de6016b93302f1decc40b
-SHA256: c231cbcbf12c11c7aa822fdd7dac4368ec0590cb1f77e8651ffe036f670bb46d
-SHA512: 3e6d9199a75a1d2b93c1e1c7468a30af0d934605984dd8a1fd6ceb16e0430f4bc21ea73d7583c4a4bd8fe27efb1ff0f32e7e4eb3c1fa1e308f7980a7b3d9296a
-
-Package: com.soulfx.souldicetweak
-Name: SoulDiceTweak
-Version: 1.0.0
-Architecture: iphoneos-arm64
-Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
-Maintainer: soulfx
-Author: soulfx
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm64/com.soulfx.souldicetweak_iphoneos-arm64.deb
-Size: 46352
-MD5sum: 900b793c832b44326f9671e55780d5b5
-SHA1: 8b81a3b24a192fb834b0c5ad79b1853d490d5b77
-SHA256: 41bda79a482c16755bbf2f6b9660079e80349be60b1e27c8ad258b5b25ed19d8
-SHA512: 2915f7b0894e16378d7682c162ad7991202a08f3a1b5d9fece04e76abe869713f0969e463a3b6a2089b4126a7fcb4c12efd7b685e0496ebd75203329f51eb6d0
+Size: 3548
+MD5sum: 42c964830b49eb50c0fb7b153ccf4ba0
+SHA1: 0b2476b912ccd46262b2cd94d7e0a85cb2383fa0
+SHA256: 375cc8a98a5309c4c0dd8000ea8238b5eec8d96f12a94c9bd5acab2a1f474f08
+SHA512: 171ad318668249bd5c8722a1b2881cad4b88a81580dce71db90d46c3adbf401ae4b2162eb0d23bd65b3ad7f44fa6ec6db5942290aea226718bc8ee59770d898b
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
@@ -136,11 +122,29 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.loonbatch_iphoneos-arm64.deb
-Size: 42896
-MD5sum: 637c59658d63ae3d2dddc19ffd6cb822
-SHA1: 0ddb569e6471e4f7a6362d237a67ee4db0d4808e
-SHA256: 3d02791fa2a1b7887b3d409a9c50f3d4e24e551965e4764f839f72f726070aab
-SHA512: a536407400b9fe96394e096a03cbb750a0dcf44bd6c2124c493c98c0353ba6a4319a7a4839314d1e5c41cb6bcd6d197e44c22b96796d55f1912c4e5a6fcac210
+Size: 42912
+MD5sum: a47a4086790689578e2262a6119f81b0
+SHA1: 7e31b45a4031a0dc4329483a7ef0f4d4c1a87f64
+SHA256: 1e61999dde711c6bf23945ce7b965c9cd6825a7550a4c67a6401d22468e339a4
+SHA512: 55870cbadff891677c876ed8b9846c0ac628e9cedd61769a7798dbf82051b968b795536051a703efc4d6944996fe39f35c68e658a2065b6039f9b36fb0f66361
+
+Package: com.tomie.soultweak
+Name: SoulTweak
+Version: 1.0.1
+Architecture: iphoneos-arm64
+Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
+Maintainer: soulfx
+Author: soulfx
+Section: Tweaks
+Depends: mobilesubstrate
+Replaces: com.soulfx.souldicetweak
+Conflicts: com.soulfx.souldicetweak
+Filename: ./debs/iphoneos-arm64/com.tomie.soultweak_iphoneos-arm64.deb
+Size: 34732
+MD5sum: 66932ff2e30db4d4b414bfd0f0e9acff
+SHA1: cc3c1f8a762ee20c2872923e3766c0c01d2c4997
+SHA256: 0ee65f4d9d222e8e40f129719d24062657455c47c6a6907cbaef4b1d0cc6049c
+SHA512: c3622794df56c4486a00bfb7eadd53a558fda77cd2941b984855e49b845b64dbd478a93d68885aa5328f7f8cc81a972f6419625e35b5ee718c5eb242ece717fc
 
 Package: com.tomie.termkeys
 Name: TermKeys
@@ -152,11 +156,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.termkeys_iphoneos-arm64.deb
-Size: 15904
-MD5sum: 7522e0eaef4f5a2b1302515afc1b73b9
-SHA1: 1b4a6f3d2dcd6dbd01aa6bdf98bb71cf878ff737
-SHA256: 210007ec83f9eba6f148cf12bba83ef05f77de267e41e37d341e93810a08418d
-SHA512: 4a2102ac59841d02bda3c61e206cb55c82871b7e7e9bcbe2891197b36c4b48bc0bc481adfad9ea2689be7ee17c21a2f1d02245f7cee42ce0727d68faa906ba91
+Size: 15900
+MD5sum: 07d2ddc6ad07776127e97af560d01031
+SHA1: 5602547114304dfaae553f5562bee5672f7a97a3
+SHA256: b8448a7772c6aa532d0ffb1683183ff1f9e501b1bcab7463cdadf91a657f7a3b
+SHA512: e457b6edfa104355ec6b7a541022ea63d2bc452d697855184a354ddccb7bb06f1d440d10376a792a8ae6344f6a55df5cda407f6deabc401e5bffe635382c6326
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -168,11 +172,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tfdevices_iphoneos-arm64.deb
-Size: 20728
-MD5sum: 417eadaf2d811977e374c87cd077058c
-SHA1: ffb99a983374cae1581dd610f030d6036e8f934a
-SHA256: 91b39d5a1f560633f0c6ca13c130b662be6b70040b8dfab257f0cfcd0133b66d
-SHA512: b00aaf52c4fcc6f4cbe02e8814a3463f3769b62c98d174b0da93cc3b01bf595faa3880b73f12d7b466dbe32b47dbd9c8d021a53fc12c2997d448c559cc191d7f
+Size: 20720
+MD5sum: 3fa393ff70589b6f1205c632019ae2dd
+SHA1: e22194a0f1fbaacf449682664e583c15ba518b76
+SHA256: 8cfa280b3626627060b455de096ace9107cf0ed7222f4780582de8bff21cc511
+SHA512: f5fe4ca9685302169f8734ec2eb0753aeae82fec4f2f6d04fa4b9771c9bcdaccad383e2499cf3ab6af50b58ffb97198d6228d338876a27fd35f689eebc9105d3
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
@@ -185,10 +189,10 @@ Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tfinstallbypass_iphoneos-arm64.deb
 Size: 5180
-MD5sum: 231a21285c1cf897514882cc60b0fe46
-SHA1: 009d1ac3051d3fa4759d88c5991b56d53d319faf
-SHA256: 563071cde609b19d276757276ede26f8ceb885a6470f8e24fb14c1f98fac1c36
-SHA512: 6379f41df8ab4ceef8430da1d5684f8a196ae3262994e0424a546dd6b2198bbf69cb7ed45d060a784126236a23c3c6ff38bb8035bfa8d0dfd4c6559dbae721fe
+MD5sum: a4992e394c9becac68f3b64ff7eb0617
+SHA1: b0c2b5ee929ef9e018595d9e81613d82c23c0ed9
+SHA256: 85bb4e2128d56db433db6663591088b301ef1dd71c75022aefac4cc121a0f9d7
+SHA512: df61f0779a124fa86d7eb5ca23df465ea69b1857e179e76aef002f7293a418f3ff84f46a39f5254db3540201b8366307c7a22b5f46748f6d6e5dee4f48962e81
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -200,11 +204,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.tftool_iphoneos-arm64.deb
-Size: 35268
-MD5sum: 27d6c1819d6a4ed2f50f24862d9da9c7
-SHA1: 56dd89657796f2ff08da8de7e8a578221a6579b0
-SHA256: d65dcaaa151f5676a40bfdf046fc234ab0f72a344a29faa6d4715b57e70c439a
-SHA512: b334be769d2442a6b9ad731f07d3b7f483ca122d3b60cee84f4f79025117e042c962bc44f1e296414b35cec2e2cc2bc2b530dd07bc8b8eef825a01eeda4313a4
+Size: 35276
+MD5sum: 02dfa8a11f7314ea61a3d8d94c75f08d
+SHA1: d1b2b806abad5d735b418d2bc3b323d86b5e1f5a
+SHA256: 69f97c269c31b5614462c57eb3cf3663e51fde30677fb409ba76ea2c406cb6e5
+SHA512: 5742795f5ecdee2827be28e329e9eda11dcf91bb214384f22a1edb764a75a50dd0c9bf5902730739b73ff185cd04e72b73162ce1702c684af99d577f48d6814e
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -217,26 +221,10 @@ Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64/com.tomie.trollfoolsnoads_iphoneos-arm64.deb
 Size: 3576
-MD5sum: eaf531d9f97f85025902d9b548cc7995
-SHA1: 34b0dd7f0a1f63af7374824c7da9056b08a430fb
-SHA256: a12696b00663c4ecafac95cb759c9faaf02b1898d921443ae4390906a4a7347f
-SHA512: 281086bd0b0f6f972bf3c9ff4939c9a2dd049879eb0878e94fb9c3550559d9b89ba99dc24c5656cb01cdf431a3e966f37565ba6696f0e2cb8b59cfd3bd65977c
-
-Package: com.soulfx.souldicetweak
-Name: SoulDiceTweak
-Version: 1.0.0
-Architecture: iphoneos-arm64e
-Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
-Maintainer: soulfx
-Author: soulfx
-Section: Tweaks
-Depends: mobilesubstrate
-Filename: ./debs/iphoneos-arm64e/com.soulfx.souldicetweak_iphoneos-arm64e.deb
-Size: 46312
-MD5sum: 25b20dfca58732699e2dbde968c3dac3
-SHA1: 8a5eef5bfe557e6d24b9b2929e882127b75e664a
-SHA256: 25a73b1b5995c56c0f5b163dd8cb3cf334a704b4edce0f09475eedb76f62d651
-SHA512: 75f989f068e5c24663d2ab023c2760286594b64647777f04ee8735b35e9effb82c25bfb00ce7e29b37f333885bb64275714c69c5a99b6fa5117e105bd92ba834
+MD5sum: 3c954dfbb7715d22e1a11bf0a22e57bb
+SHA1: c76873cc0ea68984ea13ee75711bbfe6a7972ba1
+SHA256: 614677f81245126133a617c32d50b1a17f6ff68bca164b5abbc7b3c57858cc9a
+SHA512: c988283e45840bb87642d7f14476c51a4b3fa65039a8644eb3ddd57050334aacbc4fa7a21ea8de22b378bb1579a087832f78ec75261ea75b729ec88f059a3af5
 
 Package: com.tomie.loonbatch
 Name: LoonBatch
@@ -248,11 +236,29 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.loonbatch_iphoneos-arm64e.deb
-Size: 42884
-MD5sum: d8c527855a0a04513a4c83c3b1658320
-SHA1: 7c8550ee6940169b24cc20c5c4c1b92ef425787c
-SHA256: f6d39810b149351f92adea761ccb1586bd1e94ecd7c689d6b1b1fa4d52c12229
-SHA512: 35de03aec1122096bd897db65547debc08cd0f784a2468909812eb29e59eb99e19b326b6314fbeb1d9ec2ccd5b1488287f79209a0656f07d0ff6cd194691fa13
+Size: 42852
+MD5sum: e7a33a0292cd2b04ef590a6034d47881
+SHA1: 272c4b73a0adf041f18503bb8be9e3f10453a54f
+SHA256: dfe812b7df139d60b388775aa879cd724961a5094bbcbefb9340bb23fa797784
+SHA512: 49daa56dd19f47cc316e6c6cd1755c4aad19fffd5d10813ac879173e508feaf24bd927e05ce5598deb1b73518043ffb005d8571b30c4d6c95d81075f71bbeadf
+
+Package: com.tomie.soultweak
+Name: SoulTweak
+Version: 1.0.1
+Architecture: iphoneos-arm64e
+Description: SOUL 6.17 iOS tweak (arm64 + arm64e)
+Maintainer: soulfx
+Author: soulfx
+Section: Tweaks
+Depends: mobilesubstrate
+Replaces: com.soulfx.souldicetweak
+Conflicts: com.soulfx.souldicetweak
+Filename: ./debs/iphoneos-arm64e/com.tomie.soultweak_iphoneos-arm64e.deb
+Size: 34688
+MD5sum: fa68696198b4ddf29bad9b5e4221c934
+SHA1: bc873c2a200f7fd3a44f936d1196cbe392ad3cb0
+SHA256: 5cfe446073965e6621afa0fe0a29484ff6066891bc414e7ed522286c9b72ef7a
+SHA512: 90ca92da79e07a9571a808744135698d82cb54670d40d8a0acb955772ea17a5b253899a8d79ab3d4ca3a2c6c77b34015cd5b48522c0fdb45ffd1a7dfbb7b83c9
 
 Package: com.tomie.termkeys
 Name: TermKeys
@@ -264,11 +270,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.termkeys_iphoneos-arm64e.deb
-Size: 15892
-MD5sum: 071c9af5d8c676f1c4cbd6a93d2875a7
-SHA1: 2261d3b05732dcdddd98eeb5cfd8c1a79443bf8e
-SHA256: 296966baefdb271bec85c18fe090e1f6b0c24a10f634fdde30acd6c016ce33ff
-SHA512: 77103dc620de7b521e21f832213af09e3eca327cc3c213cfa10b7968266c93d06c4ef6afb4b9c944bdf6963ecf78221f5c52457b60bb16f790f4963d3424d3b3
+Size: 15884
+MD5sum: ec8c742a5c31a4a8c652224af9a50bca
+SHA1: b22595031ea08c1fd5f2f5019198417d6a13cc55
+SHA256: 8d12a4f496667402f68488237ab6dc39e9c203a99efe4757db1d57ea61f635b4
+SHA512: 6230a5343fae266ad5fa6f5a0db72ac382ed4dd151ce1ac958d1303b464a6e9d59533999bc816d9e5cf1a05dff2c3d626e40bf9844d7a1796e0896c7bc671564
 
 Package: com.tomie.tfdevices
 Name: TFDevices
@@ -280,11 +286,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tfdevices_iphoneos-arm64e.deb
-Size: 20688
-MD5sum: 4af335a0226fe3ae1369dfe78d614584
-SHA1: 92af3d80ed1dc2bc3346b1dd921c745c61f6e926
-SHA256: b81e95aabdf75fe5ed63e277800c87b47a77274b78b4a7000c353a1e0d4e3e4e
-SHA512: 673ae289d142436be02a82ec41a2d145d2291f962cf92a3307c9e5aaea88d9fceaf954675113860c0912bf32fc24857940737b83feee6e640c4cc6de27244ea6
+Size: 20716
+MD5sum: bfa7f0b75dddcf74be48ae3e96b0d408
+SHA1: 8b8b7a423b208b5f255ad3809891bf329e44db42
+SHA256: f084edff535fb4e60a0fb6e1bb82da410edb479dddf89fa87aa5f3496757aac5
+SHA512: 198a14615e2bb5c86fa0d59a8d8b20bf9c5df936a33232d2938f4b88cdafcdaace2d78990fa966b601a1fe3486d36484c8d2eb740a5bb2ee14c29f016793ab43
 
 Package: com.tomie.tfinstallbypass
 Name: TFInstallBypass
@@ -296,11 +302,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tfinstallbypass_iphoneos-arm64e.deb
-Size: 5152
-MD5sum: 7fc37c790f34e92878d1355d098977d5
-SHA1: f46ebe0a56c63c6c6809622e8b9e771e15bfcf66
-SHA256: 3ff0106d250112451ff7e85e723badd6a38f2a7e28f0ec61b953e85c5c5fa678
-SHA512: 2020e8d73e2a56bfceae1eed739c580fbe1527b4c40cd6d97c607bf8b3223893deb052b74af9646f52f334ba3a9962cd312510c2d15c52c18bb07a705914bb86
+Size: 5160
+MD5sum: e15ff02a467510cee763b999434fc240
+SHA1: 1eb68e41bac82e0870ad67e325e713561db7dcb2
+SHA256: ecb72eedf1fbfd0fc3a013f7cd71cf05b4621652934e2f7f6be2e852774ee72a
+SHA512: 6eb4003c43516d81c8e597d14614002b7e08e5ff60842cf455315802e708299f53b7758a072875b9060346fe4c0a4d45de8dde29e30fdd8a2daf9c2bbe7fee9b
 
 Package: com.tomie.tftool
 Name: TFTool
@@ -312,11 +318,11 @@ Author: tomie
 Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.tftool_iphoneos-arm64e.deb
-Size: 35268
-MD5sum: c48cbb9c261c83c1df7777f87141d773
-SHA1: 02b974995508e17b454e410ce84fcf02cac9cba8
-SHA256: 409d1d25d88cf74fa951a736d549b05c0ee9e1e19f6add5a1aa95522414c9110
-SHA512: 240fe42b6d6bcaafc25a0fa57c595adbb14dc38161decacf7e0be4ebabc571f956d7640f778ec6abd91704e5b2fd8e6fba4128b0b879d2f91f22e5400a31deec
+Size: 35196
+MD5sum: 45b61895226840d11c20d849f00dee84
+SHA1: 4faae512db14c4cd2a46d5d0bae0e39faac80e83
+SHA256: 61149f6d39dd1f5da6cbbc3626e64227f479876d35ab24d13f037f0639b10588
+SHA512: 1cfa32ea85b080d2642fde4bcb8cb60c81b05e19729ad8cde9bdbbaa2eb9c94044c8d254ea46e1c2669d698f8d923c8c1876c69939540492a6bdef86b2414fdd
 
 Package: com.tomie.trollfoolsnoads
 Name: TrollFoolsNoAds
@@ -329,8 +335,8 @@ Section: Tweaks
 Depends: mobilesubstrate
 Filename: ./debs/iphoneos-arm64e/com.tomie.trollfoolsnoads_iphoneos-arm64e.deb
 Size: 3552
-MD5sum: 685df87804c53e7c1af848f98c819170
-SHA1: 3c0e74b690b887bbe02f9a12cef4c2d4181b2e5a
-SHA256: 02617d31f26c79d796558a01731df3e9c0532f8f25b6bd198bc5ef40556b3321
-SHA512: 877eaf393902a2174c4f9522b850b7a29c9d87ed3c674775805a9a4d01116d0c705c9c0ecb6585570f319aa3994126b21ef367e62dd2f3e19ec7bbc3c738fcb1
+MD5sum: 655a9f94e3e904af740ab62e14d8307c
+SHA1: 81b54f5853a08528d68124196bce0fa4c13e6c77
+SHA256: 7d48212a708f55ada2e0ce812e14d429512ee83610f0a56362e2001df20f5ecd
+SHA512: 740b8bbd4cf59d63d26e736011e66c4c5ceaf5c4fc2d2e182111048b1738c6b378a80425d760f0773f30242a3910b202d1f8991297a968eb03d0b80c6ab3825c
 
