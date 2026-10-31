@@ -653,7 +653,14 @@ static NSString *keyForConfigLine(NSString *kind, NSString *line) {
     if (!t.length || [t hasPrefix:@"#"]) return nil;
     if ([kind isEqualToString:@"plugins"] || [kind isEqualToString:@"remoteRules"])
         return trimmed([[t componentsSeparatedByString:@","] firstObject]);
-    if ([kind isEqualToString:@"localNodes"] || [kind isEqualToString:@"remoteProxies"]) {
+    if ([kind isEqualToString:@"remoteProxies"]) {
+        // "名字 = url, 参数..."：订阅名字可能改，URL 不会，用 URL 做标识更稳。
+        NSRange eq = [t rangeOfString:@"="];
+        if (eq.location == NSNotFound) return nil;
+        NSString *rhs = trimmed([t substringFromIndex:eq.location + 1]);
+        return trimmed([[rhs componentsSeparatedByString:@","] firstObject]);
+    }
+    if ([kind isEqualToString:@"localNodes"]) {
         NSRange eq = [t rangeOfString:@"="];
         if (eq.location == NSNotFound) return nil;
         return trimmed([t substringToIndex:eq.location]);
@@ -671,6 +678,10 @@ static NSString *keyForItem(NSString *kind, id item) {
     if ([kind isEqualToString:@"localRules"]) {
         NSString *p = strv(ruleInnerObject(item), @"playload");
         return p.length ? trimmed(p) : nil;
+    }
+    if ([kind isEqualToString:@"remoteProxies"]) {
+        NSString *u = strv(item, @"remoteUrl") ?: strv(item, @"url");
+        if (u.length) return u;
     }
     NSString *name = strv(item, @"proxyName");
     if (!name.length) name = strv(item, @"remarks");
@@ -710,16 +721,19 @@ static NSString *generatedLineForItem(NSString *kind, id item) {
         return [NSString stringWithFormat:@"%@, policy=%@, tag=%@, enabled=%@",
                 u, policy, tag, itemEnabled(item) ? @"true" : @"false"];
     }
-    NSString *name = keyForItem(kind, item);
-    if (!name.length) return nil;
+    NSString *name = strv(item, @"proxyName");
+    if (!name.length) name = strv(item, @"remarks");
+    if (!name.length) name = strv(item, @"name");
     if ([kind isEqualToString:@"localNodes"]) {
+        if (!name.length) return nil;
         NSString *v = strv(item, @"playload");
         if (!v.length) v = msg0(item, @"generateLoonFormat");
         if (!v.length) return nil;
         return [NSString stringWithFormat:@"%@ = %@", name, trimmed(v)];
     }
-    NSString *u = strv(item, @"remoteUrl");
+    NSString *u = strv(item, @"remoteUrl") ?: strv(item, @"url");
     if (!u.length) return nil;
+    if (!name.length) name = [u lastPathComponent];
     return [NSString stringWithFormat:@"%@ = %@, enabled=%@",
             name, u, itemEnabled(item) ? @"true" : @"false"];
 }
@@ -727,6 +741,8 @@ static NSString *generatedLineForItem(NSString *kind, id item) {
 static BOOL rewriteSectionFromItems(NSString *path, NSString *kind, NSArray *items, NSSet *removedKeys) {
     NSString *header = headerForKind(kind);
     if (!path.length || !header.length) return NO;
+    // nil 表示模型还没准备好；这时整段重写会把配置清空，直接跳过。
+    if (!items) return NO;
     NSError *err = nil;
     NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err];
     if (!text) { LBL(@"读取配置失败 %@", err); return NO; }
@@ -934,6 +950,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (NSArray *)allKindsForMode;
 - (void)syncConfigSectionsWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds;
 - (void)scheduleSectionSyncWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds;
+- (void)refreshRuleArchive;
 - (BOOL)batchItemCanToggle:(id)item;
 @end
 
@@ -1827,6 +1844,12 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     return @[@"plugins"];
 }
 
+- (void)refreshRuleArchive {
+    // 远程规则的启停/删除还要让规则归档库按配置重算一次，否则隧道仍按旧集合跑。
+    if (self.mode != LNBLModeRules) return;
+    msgv(ruleManager(), @"flagArchivedRules");
+}
+
 - (void)syncConfigSectionsWithRemovals:(NSDictionary *)removals kinds:(NSArray *)kinds {
     LNDCConfigModel *config = configForHost(self.host);
     NSString *path = configFilePath(config);
@@ -1865,6 +1888,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     NSArray *kinds = (self.mode == LNBLModeRules) ? @[@"remoteRules"]
                     : (self.mode == LNBLModeNodes) ? @[@"remoteProxies"] : nil;
     [self scheduleSectionSyncWithRemovals:nil kinds:kinds];
+    [self refreshRuleArchive];
     msgv(dataManager(), @"postChangeNoti");
     [self refreshHost];
     [self reloadData];
@@ -1907,6 +1931,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     } else {
         // 规则/节点页靠 initData 从配置模型重建 section，单纯 reloadData 不够。
         [self scheduleSectionSyncWithRemovals:nil kinds:kinds];
+        [self refreshRuleArchive];
         [self refreshHost];
     }
     [self reloadData];
@@ -2085,6 +2110,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     if (light) [self refreshPluginHostLight];
     else {
         [self scheduleSectionSyncWithRemovals:sectionRemovals kinds:nil];
+        [self refreshRuleArchive];
         [self refreshHost];
     }
     [self reloadData];
@@ -2098,6 +2124,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
     UIViewController *vc = self.host;
     if (!vc) return;
     LNDCConfigModel *cfg = configForHost(vc);
+    if (!cfg) return;
     NSArray *local = cfg.localRule ?: @[];
     NSArray *remote = cfg.remoteRules ?: @[];
     @try {
