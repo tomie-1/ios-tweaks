@@ -367,7 +367,47 @@ static NSString *remoteRuleSubtitle(id r) {
     return [a componentsJoinedByString:@" · "];
 }
 
+static NSString *localNodePayload(id n) {
+    NSString *v = strv(n, @"playload");
+    if (!v.length) v = msg0(n, @"generateLoonFormat");
+    v = trimmed(v);
+    if (!v.length) return nil;
+    NSRange eq = [v rangeOfString:@"="];
+    NSRange comma = [v rangeOfString:@","];
+    if (eq.location != NSNotFound && (comma.location == NSNotFound || eq.location < comma.location))
+        v = trimmed([v substringFromIndex:eq.location + 1]);
+    return v.length ? v : nil;
+}
+
+static NSDictionary<NSString *, NSString *> *gLocalNodeAliases;
+static NSString *configFilePath(LNDCConfigModel *config);
+
+static void reloadLocalNodeAliases(LNDCConfigModel *config) {
+    NSMutableDictionary *aliases = [NSMutableDictionary dictionary];
+    NSString *path = configFilePath(config);
+    NSError *err = nil;
+    NSString *text = path.length ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&err] : nil;
+    BOOL inProxy = NO;
+    for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
+        NSString *t = trimmed(line);
+        if ([t hasPrefix:@"["] && [t hasSuffix:@"]"]) {
+            inProxy = [t caseInsensitiveCompare:@"[Proxy]"] == NSOrderedSame;
+            continue;
+        }
+        if (!inProxy || !t.length || [t hasPrefix:@"#"]) continue;
+        NSRange eq = [t rangeOfString:@"="];
+        if (eq.location == NSNotFound) continue;
+        NSString *name = trimmed([t substringToIndex:eq.location]);
+        NSString *payload = trimmed([t substringFromIndex:eq.location + 1]);
+        if (name.length && payload.length) aliases[payload] = name;
+    }
+    gLocalNodeAliases = aliases;
+}
+
 static NSString *nodeConfigName(id n) {
+    NSString *payload = localNodePayload(n);
+    NSString *alias = payload.length ? gLocalNodeAliases[payload] : nil;
+    if (alias.length) return alias;
     NSString *s = strv(n, @"name");
     if (!s.length) s = strv(n, @"remarks");
     if (!s.length) s = strv(n, @"proxyName");
@@ -668,7 +708,8 @@ static NSString *keyForConfigLine(NSString *kind, NSString *line) {
     if ([kind isEqualToString:@"localNodes"]) {
         NSRange eq = [t rangeOfString:@"="];
         if (eq.location == NSNotFound) return nil;
-        return trimmed([t substringToIndex:eq.location]);
+        NSString *payload = trimmed([t substringFromIndex:eq.location + 1]);
+        return payload.length ? payload : nil;
     }
     return t;
 }
@@ -688,7 +729,7 @@ static NSString *keyForItem(NSString *kind, id item) {
         NSString *u = strv(item, @"remoteUrl") ?: strv(item, @"url");
         if (u.length) return u;
     }
-    if ([kind isEqualToString:@"localNodes"]) return nodeConfigName(item);
+    if ([kind isEqualToString:@"localNodes"]) return localNodePayload(item);
     NSString *name = strv(item, @"proxyName");
     if (!name.length) name = strv(item, @"remarks");
     if (!name.length) name = strv(item, @"name");
@@ -1073,6 +1114,7 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
         self.title = [NSString stringWithFormat:@"批量插件 (%lu)", (unsigned long)items.count];
         [self.sections addObject:@{@"title": @"插件", @"items": items, @"kind": @"plugins"}];
     } else if (self.mode == LNBLModeNodes) {
+        reloadLocalNodeAliases(config);
         NSArray *local = config.proxys ?: @[];
         NSArray *remote = config.remoteProxys ?: @[];
         self.title = [NSString stringWithFormat:@"批量节点 (%lu)", (unsigned long)(local.count + remote.count)];
