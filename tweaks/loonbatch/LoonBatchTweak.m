@@ -367,10 +367,15 @@ static NSString *remoteRuleSubtitle(id r) {
     return [a componentsJoinedByString:@" · "];
 }
 
-static NSString *nodeTitle(id n) {
-    NSString *s = strv(n, @"proxyName");
+static NSString *nodeConfigName(id n) {
+    NSString *s = strv(n, @"name");
     if (!s.length) s = strv(n, @"remarks");
-    if (!s.length) s = strv(n, @"name");
+    if (!s.length) s = strv(n, @"proxyName");
+    return s;
+}
+
+static NSString *nodeTitle(id n) {
+    NSString *s = nodeConfigName(n);
     return s.length ? s : @"(未命名节点)";
 }
 
@@ -683,6 +688,7 @@ static NSString *keyForItem(NSString *kind, id item) {
         NSString *u = strv(item, @"remoteUrl") ?: strv(item, @"url");
         if (u.length) return u;
     }
+    if ([kind isEqualToString:@"localNodes"]) return nodeConfigName(item);
     NSString *name = strv(item, @"proxyName");
     if (!name.length) name = strv(item, @"remarks");
     if (!name.length) name = strv(item, @"name");
@@ -721,7 +727,7 @@ static NSString *generatedLineForItem(NSString *kind, id item) {
         return [NSString stringWithFormat:@"%@, policy=%@, tag=%@, enabled=%@",
                 u, policy, tag, itemEnabled(item) ? @"true" : @"false"];
     }
-    NSString *name = strv(item, @"proxyName");
+    NSString *name = [kind isEqualToString:@"localNodes"] ? nodeConfigName(item) : strv(item, @"proxyName");
     if (!name.length) name = strv(item, @"remarks");
     if (!name.length) name = strv(item, @"name");
     if ([kind isEqualToString:@"localNodes"]) {
@@ -2034,8 +2040,10 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                 NSString *k = keyForItem(@"remoteProxies", r);
                 if (k.length) [remoteKeys addObject:k];
             }
-            config.proxys = arrayByRemovingKeys(origProxys, @"localNodes", localKeys);
-            config.remoteProxys = arrayByRemovingKeys(origRemoteProxys, @"remoteProxies", remoteKeys);
+            // 页面对象通常就是模型数组里的同一个指针，先精确移除；名称 key 只兜底
+            // 页面包装对象和模型对象不一致的情况，避免多个同名节点被一起删除。
+            config.proxys = arrayByRemovingKeys(arrayByRemovingPtrs(origProxys, local), @"localNodes", localKeys);
+            config.remoteProxys = arrayByRemovingKeys(arrayByRemovingPtrs(origRemoteProxys, remote), @"remoteProxies", remoteKeys);
             sectionRemovals[@"localNodes"] = localKeys;
             sectionRemovals[@"remoteProxies"] = remoteKeys;
             // 上面的数组已经按稳定 key 完成删除。原生 deleteNode/deleteRemoteProxy
