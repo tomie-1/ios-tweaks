@@ -2038,11 +2038,11 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
             config.remoteProxys = arrayByRemovingKeys(origRemoteProxys, @"remoteProxies", remoteKeys);
             sectionRemovals[@"localNodes"] = localKeys;
             sectionRemovals[@"remoteProxies"] = remoteKeys;
-            for (id n in local) {
-                if ([config respondsToSelector:NSSelectorFromString(@"deleteNode:")]) msg1(config, @"deleteNode:", n);
-                else msgv(n, @"deleteProxy");
-            }
-            for (id r in remote) msg1(config, @"deleteRemoteProxy:", r);
+            // 上面的数组已经按稳定 key 完成删除。原生 deleteNode/deleteRemoteProxy
+            // 会再按旧位置修改同一数组，批量删除时会多删后续节点；这里只保留模型这一份事实来源。
+            LBL(@"节点删除 local=%lu remote=%lu 剩余 local=%lu remote=%lu",
+                (unsigned long)local.count, (unsigned long)remote.count,
+                (unsigned long)config.proxys.count, (unsigned long)config.remoteProxys.count);
         } else {
             NSMutableArray *local = [NSMutableArray array];
             NSMutableArray *remote = [NSMutableArray array];

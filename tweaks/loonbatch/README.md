@@ -26,7 +26,7 @@ Loon 插件、规则和节点批量管理。包名 `com.tomie.loonbatch`，注�
 - 从 `DataManager.shareInstance.currentConfigModel` 读取 `DCConfigModel`；节点页优先读页面的 `configModel`。
 - 插件来自 `config.plugins`，规则来自 `config.localRule` / `config.remoteRules`，节点来自 `config.proxys` / `config.remoteProxys`。
 - 插件原生标题：配置 `tag` → `LNPlugin.pluginName` → 下载文件里的 `#!name`。
-- 节点删除使用 `DCConfigModel` 的 `deleteNode:` / `deleteRemoteProxy:`，规则删除使用 `RuleArchieveManager` 的对应接口。
+- 节点删除按稳定 key 更新 `DCConfigModel.proxys` / `remoteProxys`，规则删除使用 `RuleArchieveManager` 的对应接口；节点不再叠加会二次修改数组的原生删除方法。
 - 改动后会按模型重排 `[Rule]` / `[Remote Rule]` / `[Proxy]` / `[Remote Proxy]` 段落，并同步远程项的 `enabled`，再调用原生页的 `configHasChanged` / `configDidChanged` 重建列表；保存后延迟 0.8 秒再同步一次，覆盖 Loon 自己写回的旧顺序。
 - 本地规则没有启用/禁用概念，批量菜单只对远程规则、远程订阅提供启停。
 - 拖动只会在同一个分组（分组 kind）内排序。
