@@ -77,8 +77,6 @@ static void LBL(NSString *fmt, ...) {
 
 @interface LNRuleArchieveManager : NSObject
 + (instancetype)shareInstance;
-- (void)deleteLocalRule:(id)rule;
-- (void)deleteRemoteRule:(id)rule;
 - (void)deletePluginRules:(id)plugin;
 @end
 
@@ -691,12 +689,42 @@ static id ruleInnerObject(id item) {
     return msg0(item, @"remoteRule") ?: msg0(item, @"rule") ?: item;
 }
 
-// 配置行的稳定标识：插件和远程规则用首个逗号前的 URL；节点用 "name =" 前的
-// 名字；本地规则用整行文本（规则本身含逗号，不能按逗号切分）。
+static NSString *remoteRuleField(NSArray<NSString *> *parts, NSString *field) {
+    NSString *prefix = [field stringByAppendingString:@"="];
+    for (NSUInteger i = 1; i < parts.count; i++) {
+        NSString *p = trimmed(parts[i]);
+        if ([p hasPrefix:prefix]) return trimmed([p substringFromIndex:prefix.length]);
+    }
+    return nil;
+}
+
+static NSString *remoteRuleKey(NSString *url, NSString *policy, NSString *tag) {
+    if (!url.length) return nil;
+    if (!policy.length && !tag.length) return url;
+    return [NSString stringWithFormat:@"%@|%@|%@", url, policy ?: @"", tag ?: @""];
+}
+
+static NSString *remoteRuleLineKey(NSString *line) {
+    NSArray<NSString *> *parts = [line componentsSeparatedByString:@","];
+    NSString *url = parts.count ? trimmed(parts.firstObject) : nil;
+    return remoteRuleKey(url, remoteRuleField(parts, @"policy"), remoteRuleField(parts, @"tag"));
+}
+
+static NSString *remoteRuleItemKey(id item) {
+    id inner = ruleInnerObject(item);
+    NSString *url = strv(inner, @"remoteUrl") ?: strv(item, @"remoteUrl") ?: strv(inner, @"url");
+    NSString *policy = strv(inner, @"strategyName") ?: strv(inner, @"policy");
+    NSString *tag = strv(inner, @"tag");
+    return remoteRuleKey(url, policy, tag);
+}
+
+// 配置行的稳定标识：插件用 URL；远程规则用 URL + 策略 + tag；订阅用 URL；
+// 本地节点用完整连接内容；本地规则用整行文本。
 static NSString *keyForConfigLine(NSString *kind, NSString *line) {
     NSString *t = trimmed(line);
     if (!t.length || [t hasPrefix:@"#"]) return nil;
-    if ([kind isEqualToString:@"plugins"] || [kind isEqualToString:@"remoteRules"])
+    if ([kind isEqualToString:@"remoteRules"]) return remoteRuleLineKey(t);
+    if ([kind isEqualToString:@"plugins"])
         return trimmed([[t componentsSeparatedByString:@","] firstObject]);
     if ([kind isEqualToString:@"remoteProxies"]) {
         // "名字 = url, 参数..."：订阅名字可能改，URL 不会，用 URL 做标识更稳。
@@ -717,9 +745,9 @@ static NSString *keyForConfigLine(NSString *kind, NSString *line) {
 static NSString *keyForItem(NSString *kind, id item) {
     if ([kind isEqualToString:@"plugins"]) return pluginURLForObject(item);
     if ([kind isEqualToString:@"remoteRules"]) {
-        id inner = ruleInnerObject(item);
-        NSString *u = strv(inner, @"remoteUrl") ?: strv(item, @"remoteUrl") ?: strv(inner, @"url");
-        return u.length ? u : remoteRuleTitle(inner);
+        NSString *key = remoteRuleItemKey(item);
+        if (key.length) return key;
+        return remoteRuleTitle(ruleInnerObject(item));
     }
     if ([kind isEqualToString:@"localRules"]) {
         NSString *p = strv(ruleInnerObject(item), @"playload");
@@ -1178,23 +1206,18 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
 - (NSString *)stableKeyForItem:(id)item {
     if (!item) return nil;
     if (self.mode == LNBLModePlugins) {
-        id p = pluginObject(item);
-        NSString *u = strv(p, @"remoteUrl") ?: strv(item, @"remoteUrl");
-        return u.length ? [@"p:" stringByAppendingString:u] : [@"p:" stringByAppendingString:pluginTitle(item)];
+        NSString *k = keyForItem(@"plugins", item);
+        return k.length ? [@"p:" stringByAppendingString:k] : nil;
     }
     if (self.mode == LNBLModeNodes) {
-        NSString *u = strv(item, @"remoteUrl");
-        if (u.length) return [@"rn:" stringByAppendingString:u];
-        return [NSString stringWithFormat:@"ln:%@|%@:%ld", nodeTitle(item),
-                strv(item, @"serverAddress") ?: @"", (long)intv(item, @"serverPort")];
+        NSString *kind = isRemoteProxy(item) ? @"remoteProxies" : @"localNodes";
+        NSString *k = keyForItem(kind, item);
+        return k.length ? [NSString stringWithFormat:@"n:%@:%@", kind, k] : nil;
     }
-    id inner = msg0(item, @"remoteRule") ?: msg0(item, @"rule") ?: item;
-    if ([inner isKindOfClass:NSClassFromString(@"RemoteRule")]) {
-        NSString *u = strv(inner, @"remoteUrl");
-        return u.length ? [@"rr:" stringByAppendingString:u] : [@"rr:" stringByAppendingString:remoteRuleTitle(inner)];
-    }
-    NSString *p = strv(inner, @"playload");
-    return p.length ? [@"lr:" stringByAppendingString:p] : [@"lr:" stringByAppendingString:ruleTitle(inner)];
+    id inner = ruleInnerObject(item);
+    NSString *kind = [inner isKindOfClass:NSClassFromString(@"RemoteRule")] ? @"remoteRules" : @"localRules";
+    NSString *k = keyForItem(kind, inner);
+    return k.length ? [NSString stringWithFormat:@"r:%@:%@", kind, k] : nil;
 }
 
 - (NSInteger)linearIndexOf:(NSIndexPath *)ip {
@@ -2116,14 +2139,14 @@ typedef NS_ENUM(NSInteger, LNBLMode) {
                 NSString *k = keyForItem(@"remoteRules", r);
                 if (k.length) [remoteKeys addObject:k];
             }
-            newLocal = arrayByRemovingKeys(origLocal, @"localRules", localKeys);
-            newRemote = arrayByRemovingKeys(origRemote, @"remoteRules", remoteKeys);
+            newLocal = arrayByRemovingKeys(arrayByRemovingPtrs(origLocal, local), @"localRules", localKeys);
+            newRemote = arrayByRemovingKeys(arrayByRemovingPtrs(origRemote, remote), @"remoteRules", remoteKeys);
             config.localRule = newLocal;
             config.remoteRules = newRemote;
             sectionRemovals[@"localRules"] = localKeys;
             sectionRemovals[@"remoteRules"] = remoteKeys;
-            for (id r in local) [mgr deleteLocalRule:r];
-            for (id r in remote) [mgr deleteRemoteRule:r];
+            // 数组已经是唯一事实来源；规则归档随后由 flagArchivedRules 重建。
+            // 再调用 deleteLocalRule/deleteRemoteRule 可能像节点接口一样按旧位置二次删除。
         }
         [config saveConfigPlayload];
         if (!light) msgv(dataManager(), @"postChangeNoti");
